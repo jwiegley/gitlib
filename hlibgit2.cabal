@@ -1,0 +1,19 @@
+Name:                hlibgit2
+Version:             0.0
+Description:         bindings to libgit2
+License:             GPL
+License-file:        LICENSE
+Author:              Sakari Jokinen
+Maintainer:          sakariij@gmail.com
+Build-Type:          Simple
+Cabal-Version:       >=1.2
+
+library
+  build-depends:
+    base >= 3 && < 5,
+    bindings-DSL >= 1.0.7 && < 1.1
+  exposed-modules:
+    Bindings.Git2
+  extensions:
+    ForeignFunctionInterface
+
