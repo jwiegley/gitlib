@@ -131,6 +131,18 @@ def pick_structs(string)
   return structs
 end
 
+def pick_typedefs(contents)
+  defs = []
+  types = {}
+  contents.scan(/typedef ([^\s]+) ([^\s]+_t);/) {|m|
+    if types[m[1]].nil?
+      defs.push({:original => "", :typedef => "#integral_t #{m[1]}"})
+      types[m[1]] = true 
+    end
+  }
+  return defs
+end
+
 def pick_consts(contents)
   consts = []
   contents.scan(/#define ([^\s]+) ([^\s]+)$/) {|m|
@@ -148,6 +160,7 @@ def fill_prototypes
       public_functions = []
       
       contents = fh.read
+      public_typedefs = pick_typedefs(contents)
       public_consts = pick_consts(contents)
       public_enums = pick_enums(contents)
       public_structs = pick_structs(contents)
@@ -159,7 +172,7 @@ def fill_prototypes
                               :return_type => m[1],
                               :prototype => prototype)
       }
-      if public_functions.length > 0 or public_enums.length > 0 or public_structs.length > 0 or public_consts.length > 0
+      if public_functions.length > 0 or public_enums.length > 0 or public_structs.length > 0 or public_consts.length > 0 or public_typedefs.length > 0
         includes = []
         contents.scan(/#include "([^"]+)"/) {|i| 
           includes.push(i[0])
@@ -173,6 +186,11 @@ def fill_prototypes
             fh << """{- #{p[:prototype]} -}
 #ccall #{p[:function_name]} , #{ffi_arguments(p[:arguments])} -> #{ffi_return(p[:return_type])}
 
+"""
+          }
+          public_typedefs.each{|p|
+            fh << """{- #{p[:original]} -}
+#{p[:typedef]}
 """
           }
           public_consts.each{|p|
