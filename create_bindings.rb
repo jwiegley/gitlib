@@ -8,7 +8,8 @@ def ffi_type(type)
     "char" => "CChar",
     "unsigned" => "CInt",
     "void" => "()",
-    "size_t" => "CInt"
+    "size_t" => "CInt",
+    "time_t" => "CInt"
   }
   if types[type]
     return types[type]
@@ -55,22 +56,30 @@ module #{module_name(header)} where
 #strict_import
 """
 end
-
-def fill_types_module
-  open("libgit2/src/git2/types.h", "r") {|fh|
-    open(module_path("types.h"), "w+") {|mod|
-      mod << module_header("types.h")
-      fh.read.scan(/typedef struct ([^ ]+)/) {|type|
-        mod << "#opaque_t #{type}\n"
-      }
+ 
+def pick_enums(contents)
+  enums = []
+  contents.scan(/typedef enum *\{[^\}]+\} [^;]+;/) {|enum|
+    m = enum.match(/\{([^\}]+)\} *([^;]+);/)
+    enum_name = m[2].strip
+    enum_body = m[1].strip
+    enum_definition = ["#integral_t #{enum_name}"]
+    enum_body.scan(/^ *[^ ]+ = [^,]+,/) {|e|
+      n = e.match(/^ *([^ ]+) = ([^,]+)/)
+      enum_definition.push("#num    #{n[1].strip}")
     }
+    enums.push({ :enum => enum_definition.join("\n"), 
+                 :original => enum
+               })
   }
+  return enums
 end
 
 def module_basename(header)
   header = File.basename(header)
-  header.gsub(/^[a-z]|_[a-z]/) {|a| a.upcase }.gsub(/\.h$/, '')
+  header.gsub(/^[a-z]|_[a-z]|-[a-z]/) {|a| a.upcase }.gsub(/\.h$/, '').gsub(/_|-/, '')
 end
+
 def module_name(header)
   "Bindings.Git.#{module_basename(header)}"
 end
@@ -78,13 +87,71 @@ def module_path(header)
   "Bindings/Git/#{module_basename(header)}.hsc"
 end
 
+def parse_structs(string)  
+  string.scan(/typedef struct [^ \{]+ ([^ \{]+);/) {|type|
+    yield({:opaque => type })
+  }
+  
+  string.scan(/typedef struct [^;\{]*\{[^}]+\} [^;]+;/) {|struct| 
+    m = struct.match(/typedef struct [^\{]*\{([^\}]*)\} ([^;]+);/)
+    raise "could not parse open struct '#{struct}'" if not m
+    yield({:original => struct, 
+            :name => m[2],
+            :body => m[1]})
+  }
+end
+
+def parse_struct_fields(body)
+  body.scan(/^ *[^ ]+ [^;]+;/){|field|
+    f = field.match(/^ *([^;]+);/)
+    raise "could not parse struct field '#{field}'" if not f
+    fieldname = field.match(/([^* ]+);/)
+    yield(f[1].strip, fieldname[1])
+  }
+end
+
+def pick_structs(string)
+  string.gsub!(/\/\*[^\/]*\*\//, '')
+  structs = []
+  parse_structs(string) {|p|
+    if p[:opaque]
+      structs.push({ :original => p[:origanal],
+                     :struct => "#opaque_t #{p[:opaque]}"
+                   })
+    else
+      structlist = ["#starttype #{p[:name]}"]
+      parse_struct_fields(p[:body]) {|type, field|
+        structlist.push("#field    #{field} , #{ffi_argument(type)}")
+      }
+      structlist.push("#stoptype")
+      structs.push({ :struct => structlist.join("\n"), 
+                     :original => p[:original] })
+    end
+  }
+  return structs
+end
+
+def pick_consts(contents)
+  consts = []
+  contents.scan(/#define ([^\s]+) ([^\s]+)$/) {|m|
+    consts.push({:original => m[0], :const => "#num    #{m[0]}"})
+  }
+  return consts
+end
+
 def fill_prototypes
   import_headers = []
-  `find libgit2/src -name '*.h'`.each {|header|
+  `find libgit2/src/git2 -name '*.h'`.each {|header|
     header.strip!
     open(header, "r"){|fh|
+      public_structs = []
       public_functions = []
-      fh.read.scan(/^ *GIT_EXTERN[^;]+/) {|prototype|
+      
+      contents = fh.read
+      public_consts = pick_consts(contents)
+      public_enums = pick_enums(contents)
+      public_structs = pick_structs(contents)
+      contents.scan(/^ *GIT_EXTERN[^;]+/) {|prototype|
         m = prototype.match(/GIT_EXTERN\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/)
         raise "suprisingly formatted prototype '#{prototype}'" if not m    
         public_functions.push(:function_name => m[2],
@@ -92,17 +159,35 @@ def fill_prototypes
                               :return_type => m[1],
                               :prototype => prototype)
       }
-      if public_functions.length > 0
+      if public_functions.length > 0 or public_enums.length > 0 or public_structs.length > 0 or public_consts.length > 0
+        includes = []
+        contents.scan(/#include "([^"]+)"/) {|i| 
+          includes.push(i[0])
+        }
         import_headers.push(header)
         open(module_path(header), "w+"){|fh|
           fh << """#{module_header(header)}
-import #{module_name("types.h")}
-
+#{includes.map{|i| "import #{module_name(i)}"}.join("\n")}
 """
           public_functions.each{|p|
-            fh << """-- #{p[:prototype]}
+            fh << """{- #{p[:prototype]} -}
 #ccall #{p[:function_name]} , #{ffi_arguments(p[:arguments])} -> #{ffi_return(p[:return_type])}
 
+"""
+          }
+          public_consts.each{|p|
+            fh << """{- #{p[:original]} -}
+#{p[:const]}
+"""
+          }
+          public_enums.each{|p|
+            fh << """{- #{p[:original]} -}
+#{p[:enum]}
+"""
+          }
+          public_structs.each{|p|
+            fh << """{- #{p[:original]} -}
+#{p[:struct]}
 """
           }
         }
@@ -127,14 +212,39 @@ module Bindings.Git (
       fh << "import #{module_name(header)}\n"
     }
   }
+  return import_headers
 end
 
 def create_directory_structure
   FileUtils.mkdir_p("Bindings/Git")
 end
 
+def fill_cabal(headers)
+  open("hlibgit2.cabal", "w+") {|fh|
+    fh <<
+"""
+Name:                hlibgit2
+Version:             0.0
+Description:         bindings to libgit2
+License:             GPL
+License-file:        LICENSE
+Author:              Sakari Jokinen
+Maintainer:          sakariij@gmail.com
+Build-Type:          Simple
+Cabal-Version:       >=1.2
+
+library
+  build-depends:
+    base >= 3 && < 5,
+    bindings-DSL >= 1.0.7 && < 1.1
+  exposed-modules:
+    Bindings.Git
+#{headers.map{|h| "    #{module_name(h)}"}.join("\n")}
+  extensions:
+    ForeignFunctionInterface
+"""
+  }
+end
+
 create_directory_structure
-fill_types_module
-fill_toplevel(fill_prototypes)
-
-
+fill_cabal(fill_toplevel(fill_prototypes))

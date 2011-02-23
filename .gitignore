@@ -2,3 +2,4 @@ libgit2/
 dist/
 test/
 Bindings/
+hlibgit.cabal
