@@ -13,7 +13,7 @@ library
     base >= 3 && < 5,
     bindings-DSL >= 1.0.7 && < 1.1
   exposed-modules:
-    Bindings.Git2
+    Bindings.Git
   extensions:
     ForeignFunctionInterface
 
