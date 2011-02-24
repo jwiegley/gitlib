@@ -244,7 +244,7 @@ def fill_cabal(headers)
 Name:                hlibgit2
 Version:             0.0
 Description:         bindings to libgit2
-License:             GPL
+License:             GPL with linking exception
 License-file:        LICENSE
 Author:              Sakari Jokinen
 Maintainer:          sakariij@gmail.com
