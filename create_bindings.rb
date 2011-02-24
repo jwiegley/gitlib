@@ -57,7 +57,7 @@ module #{module_name(header)} where
 """
 end
  
-def pick_enums(contents)
+def transform_enums(contents)
   enums = []
   contents.scan(/typedef enum *\{[^\}]+\} [^;]+;/) {|enum|
     m = enum.match(/\{([^\}]+)\} *([^;]+);/)
@@ -68,7 +68,7 @@ def pick_enums(contents)
       n = e.match(/^ *([^ ]+) = ([^,]+)/)
       enum_definition.push("#num    #{n[1].strip}")
     }
-    enums.push({ :enum => enum_definition.join("\n"), 
+    enums.push({ :transformed => enum_definition.join("\n"), 
                  :original => enum
                })
   }
@@ -110,13 +110,13 @@ def parse_struct_fields(body)
   }
 end
 
-def pick_structs(string)
+def transform_structs(string)
   string.gsub!(/\/\*[^\/]*\*\//, '')
   structs = []
   parse_structs(string) {|p|
     if p[:opaque]
-      structs.push({ :original => p[:origanal],
-                     :struct => "#opaque_t #{p[:opaque]}"
+      structs.push({ :original => p[:original],
+                     :transformed => "#opaque_t #{p[:opaque]}"
                    })
     else
       structlist = ["#starttype #{p[:name]}"]
@@ -124,34 +124,48 @@ def pick_structs(string)
         structlist.push("#field    #{field} , #{ffi_argument(type)}")
       }
       structlist.push("#stoptype")
-      structs.push({ :struct => structlist.join("\n"), 
+      structs.push({ :transformed => structlist.join("\n"), 
                      :original => p[:original] })
     end
   }
   return structs
 end
 
-def pick_typedefs(contents)
+def transform_typedefs(contents)
   defs = []
   types = {}
   contents.scan(/typedef ([^\s]+) ([^\s]+_t);/) {|m|
     if types[m[1]].nil?
-      defs.push({:original => "", :typedef => "#integral_t #{m[1]}"})
+      defs.push({:transformed => "#integral_t #{m[1]}"})
       types[m[1]] = true 
     end
   }
   return defs
 end
 
-def pick_consts(contents)
+def transform_consts(contents)
   consts = []
   contents.scan(/#define ([^\s]+) ([^\s]+)$/) {|m|
-    consts.push({:original => m[0], :const => "#num    #{m[0]}"})
+    consts.push({:transformed => "#num    #{m[0]}"})
   }
   return consts
 end
 
-def fill_prototypes
+def transform_functions(contents)
+  functions = []
+  contents.scan(/^ *GIT_EXTERN[^;]+/) {|prototype|
+    m = prototype.match(/GIT_EXTERN\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/)
+    raise "suprisingly formatted prototype '#{prototype}'" if not m    
+    function_name = m[2]
+    return_type = m[1]
+    arguments = m[3]
+    functions.push({:original => prototype, 
+                       :transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
+  }
+  return functions
+end
+
+def transform_headers
   import_headers = []
   `find libgit2/src/git2 -name '*.h'`.each {|header|
     header.strip!
@@ -160,19 +174,12 @@ def fill_prototypes
       public_functions = []
       
       contents = fh.read
-      public_typedefs = pick_typedefs(contents)
-      public_consts = pick_consts(contents)
-      public_enums = pick_enums(contents)
-      public_structs = pick_structs(contents)
-      contents.scan(/^ *GIT_EXTERN[^;]+/) {|prototype|
-        m = prototype.match(/GIT_EXTERN\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/)
-        raise "suprisingly formatted prototype '#{prototype}'" if not m    
-        public_functions.push(:function_name => m[2],
-                              :arguments => m[3],
-                              :return_type => m[1],
-                              :prototype => prototype)
-      }
-      if public_functions.length > 0 or public_enums.length > 0 or public_structs.length > 0 or public_consts.length > 0 or public_typedefs.length > 0
+      transforms = [transform_typedefs(contents),
+                    transform_consts(contents),
+                    transform_enums(contents),
+                    transform_structs(contents),
+                    transform_functions(contents)].flatten
+      if transforms.length > 0
         includes = []
         contents.scan(/#include "([^"]+)"/) {|i| 
           includes.push(i[0])
@@ -182,31 +189,11 @@ def fill_prototypes
           fh << """#{module_header(header)}
 #{includes.map{|i| "import #{module_name(i)}"}.join("\n")}
 """
-          public_functions.each{|p|
-            fh << """{- #{p[:prototype]} -}
-#ccall #{p[:function_name]} , #{ffi_arguments(p[:arguments])} -> #{ffi_return(p[:return_type])}
-
-"""
-          }
-          public_typedefs.each{|p|
-            fh << """{- #{p[:original]} -}
-#{p[:typedef]}
-"""
-          }
-          public_consts.each{|p|
-            fh << """{- #{p[:original]} -}
-#{p[:const]}
-"""
-          }
-          public_enums.each{|p|
-            fh << """{- #{p[:original]} -}
-#{p[:enum]}
-"""
-          }
-          public_structs.each{|p|
-            fh << """{- #{p[:original]} -}
-#{p[:struct]}
-"""
+          transforms.each{|t|
+            if t[:original]
+              fh << "{- #{t[:original]} -}\n"
+            end
+            fh << "#{t[:transformed]}\n"
           }
         }
       end
@@ -264,4 +251,4 @@ library
 end
 
 create_directory_structure
-fill_cabal(fill_toplevel(fill_prototypes))
+fill_cabal(fill_toplevel(transform_headers))
