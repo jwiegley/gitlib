@@ -2,4 +2,6 @@ libgit2/
 dist/
 test/
 Bindings/
-hlibgit.cabal
+hlibgit2.cabal
+*.hi
+*.o
