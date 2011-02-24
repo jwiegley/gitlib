@@ -1,5 +1,5 @@
 module Main where
-import Bindings.Git
+import Bindings.Libgit2
 import Foreign
 import Foreign.C.String
 

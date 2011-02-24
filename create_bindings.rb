@@ -81,10 +81,10 @@ def module_basename(header)
 end
 
 def module_name(header)
-  "Bindings.Git.#{module_basename(header)}"
+  "Bindings.Libgit2.#{module_basename(header)}"
 end
 def module_path(header)
-  "Bindings/Git/#{module_basename(header)}.hsc"
+  "Bindings/Libgit2/#{module_basename(header)}.hsc"
 end
 
 def parse_structs(string)  
@@ -220,9 +220,9 @@ def export_modules(headers)
 end
 
 def fill_toplevel(import_headers)
-  open("Bindings/Git.hs", "w+") {|fh|
+  open("Bindings/Libgit2.hs", "w+") {|fh|
     fh << """
-module Bindings.Git (
+module Bindings.Libgit2 (
 #{export_modules(import_headers)}) where
 """
     import_headers.each {|header|
@@ -234,7 +234,7 @@ module Bindings.Git (
 end
 
 def create_directory_structure
-  FileUtils.mkdir_p("Bindings/Git")
+  FileUtils.mkdir_p("Bindings/Libgit2")
 end
 
 def fill_cabal(headers)
@@ -256,7 +256,7 @@ library
     base >= 3 && < 5,
     bindings-DSL >= 1.0.7 && < 1.1
   exposed-modules:
-    Bindings.Git
+    Bindings.Libgit2
 #{headers.map{|h| "    #{module_name(h)}"}.join("\n")}
   extensions:
     ForeignFunctionInterface
