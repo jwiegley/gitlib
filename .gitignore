@@ -1,6 +1,5 @@
 libgit2/
 dist/
-test/
 Bindings/
 hlibgit2.cabal
 *.hi
