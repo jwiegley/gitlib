@@ -145,7 +145,7 @@ end
 
 def transform_consts(contents)
   consts = []
-  contents.scan(/#define ([^\s]+) ([^\s]+)$/) {|m|
+  contents.scan(/#define ([^\s]+) (.+)$/) {|m|
     consts.push({:transformed => "#num    #{m[0]}"})
   }
   return consts
