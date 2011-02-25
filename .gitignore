@@ -4,3 +4,4 @@ Bindings/
 hlibgit2.cabal
 *.hi
 *.o
+*~
