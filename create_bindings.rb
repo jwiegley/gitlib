@@ -80,6 +80,9 @@ def module_basename(header)
   header.gsub(/^[a-z]|_[a-z]|-[a-z]/) {|a| a.upcase }.gsub(/\.h$/, '').gsub(/_|-/, '')
 end
 
+def module_c_helper(header)
+  "#{module_path(header)}.helper.c"
+end
 def module_name(header)
   "Bindings.Libgit2.#{module_basename(header)}"
 end
@@ -153,13 +156,64 @@ end
 
 def transform_functions(contents)
   functions = []
-  contents.scan(/^ *GIT_(EXTERN|INLINE)\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/){|m|
-    function_name = m[2]
-    return_type = m[1]
-    arguments = m[3]
+  contents.scan(/^ *GIT_EXTERN\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/){|m|
+    function_name = m[1]
+    return_type = m[0]
+    arguments = m[2]
     functions.push({:transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
   }
   return functions
+end
+
+def inline_c_helper(fun, ret, args)
+  arg_string = args.map{|a| ", #{a}"}.join('')
+  ret.strip!
+  if (ret == "void")
+    "BC_INLINE#{args.length}VOID(#{fun}#{arg_string})"
+  else
+    "BC_INLINE#{args.length}(#{fun}#{arg_string},#{ret})"
+  end
+end
+
+def parse_c_type_from_arg(arg)
+  arg.strip.gsub(/[a-z_0-9A-Z]+$/, '')
+end
+
+def transform_inlines(contents)
+  inlines = []
+  contents.scan(/^ *GIT_INLINE\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/){|m|
+    function_name = m[1]
+    return_type = m[0]
+    arguments = m[2]
+    inlines.push({ :c_helper => inline_c_helper(function_name, 
+                                                return_type, 
+                                                arguments.split(',').map {|t| parse_c_type_from_arg(t)}),
+                   :transformed => "#cinline #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
+  }
+  return inlines
+end
+
+def write_c_helper_for(header, transforms) 
+  open(header, "r") {|fh|
+    contents = fh.read
+    c_helpers = transforms.select{|t| t[:c_helper]}.map{|t| t[:c_helper]}
+    open(module_c_helper(header), "w+") {|fh|
+      fh << """
+#include <bindings.cmacros.h>
+#include <git2.h>
+
+#{c_helpers.join("\n")}
+"""
+    }
+  }
+end
+
+def scan_includes(contents)
+  includes = []
+  contents.scan(/#include "([^"]+)"/) {|i| 
+    includes.push(i[0])
+  }
+  return includes
 end
 
 def transform_headers
@@ -177,12 +231,11 @@ def transform_headers
                     transform_consts(contents),
                     transform_enums(contents),
                     transform_structs(contents),
-                    transform_functions(contents)].flatten
+                    transform_functions(contents),
+                    transform_inlines(contents)].flatten
       if transforms.length > 0
-        includes = []
-        contents.scan(/#include "([^"]+)"/) {|i| 
-          includes.push(i[0])
-        }
+        includes = scan_includes(contents)
+        write_c_helper_for(header, transforms)
         import_headers.push(header)
         open(module_path(header), "w+"){|fh|
           fh << """#{module_header(header)}
@@ -257,6 +310,8 @@ library
   exposed-modules:
     Bindings.Libgit2
 #{headers.map{|h| "    #{module_name(h)}"}.join("\n")}
+  c-sources:
+#{headers.map{|h| "    #{module_c_helper(h)}"}.join("\n")}
 """
   }
 end
