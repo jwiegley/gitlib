@@ -153,14 +153,11 @@ end
 
 def transform_functions(contents)
   functions = []
-  contents.scan(/^ *GIT_EXTERN[^;]+/) {|prototype|
-    m = prototype.match(/GIT_EXTERN\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/)
-    raise "suprisingly formatted prototype '#{prototype}'" if not m    
+  contents.scan(/^ *GIT_(EXTERN|INLINE)\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/){|m|
     function_name = m[2]
     return_type = m[1]
     arguments = m[3]
-    functions.push({:original => prototype, 
-                       :transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
+    functions.push({:transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
   }
   return functions
 end
@@ -168,7 +165,9 @@ end
 def transform_headers
   import_headers = []
   `find libgit2/src/git2 -name '*.h'`.each {|header|
+    next if header.match(/zlib.h/)
     header.strip!
+    
     open(header, "r"){|fh|
       public_structs = []
       public_functions = []
