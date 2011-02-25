@@ -235,17 +235,28 @@ License-file:        LICENSE
 Author:              Sakari Jokinen
 Maintainer:          sakariij@gmail.com
 Build-Type:          Simple
-Cabal-Version:       >=1.2
+Cabal-Version:       >=1.10
+
+test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: tests
+  build-depends:
+    base >=3,
+    hlibgit2,
+    process
+  extra-libraries: git2
 
 library
+  default-extensions:
+    ForeignFunctionInterface
   build-depends:
     base >= 3 && < 5,
-    bindings-DSL >= 1.0.7 && < 1.1
+    bindings-DSL >= 1.0.9 && < 1.1
   exposed-modules:
     Bindings.Libgit2
 #{headers.map{|h| "    #{module_name(h)}"}.join("\n")}
-  extensions:
-    ForeignFunctionInterface
 """
   }
 end
