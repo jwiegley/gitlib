@@ -248,6 +248,7 @@ test-suite smoke
   extra-libraries: git2
 
 library
+  default-language: Haskell98
   default-extensions:
     ForeignFunctionInterface
   build-depends:
