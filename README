@@ -1,0 +1,7 @@
+Run build.sh to generate the binding source code and cabal file and 
+build, test, and install everything 
+
+  * requires git
+  * ruby
+  * ghc
+  * probably sqlite3 for the extra libgit2 backend
