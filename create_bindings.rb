@@ -291,6 +291,7 @@ Maintainer:          sakariij@gmail.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
+extra-source-files:  tests/Main.hs
 
 Source-repository head
   type: git
