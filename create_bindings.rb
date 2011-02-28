@@ -281,13 +281,25 @@ def fill_cabal(headers)
     fh <<
 """
 Name:                hlibgit2
-Version:             0.0
-Description:         bindings to libgit2
+Version:             0.1
+Synopsis:            bindings to libgit2
+Description:         Generated bindings to libgit2.
 License-file:        LICENSE
+License:             GPL-2
 Author:              Sakari Jokinen
 Maintainer:          sakariij@gmail.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
+Category:            FFI
+
+Source-repository head
+  type: git
+  location: git://github.com/sakari/hlibgit2.git
+
+Source-repository this
+  type: git
+  location: git://github.com/sakari/hlibgit2.git
+  tag: hlibgit2-0.1
 
 test-suite smoke
   default-language: Haskell98

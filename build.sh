@@ -20,7 +20,7 @@ echo "Generating bindings"
 
 echo 
 echo "Starting to build haskell bindings"
-ghc --make setup.hs -o setup
+ghc --make Setup.hs -o setup
 ./setup configure --user --enable-test
 ./setup build
 ./setup test
