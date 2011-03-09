@@ -378,7 +378,7 @@ Version:             0.1
 Synopsis:            Bindings to libgit2 #{libgit2_version}
 Description:         Generated bindings to libgit2.
 License-file:        LICENSE
-License:             GPL-2
+License:             MIT
 Author:              Sakari Jokinen, Jacob Stanley
 Maintainer:          sakariij@gmail.com
 Build-Type:          Simple
