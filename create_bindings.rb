@@ -326,7 +326,11 @@ def create_directory_structure
   FileUtils.mkdir_p("Bindings/Libgit2")
 end
 
-def libgit2_version()
+def hlibgit2_version
+  `git describe || git log -1 --pretty=format:%H`.chomp
+end
+
+def libgit2_version
   `git --git-dir=libgit2/.git describe`.chomp
 end
 
@@ -391,7 +395,7 @@ Source-repository head
 Source-repository this
   type: git
   location: git://github.com/sakari/hlibgit2.git
-  tag: hlibgit2-0.1
+  tag: #{hlibgit2_version}
 
 test-suite smoke
   default-language: Haskell98
