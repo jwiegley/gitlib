@@ -11,7 +11,6 @@ pushd libgit2
 ./waf configure
 ./waf build
 ./waf test
-sudo ./waf install
 popd
 
 echo 

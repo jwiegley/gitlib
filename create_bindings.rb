@@ -83,6 +83,11 @@ end
 def module_c_helper(header)
   "#{module_path(header)}.helper.c"
 end
+def c_helpers(headers)
+  headers.
+    map{|h| module_c_helper(h)}.
+    select{|c| File.exists? c}
+end
 def module_name(header)
   "Bindings.Libgit2.#{module_basename(header)}"
 end
@@ -194,9 +199,10 @@ def transform_inlines(contents)
 end
 
 def write_c_helper_for(header, transforms)
+  c_helpers = transforms.select{|t| t[:c_helper]}.map{|t| t[:c_helper]}
+  return if c_helpers.empty?
   open(header, "r") {|fh|
     contents = fh.read
-    c_helpers = transforms.select{|t| t[:c_helper]}.map{|t| t[:c_helper]}
     open(module_c_helper(header), "w+") {|fh|
       fh << """
 #include <bindings.cmacros.h>
@@ -220,6 +226,7 @@ def transform_headers
   import_headers = []
   `find libgit2/include/git2 -name '*.h'`.each {|header|
     next if header.match(/zlib.h/)
+    next if header.match(/odb_backend.h/)
     header.strip!
 
     open(header, "r"){|fh|
@@ -273,7 +280,29 @@ module Bindings.Libgit2 (
 end
 
 def create_directory_structure
+  FileUtils.rm_rf("Bindings/Libgit2")
   FileUtils.mkdir_p("Bindings/Libgit2")
+end
+
+def includes()
+  ['libgit2/include',
+   'libgit2/src',
+   'libgit2/src/block-sha1',
+   'libgit2/deps/zlib']
+end
+
+def c_sources()
+  Dir.glob('libgit2/src/*.c') +
+  Dir.glob('libgit2/src/block-sha1/*.c') +
+  Dir.glob('libgit2/deps/zlib/*.c')
+end
+
+def c_sources_unix()
+  Dir.glob('libgit2/src/unix/*.c')
+end
+
+def c_sources_win32()
+  Dir.glob('libgit2/src/win32/*.c')
 end
 
 def fill_cabal(headers)
@@ -311,7 +340,6 @@ test-suite smoke
     base >=3,
     hlibgit2,
     process
-  extra-libraries: git2
 
 library
   default-language: Haskell98
@@ -324,7 +352,21 @@ library
     Bindings.Libgit2
 #{headers.map{|h| "    #{module_name(h)}"}.join("\n")}
   c-sources:
-#{headers.map{|h| "    #{module_c_helper(h)}"}.join("\n")}
+#{c_helpers(headers).map{|h| "    #{h}"}.join("\n")}
+
+  -- libgit2
+  cc-options: -DNO_GZIP
+  include-dirs:
+#{includes.map{|i| "    #{i}"}.join("\n")}
+  c-sources:
+#{c_sources.map{|c| "    #{c}"}.join("\n")}
+
+  if os(windows)
+    c-sources:
+#{c_sources_win32.map{|c| "      #{c}"}.join("\n")}
+  else
+    c-sources:
+#{c_sources_unix.map{|c| "      #{c}"}.join("\n")}
 """
   }
 end
