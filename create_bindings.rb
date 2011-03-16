@@ -28,10 +28,10 @@ def ffi_argument(arg)
   arg.gsub!(/const/, '')
   arg.gsub!(/unsigned int/, 'unsigned')
   if (m = arg.match(/^ *([^ ]+) *\*\*/))
-    return "Ptr (Ptr #{ffi_type(m[1])})" 
+    return "Ptr (Ptr #{ffi_type(m[1])})"
   end
   if (m = arg.match(/^ *([^ ]+) *\*/))
-    return "Ptr #{ffi_type(m[1])}" 
+    return "Ptr #{ffi_type(m[1])}"
   end
   if (m = arg.match(/^ *([^ ]+)/))
     return ffi_type(m[1])
@@ -56,7 +56,7 @@ module #{module_name(header)} where
 #strict_import
 """
 end
- 
+
 def transform_enums(contents)
   enums = []
   contents.scan(/typedef enum *\{[^\}]+\} [^;]+;/) {|enum|
@@ -68,7 +68,7 @@ def transform_enums(contents)
       n = e.match(/^ *([^ ]+) = ([^,]+)/)
       enum_definition.push("#num    #{n[1].strip}")
     }
-    enums.push({ :transformed => enum_definition.join("\n"), 
+    enums.push({ :transformed => enum_definition.join("\n"),
                  :original => enum
                })
   }
@@ -90,15 +90,15 @@ def module_path(header)
   "Bindings/Libgit2/#{module_basename(header)}.hsc"
 end
 
-def parse_structs(string)  
+def parse_structs(string)
   string.scan(/typedef struct [^ \{]+ ([^ \{]+);/) {|type|
     yield({:opaque => type })
   }
-  
-  string.scan(/typedef struct [^;\{]*\{[^}]+\} [^;]+;/) {|struct| 
+
+  string.scan(/typedef struct [^;\{]*\{[^}]+\} [^;]+;/) {|struct|
     m = struct.match(/typedef struct [^\{]*\{([^\}]*)\} ([^;]+);/)
     raise "could not parse open struct '#{struct}'" if not m
-    yield({:original => struct, 
+    yield({:original => struct,
             :name => m[2],
             :body => m[1]})
   }
@@ -127,7 +127,7 @@ def transform_structs(string)
         structlist.push("#field    #{field} , #{ffi_argument(type)}")
       }
       structlist.push("#stoptype")
-      structs.push({ :transformed => structlist.join("\n"), 
+      structs.push({ :transformed => structlist.join("\n"),
                      :original => p[:original] })
     end
   }
@@ -140,7 +140,7 @@ def transform_typedefs(contents)
   contents.scan(/typedef ([^\s]+) ([^\s]+_t);/) {|m|
     if types[m[1]].nil?
       defs.push({:transformed => "#integral_t #{m[1]}"})
-      types[m[1]] = true 
+      types[m[1]] = true
     end
   }
   return defs
@@ -185,15 +185,15 @@ def transform_inlines(contents)
     function_name = m[1]
     return_type = m[0]
     arguments = m[2]
-    inlines.push({ :c_helper => inline_c_helper(function_name, 
-                                                return_type, 
+    inlines.push({ :c_helper => inline_c_helper(function_name,
+                                                return_type,
                                                 arguments.split(',').map {|t| parse_c_type_from_arg(t)}),
                    :transformed => "#cinline #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
   }
   return inlines
 end
 
-def write_c_helper_for(header, transforms) 
+def write_c_helper_for(header, transforms)
   open(header, "r") {|fh|
     contents = fh.read
     c_helpers = transforms.select{|t| t[:c_helper]}.map{|t| t[:c_helper]}
@@ -210,7 +210,7 @@ end
 
 def scan_includes(contents)
   includes = []
-  contents.scan(/#include "([^"]+)"/) {|i| 
+  contents.scan(/#include "([^"]+)"/) {|i|
     includes.push(i[0])
   }
   return includes
@@ -221,11 +221,11 @@ def transform_headers
   `find libgit2/include/git2 -name '*.h'`.each {|header|
     next if header.match(/zlib.h/)
     header.strip!
-    
+
     open(header, "r"){|fh|
       public_structs = []
       public_functions = []
-      
+
       contents = fh.read
       transforms = [transform_typedefs(contents),
                     transform_consts(contents),
