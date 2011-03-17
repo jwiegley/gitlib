@@ -284,25 +284,39 @@ def create_directory_structure
   FileUtils.mkdir_p("Bindings/Libgit2")
 end
 
-def includes()
-  ['libgit2/include',
-   'libgit2/src',
-   'libgit2/src/block-sha1',
-   'libgit2/deps/zlib']
+UNIX_DIRS    = ['libgit2/src/unix']
+WIN32_DIRS   = ['libgit2/src/win32']
+SOURCE_DIRS  = ['libgit2/src',
+                'libgit2/src/block-sha1',
+                'libgit2/deps/zlib']
+INCLUDE_DIRS = ['libgit2/include'] + SOURCE_DIRS
+EXTRA_DIRS   = ['libgit2/include',
+                'libgit2/include/git2'] +
+                SOURCE_DIRS + UNIX_DIRS + WIN32_DIRS
+
+def paths(pattern, dirs)
+  dirs.map{|d| Dir.glob("#{d}/#{pattern}")}.flatten
+end
+
+def indent_join(indent, array)
+  array.map{|x| "#{indent}#{x}"}.join("\n")
+end
+
+def extra_sources()
+  paths('*', 'tests/**') +
+  paths('*.h', EXTRA_DIRS)
 end
 
 def c_sources()
-  Dir.glob('libgit2/src/*.c') +
-  Dir.glob('libgit2/src/block-sha1/*.c') +
-  Dir.glob('libgit2/deps/zlib/*.c')
+  paths '*.c', SOURCE_DIRS
 end
 
 def c_sources_unix()
-  Dir.glob('libgit2/src/unix/*.c')
+  paths '*.c', UNIX_DIRS
 end
 
 def c_sources_win32()
-  Dir.glob('libgit2/src/win32/*.c')
+  paths '*.c', WIN32_DIRS
 end
 
 def fill_cabal(headers)
@@ -320,7 +334,9 @@ Maintainer:          sakariij@gmail.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
-extra-source-files:  tests/Main.hs
+
+extra-source-files:
+#{indent_join "  ", extra_sources}
 
 Source-repository head
   type: git
@@ -354,19 +370,22 @@ library
   c-sources:
 #{c_helpers(headers).map{|h| "    #{h}"}.join("\n")}
 
-  -- libgit2
   include-dirs:
-#{includes.map{|i| "    #{i}"}.join("\n")}
+#{indent_join "    ", INCLUDE_DIRS}
   c-sources:
-#{c_sources.map{|c| "    #{c}"}.join("\n")}
+#{indent_join "    ", c_sources}
 
   if os(windows)
     cc-options: -DGIT_WIN32 -DNO_VIZ
+    include-dirs:
+#{indent_join "      ", WIN32_DIRS}
     c-sources:
-#{c_sources_win32.map{|c| "      #{c}"}.join("\n")}
+#{indent_join "      ", c_sources_win32}
   else
+    include-dirs:
+#{indent_join "      ", UNIX_DIRS}
     c-sources:
-#{c_sources_unix.map{|c| "      #{c}"}.join("\n")}
+#{indent_join "      ", c_sources_unix}
 """
   }
 end
