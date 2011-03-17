@@ -303,7 +303,7 @@ def indent_join(indent, array)
 end
 
 def extra_sources()
-  paths('*', 'tests/**') +
+  paths('*', ['tests/**']) +
   paths('*.h', EXTRA_DIRS)
 end
 
