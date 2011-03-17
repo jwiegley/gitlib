@@ -5,13 +5,13 @@ then
     git clone https://github.com/libgit2/libgit2.git libgit2
 fi
 
-echo 
-echo "Building and installing libgit2 library"
-pushd libgit2
-python ./waf configure
-python ./waf build
-python ./waf test
-popd
+#echo 
+#echo "Building and installing libgit2 library"
+#pushd libgit2
+#python ./waf configure
+#python ./waf build
+#python ./waf test
+#popd
 
 echo 
 echo "Generating bindings"
