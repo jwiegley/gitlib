@@ -97,7 +97,7 @@ end
 
 def parse_structs(string)
   string.scan(/typedef struct [^ \{]+ ([^ \{]+);/) {|type|
-    yield({:opaque => type })
+    yield({:opaque => type[0] })
   }
 
   string.scan(/typedef struct [^;\{]*\{[^}]+\} [^;]+;/) {|struct|
