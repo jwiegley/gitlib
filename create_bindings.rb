@@ -355,7 +355,6 @@ library
 #{c_helpers(headers).map{|h| "    #{h}"}.join("\n")}
 
   -- libgit2
-  cc-options: -DNO_GZIP
   include-dirs:
 #{includes.map{|i| "    #{i}"}.join("\n")}
   c-sources:
