@@ -2,19 +2,44 @@
 
 require 'fileutils'
 
-def ffi_type(type)
-  types = {
-    "int" => "CInt",
-    "char" => "CChar",
-    "unsigned" => "CInt",
-    "void" => "()",
-    "size_t" => "CInt",
-    "time_t" => "CInt"
-  }
-  if types[type]
-    return types[type]
+def ffi_type(ptr, type)
+  # special cases
+  case type
+  when "void"
+    return "Ptr Word8"       if ptr == 1
+    return "Ptr (Ptr Word8)" if ptr == 2
+  when "char"
+    return "CString"     if ptr == 1
+    return "Ptr CString" if ptr == 2
   end
-  return "<#{type}>"
+
+  # standard cases
+  types = {
+    "void"   => "()",
+    "char"   => "CChar",
+    "uchar"  => "Word8",
+    "short"  => "CShort",
+    "ushort" => "CUShort",
+    "int"    => "CInt",
+    "uint"   => "CUInt",
+    "long"   => "CLong",
+    "ulong"  => "CULong",
+    "size_t" => "CSize",
+    "time_t" => "CTime",
+
+    # git_time_t is typedef'd to time_t on every
+    # platform that GHC builds on because GHC uses
+    # MinGW when building on Windows.
+    "git_time_t" => "CTime"
+  }
+
+  ffi = types[type] || "<#{type}>"
+  return case ptr
+    when 0 then ffi
+    when 1 then "Ptr #{ffi}"
+    when 2 then "Ptr (Ptr #{ffi})"
+    else raise "only two pointer indirections supported"
+    end
 end
 
 def ffi_return(arg)
@@ -26,15 +51,19 @@ end
 
 def ffi_argument(arg)
   arg.gsub!(/const/, '')
-  arg.gsub!(/unsigned int/, 'unsigned')
+  arg.gsub!(/unsigned char/, 'uchar')
+  arg.gsub!(/unsigned short/, 'ushort')
+  arg.gsub!(/unsigned int/, 'uint')
+  arg.gsub!(/unsigned long/, 'ulong')
+  arg.gsub!(/unsigned/, 'uint')
   if (m = arg.match(/^ *([^ ]+) *\*\*/))
-    return "Ptr (Ptr #{ffi_type(m[1])})"
+    return ffi_type 2, m[1]
   end
   if (m = arg.match(/^ *([^ ]+) *\*/))
-    return "Ptr #{ffi_type(m[1])}"
+    return ffi_type 1, m[1]
   end
   if (m = arg.match(/^ *([^ ]+)/))
-    return ffi_type(m[1])
+    return ffi_type 0, m[1]
   end
   raise "unkown type: #{arg}"
 end
@@ -113,8 +142,14 @@ def parse_struct_fields(body)
   body.scan(/^ *[^ ]+ [^;]+;/){|field|
     f = field.match(/^ *([^;]+);/)
     raise "could not parse struct field '#{field}'" if not f
+    type = f[1].strip
     fieldname = field.match(/([^* ]+);/)
-    yield(f[1].strip, fieldname[1])
+    arrayname = fieldname[1].match(/([^\[]+)\[/)
+    if arrayname
+      yield('array_field', type, arrayname[1])
+    else
+      yield('field', type, fieldname[1])
+    end
   }
 end
 
@@ -128,8 +163,8 @@ def transform_structs(string)
                    })
     else
       structlist = ["#starttype #{p[:name]}"]
-      parse_struct_fields(p[:body]) {|type, field|
-        structlist.push("#field    #{field} , #{ffi_argument(type)}")
+      parse_struct_fields(p[:body]) {|field, type, name|
+        structlist.push("##{field}    #{name} , #{ffi_argument(type)}")
       }
       structlist.push("#stoptype")
       structs.push({ :transformed => structlist.join("\n"),
@@ -144,7 +179,10 @@ def transform_typedefs(contents)
   types = {}
   contents.scan(/typedef ([^\s]+) ([^\s]+_t);/) {|m|
     if types[m[1]].nil?
-      defs.push({:transformed => "#integral_t #{m[1]}"})
+      # git_time_t is handled explicitly in ffi_argument
+      if m[1] != "git_time_t"
+        defs.push({:transformed => "#integral_t #{m[1]}"})
+      end
       types[m[1]] = true
     end
   }
