@@ -8,14 +8,14 @@ fi
 echo 
 echo "Building and installing libgit2 library"
 pushd libgit2
-./waf configure
-./waf build
-./waf test
+python ./waf configure
+python ./waf build
+python ./waf test
 popd
 
 echo 
 echo "Generating bindings"
-./create_bindings.rb
+ruby ./create_bindings.rb
 
 echo 
 echo "Starting to build haskell bindings"
