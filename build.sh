@@ -19,8 +19,7 @@ echo "Generating bindings"
 
 echo 
 echo "Starting to build haskell bindings"
-ghc --make Setup.hs -o setup
-./setup configure --user --enable-test
-./setup build
-./setup test
-./setup install --user
+cabal configure --user --enable-test
+cabal build
+cabal test
+cabal install --user
