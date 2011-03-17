@@ -329,7 +329,7 @@ Synopsis:            bindings to libgit2
 Description:         Generated bindings to libgit2.
 License-file:        LICENSE
 License:             GPL-2
-Author:              Sakari Jokinen
+Author:              Sakari Jokinen, Jacob Stanley
 Maintainer:          sakariij@gmail.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
