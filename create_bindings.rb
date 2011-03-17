@@ -361,6 +361,7 @@ library
 #{c_sources.map{|c| "    #{c}"}.join("\n")}
 
   if os(windows)
+    cc-options: -DGIT_WIN32 -DNO_VIZ
     c-sources:
 #{c_sources_win32.map{|c| "      #{c}"}.join("\n")}
   else
