@@ -224,7 +224,7 @@ end
 
 def transform_headers
   import_headers = []
-  `find libgit2/include/git2 -name '*.h'`.each {|header|
+  Dir.glob('libgit2/include/git2/**/*.h').each {|header|
     next if header.match(/zlib.h/)
     next if header.match(/odb_backend.h/)
     header.strip!
