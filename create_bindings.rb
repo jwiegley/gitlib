@@ -165,6 +165,11 @@ def transform_functions(contents)
     function_name = m[1]
     return_type = m[0]
     arguments = m[2]
+
+    # The sqlite backend only works if
+    # GIT2_SQLITE_BACKEND is defined.
+    next if function_name.match(/sqlite/)
+
     functions.push({:transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
   }
   return functions
@@ -226,7 +231,6 @@ def transform_headers
   import_headers = []
   Dir.glob('libgit2/include/git2/**/*.h').each {|header|
     next if header.match(/zlib.h/)
-    next if header.match(/odb_backend.h/)
     header.strip!
 
     open(header, "r"){|fh|
