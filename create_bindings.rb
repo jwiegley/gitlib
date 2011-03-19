@@ -326,6 +326,10 @@ def create_directory_structure
   FileUtils.mkdir_p("Bindings/Libgit2")
 end
 
+def libgit2_version()
+  `git --git-dir=libgit2/.git describe`.chomp
+end
+
 UNIX_DIRS    = ['libgit2/src/unix']
 WIN32_DIRS   = ['libgit2/src/win32']
 SOURCE_DIRS  = ['libgit2/src',
@@ -367,7 +371,7 @@ def fill_cabal(headers)
 """
 Name:                hlibgit2
 Version:             0.1
-Synopsis:            bindings to libgit2
+Synopsis:            Bindings to libgit2 #{libgit2_version}
 Description:         Generated bindings to libgit2.
 License-file:        LICENSE
 License:             GPL-2
