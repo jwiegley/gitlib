@@ -375,8 +375,8 @@ def fill_cabal(headers)
 """
 Name:                hlibgit2
 Version:             0.1
-Synopsis:            Bindings to libgit2 #{libgit2_version}
-Description:         Generated bindings to libgit2.
+Synopsis:            Low-level bindings to libgit2.
+Description:         Bindings to libgit2 #{libgit2_version}
 License-file:        LICENSE
 License:             MIT
 Author:              Sakari Jokinen, Jacob Stanley
