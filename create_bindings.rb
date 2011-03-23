@@ -208,6 +208,10 @@ def transform_functions(contents)
     # GIT2_SQLITE_BACKEND is defined.
     next if function_name.match(/sqlite/)
 
+    # Can't wrap va_arg style functions
+    next if function_name.match(/_ov$/)
+    next if function_name.match(/_v$/)
+
     functions.push({:transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
   }
   return functions
