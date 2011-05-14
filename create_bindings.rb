@@ -197,6 +197,13 @@ def transform_consts(contents)
   return consts
 end
 
+def ffi_signature(arguments, return_type)
+  if arguments.match("^( )*void( )*$")
+    return ffi_return(return_type)
+  end
+  "#{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"
+end
+
 def transform_functions(contents)
   functions = []
   contents.scan(/^ *GIT_EXTERN\(([^\)]+)\) ([^\(]+)\(([^\)]*)\)/){|m|
@@ -212,7 +219,7 @@ def transform_functions(contents)
     next if function_name.match(/_ov$/)
     next if function_name.match(/_v$/)
 
-    functions.push({:transformed => "#ccall #{function_name} , #{ffi_arguments(arguments)} -> #{ffi_return(return_type)}"})
+    functions.push({:transformed => "#ccall #{function_name} , #{ffi_signature(arguments, return_type)}"})
   }
   return functions
 end
