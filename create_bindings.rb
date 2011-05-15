@@ -424,7 +424,7 @@ library
     ForeignFunctionInterface
   build-depends:
     base >= 3 && < 5,
-    bindings-DSL >= 1.0.9 && < 1.1
+    bindings-DSL >= 1.0.11
   exposed-modules:
     Bindings.Libgit2
 #{headers.map{|h| "    #{module_name(h)}"}.join("\n")}
