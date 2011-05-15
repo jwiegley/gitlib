@@ -59,6 +59,9 @@ def ffi_argument(arg)
   if (m = arg.match(/^ *([^ ]+) *\*\*/))
     return ffi_type 2, m[1]
   end
+  if (m = arg.match(/^ *([^ ]+) *\*.*\[.*\]/))
+    return ffi_type 2, m[1]
+  end
   if (m = arg.match(/^ *([^ ]+) *\*/))
     return ffi_type 1, m[1]
   end
