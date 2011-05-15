@@ -443,11 +443,15 @@ library
     c-sources:
 #{indent_join "      ", c_sources_win32}
   else
+    cc-options: -g
     include-dirs:
 #{indent_join "      ", UNIX_DIRS}
     c-sources:
 #{indent_join "      ", c_sources_unix}
+
 """
+
+
   }
 end
 
