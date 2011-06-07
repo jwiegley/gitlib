@@ -6,8 +6,8 @@ def ffi_type(ptr, type)
   # special cases
   case type
   when "void"
-    return "Ptr Word8"       if ptr == 1
-    return "Ptr (Ptr Word8)" if ptr == 2
+    return "Ptr CChar"       if ptr == 1
+    return "Ptr (Ptr CChar)" if ptr == 2
   when "char"
     return "CString"     if ptr == 1
     return "Ptr CString" if ptr == 2
