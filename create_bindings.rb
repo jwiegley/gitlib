@@ -421,6 +421,10 @@ test-suite smoke
     hlibgit2,
     process
 
+Flag bundled-libgit2
+  default: False
+  description: Use bundled libgit2 instead of a separate libgit2 library (easier to setup but does not work with ghci)
+
 library
   default-language: Haskell98
   default-extensions:
@@ -434,23 +438,26 @@ library
   c-sources:
 #{c_helpers(headers).map{|h| "    #{h}"}.join("\n")}
 
-  include-dirs:
-#{indent_join "    ", INCLUDE_DIRS}
-  c-sources:
-#{indent_join "    ", c_sources}
-
-  if os(windows)
-    cc-options: -DGIT_WIN32 -DNO_VIZ
-    include-dirs:
-#{indent_join "      ", WIN32_DIRS}
-    c-sources:
-#{indent_join "      ", c_sources_win32}
+  if !flag(bundled-libgit2)
+    extra-libraries : git2
   else
-    cc-options: -g
     include-dirs:
-#{indent_join "      ", UNIX_DIRS}
+#{indent_join "      ", INCLUDE_DIRS}
     c-sources:
-#{indent_join "      ", c_sources_unix}
+#{indent_join "      ", c_sources}
+
+    if os(windows)
+      cc-options: -DGIT_WIN32 -DNO_VIZ
+      include-dirs:
+#{indent_join "        ", WIN32_DIRS}
+      c-sources:
+#{indent_join "        ", c_sources_win32}
+    else
+      cc-options: -g
+      include-dirs:
+#{indent_join "        ", UNIX_DIRS}
+    c-sources:
+#{indent_join "        ", c_sources_unix}
 
 """
 
