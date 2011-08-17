@@ -11,7 +11,7 @@ cmake --build .
 popd
 
 echo "Starting to build haskell bindings"
-cabal configure --user --enable-test --extra-lib-dirs=$PWD/libgit2/build
+cabal configure --user --enable-test
 cabal build
 cabal test
 cabal install --user
