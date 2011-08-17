@@ -1,0 +1,73 @@
+
+Name:                hlibgit2
+Version:             0.1
+Synopsis:            Low-level bindings to libgit2.
+Description:         Bindings to libgit2 v0.1.0-983-g52e50c1
+License-file:        LICENSE
+License:             MIT
+Author:              Sakari Jokinen, Jacob Stanley
+Maintainer:          sakariij@gmail.com
+Build-Type:          Simple
+Cabal-Version:       >=1.10
+Category:            FFI
+
+Source-repository head
+  type: git
+  location: git://github.com/sakari/hlibgit2.git
+
+Source-repository this
+  type: git
+  location: git://github.com/sakari/hlibgit2.git
+  tag: hlibgit2-0.1-11-g81b7503
+
+test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: tests
+  build-depends:
+    base >=3,
+    hlibgit2,
+    process
+
+library
+  default-language: Haskell98
+  default-extensions:
+    ForeignFunctionInterface
+  build-depends:
+    base >= 3 && < 5,
+    bindings-DSL >= 1.0.11
+  exposed-modules:
+    Bindings.Libgit2
+    Bindings.Libgit2.Repository
+    Bindings.Libgit2.Config
+    Bindings.Libgit2.Types
+    Bindings.Libgit2.Revwalk
+    Bindings.Libgit2.OdbBackend
+    Bindings.Libgit2.Tag
+    Bindings.Libgit2.Net
+    Bindings.Libgit2.Refs
+    Bindings.Libgit2.Refspec
+    Bindings.Libgit2.Reflog
+    Bindings.Libgit2.Commit
+    Bindings.Libgit2.Index
+    Bindings.Libgit2.Signature
+    Bindings.Libgit2.Blob
+    Bindings.Libgit2.Errors
+    Bindings.Libgit2.Oid
+    Bindings.Libgit2.Tree
+    Bindings.Libgit2.Odb
+    Bindings.Libgit2.Common
+    Bindings.Libgit2.Object
+  c-sources:
+    Bindings/Libgit2/Tag.hsc.helper.c
+    Bindings/Libgit2/Commit.hsc.helper.c
+    Bindings/Libgit2/Blob.hsc.helper.c
+    Bindings/Libgit2/Tree.hsc.helper.c
+
+  include-dirs: libgit2/include
+  extra-libraries: git2
+  if os(windows)
+    cc-options: -DGIT_WIN32 -DNO_VIZ
+
+    

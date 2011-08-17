@@ -1,8 +1,6 @@
 dist/
-Bindings/
-hlibgit2.cabal
 *.hi
 *.o
 *~
 *.swp
-setup
+
