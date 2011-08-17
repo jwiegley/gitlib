@@ -13,6 +13,7 @@ import Bindings.Libgit2.Oid
 	GIT_REPO_PATH_ODB,
 	GIT_REPO_PATH_WORKDIR
 } git_repository_pathid; -}
+#num GIT_REPO_PATH_WORKDIR
 #integral_t git_repository_pathid
 #ccall git_repository_open , Ptr (Ptr <git_repository>) -> CString -> IO (CInt)
 #ccall git_repository_open2 , Ptr (Ptr <git_repository>) -> CString -> CString -> CString -> CString -> IO (CInt)
