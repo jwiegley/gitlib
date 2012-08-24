@@ -12,7 +12,7 @@ import Bindings.Libgit2.Oid
 #ccall git_reference_create_oid , Ptr (Ptr <git_reference>) -> Ptr <git_repository> -> CString -> Ptr <git_oid> -> CInt -> IO (CInt)
 #ccall git_reference_oid , Ptr <git_reference> -> IO (Ptr <git_oid>)
 #ccall git_reference_target , Ptr <git_reference> -> IO (CString)
-#ccall git_reference_type , Ptr <git_reference> -> IO (<git_rtype>)
+#ccall git_reference_type , Ptr <git_reference> -> IO (<git_ref_t>)
 #ccall git_reference_name , Ptr <git_reference> -> IO (CString)
 #ccall git_reference_resolve , Ptr (Ptr <git_reference>) -> Ptr <git_reference> -> IO (CInt)
 #ccall git_reference_owner , Ptr <git_reference> -> IO (Ptr <git_repository>)

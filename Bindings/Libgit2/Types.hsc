@@ -36,8 +36,8 @@ module Bindings.Libgit2.Types where
 	GIT_REF_PACKED = 4,
 	GIT_REF_HAS_PEEL = 8,
 	GIT_REF_LISTALL = GIT_REF_OID|GIT_REF_SYMBOLIC|GIT_REF_PACKED,
-} git_rtype; -}
-#integral_t git_rtype
+} git_ref_t; -}
+#integral_t git_ref_t
 #num    GIT_REF_INVALID
 #num    GIT_REF_OID
 #num    GIT_REF_SYMBOLIC

@@ -12,7 +12,6 @@ import Bindings.Libgit2.Oid
 	GIT_STREAM_WRONLY = (1 << 2),
 	GIT_STREAM_RW = (GIT_STREAM_RDONLY | GIT_STREAM_WRONLY),
 } git_odb_streammode; -}
-#integral_t git_odb_streammode
 #num    GIT_STREAM_RDONLY
 #num    GIT_STREAM_WRONLY
 #num    GIT_STREAM_RW

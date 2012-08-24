@@ -7,14 +7,6 @@ module Bindings.Libgit2.Repository where
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
-{- typedef enum {
-	GIT_REPO_PATH,
-	GIT_REPO_PATH_INDEX,
-	GIT_REPO_PATH_ODB,
-	GIT_REPO_PATH_WORKDIR
-} git_repository_pathid; -}
-#num GIT_REPO_PATH_WORKDIR
-#integral_t git_repository_pathid
 #ccall git_repository_open , Ptr (Ptr <git_repository>) -> CString -> IO (CInt)
 #ccall git_repository_open2 , Ptr (Ptr <git_repository>) -> CString -> CString -> CString -> CString -> IO (CInt)
 #ccall git_repository_open3 , Ptr (Ptr <git_repository>) -> CString -> Ptr <git_odb> -> CString -> CString -> IO (CInt)
@@ -26,6 +18,6 @@ import Bindings.Libgit2.Oid
 #ccall git_repository_head_detached , Ptr <git_repository> -> IO (CInt)
 #ccall git_repository_head_orphan , Ptr <git_repository> -> IO (CInt)
 #ccall git_repository_is_empty , Ptr <git_repository> -> IO (CInt)
-#ccall git_repository_path , Ptr <git_repository> -> <git_repository_pathid> -> IO (CString)
+#ccall git_repository_path , Ptr <git_repository> -> IO (CString)
 #ccall git_repository_is_bare , Ptr <git_repository> -> IO (CInt)
 #ccall git_repository_config , Ptr (Ptr <git_config>) -> Ptr <git_repository> -> CString -> CString -> IO (CInt)
