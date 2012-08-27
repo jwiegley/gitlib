@@ -11,41 +11,8 @@ Cabal-Version:       >=1.10
 Category:            FFI
 
 Extra-source-files:
-  libgit2/include/git2/attr.h
-  libgit2/include/git2/blob.h
-  libgit2/include/git2/branch.h
-  libgit2/include/git2/commit.h
-  libgit2/include/git2/common.h
-  libgit2/include/git2/config.h
-  libgit2/include/git2/diff.h
-  libgit2/include/git2/errors.h
-  libgit2/include/git2/index.h
-  libgit2/include/git2/indexer.h
-  libgit2/include/git2/inttypes.h
-  libgit2/include/git2/merge.h
-  libgit2/include/git2/net.h
-  libgit2/include/git2/notes.h
-  libgit2/include/git2/object.h
-  libgit2/include/git2/odb.h
-  libgit2/include/git2/odb_backend.h
-  libgit2/include/git2/oid.h
-  libgit2/include/git2/reflog.h
-  libgit2/include/git2/refs.h
-  libgit2/include/git2/refspec.h
-  libgit2/include/git2/remote.h
-  libgit2/include/git2/repository.h
-  libgit2/include/git2/revwalk.h
-  libgit2/include/git2/signature.h
-  libgit2/include/git2/status.h
-  libgit2/include/git2/stdint.h
-  libgit2/include/git2/submodule.h
-  libgit2/include/git2/tag.h
-  libgit2/include/git2/threads.h
-  libgit2/include/git2/tree.h
-  libgit2/include/git2/types.h
-  libgit2/include/git2/version.h
-  libgit2/include/git2/windows.h
   libgit2/include/git2.h
+  libgit2/include/git2/*.h
 
 Source-repository head
   type: git
