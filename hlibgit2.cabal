@@ -63,11 +63,12 @@ library
     Bindings.Libgit2.Common
     Bindings.Libgit2.Object
   c-sources:
-    Bindings/Libgit2/Tag.hsc.helper.c
-    Bindings/Libgit2/Commit.hsc.helper.c
-    Bindings/Libgit2/Blob.hsc.helper.c
-    Bindings/Libgit2/Tree.hsc.helper.c
+    src/Bindings/Libgit2/Tag.hsc.helper.c
+    src/Bindings/Libgit2/Commit.hsc.helper.c
+    src/Bindings/Libgit2/Blob.hsc.helper.c
+    src/Bindings/Libgit2/Tree.hsc.helper.c
 
+  hs-source-dirs: src
   include-dirs: libgit2/include
   extra-libraries: git2
   if os(windows)
