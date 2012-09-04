@@ -23,7 +23,7 @@ Source-repository this
   location: git://github.com/jwiegley/hlibgit2.git
   tag: hlibgit2-0.1-17-gd7b22d6
 
-test-suite smoke
+Test-suite smoke
   default-language: Haskell98
   type: exitcode-stdio-1.0
   main-is: Main.hs
@@ -33,7 +33,14 @@ test-suite smoke
     hlibgit2,
     process
 
-library
+Executable c2hsc
+  default-language: Haskell98
+  Main-is: src/c2hsc.hs
+  Ghc-options: -threaded
+
+  Build-depends: base >= 4 && < 5, parsec
+
+Library
   default-language: Haskell98
   default-extensions:
     ForeignFunctionInterface
