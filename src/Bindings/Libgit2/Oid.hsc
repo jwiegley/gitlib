@@ -1,4 +1,3 @@
-
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Oid where
@@ -6,24 +5,29 @@ module Bindings.Libgit2.Oid where
 
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
-#num    GIT_OID_RAWSZ
-#num    GIT_OID_HEXSZ
-#num    GIT_OID_MINPREFIXLEN
-#opaque_t git_oid_shorten
+#num GIT_OID_RAWSZ
+#num GIT_OID_HEXSZ
+#num GIT_OID_MINPREFIXLEN
 {- typedef struct {
-	
 	unsigned char id[GIT_OID_RAWSZ];
 } git_oid; -}
 #starttype git_oid
 #array_field    id , Word8
 #stoptype
 #ccall git_oid_fromstr , Ptr <git_oid> -> CString -> IO (CInt)
-#ccall git_oid_fromstrn , Ptr <git_oid> -> CString -> CSize -> IO (CInt)
-#ccall git_oid_fromraw , Ptr <git_oid> -> Ptr Word8 -> IO ()
+#ccall git_oid_fromstrn , Ptr <git_oid> -> CString -> CLong -> IO (CInt)
+#ccall git_oid_fromraw , Ptr <git_oid> -> Ptr CUChar -> IO ()
 #ccall git_oid_fmt , CString -> Ptr <git_oid> -> IO ()
 #ccall git_oid_pathfmt , CString -> Ptr <git_oid> -> IO ()
 #ccall git_oid_allocfmt , Ptr <git_oid> -> IO (CString)
-#ccall git_oid_to_string , CString -> CSize -> Ptr <git_oid> -> IO (CString)
+#ccall git_oid_tostr , CString -> CLong -> Ptr <git_oid> -> IO (CString)
 #ccall git_oid_cpy , Ptr <git_oid> -> Ptr <git_oid> -> IO ()
 #ccall git_oid_cmp , Ptr <git_oid> -> Ptr <git_oid> -> IO (CInt)
 #ccall git_oid_ncmp , Ptr <git_oid> -> Ptr <git_oid> -> CUInt -> IO (CInt)
+#ccall git_oid_streq , Ptr <git_oid> -> CString -> IO (CInt)
+#ccall git_oid_iszero , Ptr <git_oid> -> IO (CInt)
+{- typedef struct git_oid_shorten git_oid_shorten; -}
+#opaque_t git_oid_shorten
+#ccall git_oid_shorten_new , CLong -> IO (Ptr <git_oid_shorten>)
+#ccall git_oid_shorten_add , Ptr <git_oid_shorten> -> CString -> IO (CInt)
+#ccall git_oid_shorten_free , Ptr <git_oid_shorten> -> IO ()

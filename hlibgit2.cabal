@@ -42,30 +42,44 @@ Library
     bindings-DSL >= 1.0.11
   exposed-modules:
     Bindings.Libgit2
-    Bindings.Libgit2.Repository
+    Bindings.Libgit2.Attr
+    Bindings.Libgit2.Blob
+    Bindings.Libgit2.Branch
+    Bindings.Libgit2.Commit
+    Bindings.Libgit2.Common
     Bindings.Libgit2.Config
-    Bindings.Libgit2.Types
-    Bindings.Libgit2.Revwalk
-    Bindings.Libgit2.OdbBackend
-    Bindings.Libgit2.Tag
+    Bindings.Libgit2.Diff
+    Bindings.Libgit2.Errors
+    Bindings.Libgit2.Index
+    Bindings.Libgit2.Indexer
+    Bindings.Libgit2.Merge
     Bindings.Libgit2.Net
+    Bindings.Libgit2.Notes
+    Bindings.Libgit2.Object
+    Bindings.Libgit2.Odb
+    Bindings.Libgit2.OdbBackend
+    Bindings.Libgit2.Oid
+    Bindings.Libgit2.Reflog
     Bindings.Libgit2.Refs
     Bindings.Libgit2.Refspec
-    Bindings.Libgit2.Reflog
-    Bindings.Libgit2.Commit
-    Bindings.Libgit2.Index
+    Bindings.Libgit2.Remote
+    Bindings.Libgit2.Repository
+    Bindings.Libgit2.Revwalk
     Bindings.Libgit2.Signature
-    Bindings.Libgit2.Blob
-    Bindings.Libgit2.Errors
-    Bindings.Libgit2.Oid
+    Bindings.Libgit2.Status
+    Bindings.Libgit2.Submodule
+    Bindings.Libgit2.Tag
+    Bindings.Libgit2.Threads
     Bindings.Libgit2.Tree
-    Bindings.Libgit2.Odb
-    Bindings.Libgit2.Common
-    Bindings.Libgit2.Object
+    Bindings.Libgit2.Types
+    Bindings.Libgit2.Version
+    Bindings.Libgit2.Windows
   c-sources:
-    src/Bindings/Libgit2/Tag.hsc.helper.c
-    src/Bindings/Libgit2/Commit.hsc.helper.c
+    src/Bindings/Libgit2/Attr.hsc.helper.c
     src/Bindings/Libgit2/Blob.hsc.helper.c
+    src/Bindings/Libgit2/Commit.hsc.helper.c
+    src/Bindings/Libgit2/Common.hsc.helper.c
+    src/Bindings/Libgit2/Tag.hsc.helper.c
     src/Bindings/Libgit2/Tree.hsc.helper.c
 
   hs-source-dirs: src

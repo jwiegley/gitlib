@@ -1,4 +1,3 @@
-
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Revwalk where
@@ -7,14 +6,16 @@ module Bindings.Libgit2.Revwalk where
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
-#num    GIT_SORT_NONE
-#num    GIT_SORT_TOPOLOGICAL
-#num    GIT_SORT_TIME
-#num    GIT_SORT_REVERSE
 #ccall git_revwalk_new , Ptr (Ptr <git_revwalk>) -> Ptr <git_repository> -> IO (CInt)
 #ccall git_revwalk_reset , Ptr <git_revwalk> -> IO ()
 #ccall git_revwalk_push , Ptr <git_revwalk> -> Ptr <git_oid> -> IO (CInt)
+#ccall git_revwalk_push_glob , Ptr <git_revwalk> -> CString -> IO (CInt)
+#ccall git_revwalk_push_head , Ptr <git_revwalk> -> IO (CInt)
 #ccall git_revwalk_hide , Ptr <git_revwalk> -> Ptr <git_oid> -> IO (CInt)
+#ccall git_revwalk_hide_glob , Ptr <git_revwalk> -> CString -> IO (CInt)
+#ccall git_revwalk_hide_head , Ptr <git_revwalk> -> IO (CInt)
+#ccall git_revwalk_push_ref , Ptr <git_revwalk> -> CString -> IO (CInt)
+#ccall git_revwalk_hide_ref , Ptr <git_revwalk> -> CString -> IO (CInt)
 #ccall git_revwalk_next , Ptr <git_oid> -> Ptr <git_revwalk> -> IO (CInt)
 #ccall git_revwalk_sorting , Ptr <git_revwalk> -> CUInt -> IO ()
 #ccall git_revwalk_free , Ptr <git_revwalk> -> IO ()
