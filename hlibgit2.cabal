@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.2.1
+Version:             0.3.0
 Synopsis:            Low-level bindings to libgit2.
 Description:         Bindings to libgit2 v0.16.0-471-g5b9fac3
 License-file:        LICENSE
@@ -32,13 +32,6 @@ Test-suite smoke
     base >=3,
     hlibgit2,
     process
-
-Executable c2hsc
-  default-language: Haskell98
-  Main-is: src/c2hsc.hs
-  Ghc-options: -threaded
-
-  Build-depends: base >= 4 && < 5, parsec
 
 Library
   default-language: Haskell98
