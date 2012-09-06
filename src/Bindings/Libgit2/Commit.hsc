@@ -23,4 +23,3 @@ import Bindings.Libgit2.Object
 #ccall git_commit_parent , Ptr (Ptr <git_commit>) -> Ptr <git_commit> -> CUInt -> IO (CInt)
 #ccall git_commit_parent_oid , Ptr <git_commit> -> CUInt -> IO (Ptr <git_oid>)
 #ccall git_commit_create , Ptr <git_oid> -> Ptr <git_repository> -> CString -> Ptr <git_signature> -> Ptr <git_signature> -> CString -> CString -> Ptr <git_tree> -> CInt -> Ptr (Ptr <git_commit>) -> IO (CInt)
-{- #ccall git_commit_create_v , Ptr <git_oid> -> Ptr <git_repository> -> CString -> Ptr <git_signature> -> Ptr <git_signature> -> CString -> CString -> Ptr <git_tree> -> CInt -> IO (CInt) -}
