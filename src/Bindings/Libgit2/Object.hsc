@@ -15,4 +15,4 @@ import Bindings.Libgit2.Oid
 #ccall git_object_type2string , <git_otype> -> IO (CString)
 #ccall git_object_string2type , CString -> IO (<git_otype>)
 #ccall git_object_typeisloose , <git_otype> -> IO (CInt)
-#ccall git_object__size , <git_otype> -> IO (CLong)
+#ccall git_object__size , <git_otype> -> IO (CSize)

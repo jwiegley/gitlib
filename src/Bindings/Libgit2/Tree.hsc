@@ -1,5 +1,6 @@
 #include <bindings.dsl.h>
 #include <git2.h>
+#include <git2/tree.h>
 module Bindings.Libgit2.Tree where
 #strict_import
 
@@ -26,10 +27,16 @@ import Bindings.Libgit2.Object
 #ccall git_treebuilder_get , Ptr <git_treebuilder> -> CString -> IO (Ptr <git_tree_entry>)
 #ccall git_treebuilder_insert , Ptr (Ptr <git_tree_entry>) -> Ptr <git_treebuilder> -> CString -> Ptr <git_oid> -> CUInt -> IO (CInt)
 #ccall git_treebuilder_remove , Ptr <git_treebuilder> -> CString -> IO (CInt)
-#ccall git_treebuilder_filter , Ptr <git_treebuilder> -> Ptr () -> Ptr () -> IO ()
+#ccall git_treebuilder_filter , Ptr <git_treebuilder> -> FunPtr (Ptr <git_tree_entry> -> Ptr () -> CInt) -> Ptr () -> IO ()
 #ccall git_treebuilder_write , Ptr <git_oid> -> Ptr <git_repository> -> Ptr <git_treebuilder> -> IO (CInt)
 #ccall git_tree_get_subtree , Ptr (Ptr <git_tree>) -> Ptr <git_tree> -> CString -> IO (CInt)
 {- typedef int (* git_treewalk_cb)(const char * root,
                                 git_tree_entry * entry,
                                 void * payload); -}
+#synonym_t git_treewalk_cb , CInt
+{- enum git_treewalk_mode {
+    GIT_TREEWALK_PRE = 0, GIT_TREEWALK_POST = 1
+}; -}
+#num GIT_TREEWALK_PRE
+#num GIT_TREEWALK_POST
 #ccall git_tree_walk , Ptr <git_tree> -> CInt -> CInt -> Ptr () -> IO (CInt)

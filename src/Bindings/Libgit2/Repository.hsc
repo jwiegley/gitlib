@@ -7,7 +7,13 @@ import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 #ccall git_repository_open , Ptr (Ptr <git_repository>) -> CString -> IO (CInt)
-#ccall git_repository_discover , CString -> CLong -> CString -> CInt -> CString -> IO (CInt)
+#ccall git_repository_discover , CString -> CSize -> CString -> CInt -> CString -> IO (CInt)
+{- enum {
+    GIT_REPOSITORY_OPEN_NO_SEARCH = 1 << 0,
+    GIT_REPOSITORY_OPEN_CROSS_FS = 1 << 1
+}; -}
+#num GIT_REPOSITORY_OPEN_NO_SEARCH
+#num GIT_REPOSITORY_OPEN_CROSS_FS
 #ccall git_repository_open_ext , Ptr (Ptr <git_repository>) -> CString -> CUInt -> CString -> IO (CInt)
 #ccall git_repository_free , Ptr <git_repository> -> IO ()
 #ccall git_repository_init , Ptr (Ptr <git_repository>) -> CString -> CUInt -> IO (CInt)

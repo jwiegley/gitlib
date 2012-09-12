@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.3.1
+Version:             0.4.0
 Synopsis:            Low-level bindings to libgit2.
 Description:         Bindings to libgit2 v0.16.0-471-g5b9fac3
 License-file:        LICENSE

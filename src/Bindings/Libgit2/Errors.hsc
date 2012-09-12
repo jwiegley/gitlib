@@ -4,6 +4,24 @@ module Bindings.Libgit2.Errors where
 #strict_import
 
 import Bindings.Libgit2.Common
+{- enum {
+    GIT_OK = 0,
+    GIT_ERROR = -1,
+    GIT_ENOTFOUND = -3,
+    GIT_EEXISTS = -4,
+    GIT_EAMBIGUOUS = -5,
+    GIT_EBUFS = -6,
+    GIT_PASSTHROUGH = -30,
+    GIT_REVWALKOVER = -31
+}; -}
+#num GIT_OK
+#num GIT_ERROR
+#num GIT_ENOTFOUND
+#num GIT_EEXISTS
+#num GIT_EAMBIGUOUS
+#num GIT_EBUFS
+#num GIT_PASSTHROUGH
+#num GIT_REVWALKOVER
 {- typedef struct {
             char * message; int klass;
         } git_error; -}

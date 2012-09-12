@@ -8,6 +8,7 @@ import Bindings.Libgit2.Repository
 import Bindings.Libgit2.Refspec
 import Bindings.Libgit2.Net
 import Bindings.Libgit2.Indexer
+import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Types
 #ccall git_remote_new , Ptr (Ptr <git_remote>) -> Ptr <git_repository> -> CString -> CString -> CString -> IO (CInt)
 #ccall git_remote_load , Ptr (Ptr <git_remote>) -> Ptr <git_repository> -> CString -> IO (CInt)
@@ -24,7 +25,7 @@ import Bindings.Libgit2.Types
 #ccall git_remote_connected , Ptr <git_remote> -> IO (CInt)
 #ccall git_remote_disconnect , Ptr <git_remote> -> IO ()
 #ccall git_remote_free , Ptr <git_remote> -> IO ()
-#ccall git_remote_update_tips , Ptr <git_remote> -> Ptr () -> IO (CInt)
+#ccall git_remote_update_tips , Ptr <git_remote> -> FunPtr (CString -> Ptr <git_oid> -> Ptr <git_oid> -> CInt) -> IO (CInt)
 #ccall git_remote_valid_url , CString -> IO (CInt)
 #ccall git_remote_supported_url , CString -> IO (CInt)
 #ccall git_remote_list , Ptr <git_strarray> -> Ptr <git_repository> -> IO (CInt)

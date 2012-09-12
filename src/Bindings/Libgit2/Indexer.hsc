@@ -17,7 +17,7 @@ import Bindings.Libgit2.Oid
 {- typedef struct git_indexer_stream git_indexer_stream; -}
 #opaque_t git_indexer_stream
 #ccall git_indexer_stream_new , Ptr (Ptr <git_indexer_stream>) -> CString -> IO (CInt)
-#ccall git_indexer_stream_add , Ptr <git_indexer_stream> -> Ptr () -> CLong -> Ptr <git_indexer_stats> -> IO (CInt)
+#ccall git_indexer_stream_add , Ptr <git_indexer_stream> -> Ptr () -> CSize -> Ptr <git_indexer_stats> -> IO (CInt)
 #ccall git_indexer_stream_finalize , Ptr <git_indexer_stream> -> Ptr <git_indexer_stats> -> IO (CInt)
 #ccall git_indexer_stream_hash , Ptr <git_indexer_stream> -> IO (Ptr <git_oid>)
 #ccall git_indexer_stream_free , Ptr <git_indexer_stream> -> IO ()

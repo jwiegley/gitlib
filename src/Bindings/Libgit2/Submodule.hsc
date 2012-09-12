@@ -46,5 +46,5 @@ import Bindings.Libgit2.Oid
 #field fetch_recurse , CInt
 #field refcount , CInt
 #stoptype
-#ccall git_submodule_foreach , Ptr <git_repository> -> Ptr () -> Ptr () -> IO (CInt)
+#ccall git_submodule_foreach , Ptr <git_repository> -> FunPtr (CString -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
 #ccall git_submodule_lookup , Ptr (Ptr <git_submodule>) -> Ptr <git_repository> -> CString -> IO (CInt)

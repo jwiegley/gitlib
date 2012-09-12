@@ -8,7 +8,7 @@ module Bindings.Libgit2.Common where
         } git_strarray; -}
 #starttype git_strarray
 #field strings , Ptr (CString)
-#field count , CLong
+#field count , CSize
 #stoptype
 #ccall git_strarray_free , Ptr <git_strarray> -> IO ()
 #ccall git_strarray_copy , Ptr <git_strarray> -> Ptr <git_strarray> -> IO (CInt)
