@@ -29,17 +29,29 @@ Test-suite smoke
   main-is: Main.hs
   hs-source-dirs: tests
   build-depends:
-    base >=3,
-    hlibgit2,
-    process
+      base >=3
+    , hlibgit2
+    , process
+    , system-filepath >= 0.4.7
+    , time            >= 1.4
+    , text            >= 0.11.2
+    , containers      >= 0.4.2
+    , bytestring      >= 0.9.2.1
+    , lens            >= 2.8
 
 Library
   default-language: Haskell98
   default-extensions:
     ForeignFunctionInterface
   build-depends:
-    base >= 3 && < 5,
-    bindings-DSL >= 1.0.11
+      base            >= 3 && < 5
+    , bindings-DSL    >= 1.0.11
+    , system-filepath >= 0.4.7
+    , time            >= 1.4
+    , text            >= 0.11.2
+    , containers      >= 0.4.2
+    , bytestring      >= 0.9.2.1
+    , lens            >= 2.8
   exposed-modules:
     Bindings.Libgit2
     Bindings.Libgit2.Attr
@@ -74,6 +86,7 @@ Library
     Bindings.Libgit2.Types
     Bindings.Libgit2.Version
     Bindings.Libgit2.Windows
+    Data.Git
   c-sources:
     src/Bindings/Libgit2/Attr.hsc.helper.c
     src/Bindings/Libgit2/Blob.hsc.helper.c
