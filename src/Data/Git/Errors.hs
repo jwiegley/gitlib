@@ -7,7 +7,7 @@ module Data.Git.Errors
 import Control.Exception
 import Data.Typeable
 import Prelude hiding (FilePath)
-
+
 data GitException = RepositoryNotExist String
                   | RepositoryInvalid
                   | BlobCreateFailed

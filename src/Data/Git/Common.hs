@@ -1,7 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Data.Git.Common where
+module Data.Git.Common
+       ( Author, HasAuthor(..)
+       , WhoWhen, HasWhoWhen(..)
+       , Base, HasBase(..)
+       , newBase )
+       where
 
 import Control.Lens
 import Data.Either

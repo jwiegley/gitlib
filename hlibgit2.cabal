@@ -91,11 +91,12 @@ Library
     Data.Git.Commit
     Data.Git.Common
     Data.Git.Errors
-    Data.Git.Foreign
     Data.Git.Object
     Data.Git.Repository
     Data.Git.Tag
     Data.Git.Tree
+  other-modules:
+    Data.Git.Foreign
   c-sources:
     src/Bindings/Libgit2/Attr.hsc.helper.c
     src/Bindings/Libgit2/Blob.hsc.helper.c

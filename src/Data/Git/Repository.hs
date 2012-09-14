@@ -1,7 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Data.Git.Repository where
+module Data.Git.Repository
+       ( Repository
+       , HasRepository(..)
+
+       , openRepository )
+       where
 
 import Bindings.Libgit2
 import Control.Applicative
