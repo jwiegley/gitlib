@@ -2,7 +2,6 @@ module Main where
 
 import           Bindings.Libgit2
 import           Control.Monad(when)
-import qualified Data.ByteString as B
 import           Data.Git
 import           Data.Text as T hiding (map)
 import qualified Data.Text.Encoding as E
@@ -13,9 +12,10 @@ import           Prelude hiding (FilePath)
 import           System.Exit
 import           System.Process(system)
 
+main :: IO Blob
 main = do
   putStrLn "Creating Git repository..."
-  system "git init smoke.git"
+  _ <- system "git init smoke.git"
 
   putStrLn "Accessing directly..."
   alloca $ \ptr -> do

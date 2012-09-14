@@ -87,6 +87,15 @@ Library
     Bindings.Libgit2.Version
     Bindings.Libgit2.Windows
     Data.Git
+    Data.Git.Blob
+    Data.Git.Commit
+    Data.Git.Common
+    Data.Git.Errors
+    Data.Git.Foreign
+    Data.Git.Object
+    Data.Git.Repository
+    Data.Git.Tag
+    Data.Git.Tree
   c-sources:
     src/Bindings/Libgit2/Attr.hsc.helper.c
     src/Bindings/Libgit2/Blob.hsc.helper.c
