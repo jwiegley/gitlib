@@ -29,12 +29,12 @@ data Tree = Tree { _treeInfo     :: Base Tree
 makeClassy ''Tree
 
 instance Show Tree where
-  show x = case x^.treeInfo^.gitId of
+  show x = case x^.treeInfo.gitId of
     Left _  -> "Tree"
     Right y -> "Tree#" ++ show y
 
 newTreeBase :: Tree -> Base Tree
-newTreeBase t = newBase (t^.treeInfo^.gitRepo) doWriteTree
+newTreeBase t = newBase (t^.treeInfo.gitRepo) doWriteTree
 
 -- | Create a new tree, starting it with the contents at the given path.
 --
@@ -65,7 +65,7 @@ doUpdateTree (x:xs) item t =
   treeInfo     .~ newTreeBase t $
   treeContents .~ update' xs    $ t
 
-  where repo       = t^.treeInfo^.gitRepo
+  where repo       = t^.treeInfo.gitRepo
         treeMap    = t^.treeContents
         update' [] = insert x item treeMap
         update' _  = insert x subTree treeMap

@@ -24,7 +24,7 @@ data Commit = Commit { _commitInfo :: Base Commit
 makeClassy ''Commit
 
 instance Show Commit where
-  show x = case x^.commitInfo^.gitId of
+  show x = case x^.commitInfo.gitId of
     Left _  -> "Commit"
     Right y -> "Commit#" ++ show y
 

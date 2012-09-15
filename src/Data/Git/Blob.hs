@@ -27,7 +27,7 @@ data Blob = Blob { _blobInfo     :: Base Blob
 makeClassy ''Blob
 
 instance Show Blob where
-  show x = case x^.blobInfo^.gitId of
+  show x = case x^.blobInfo.gitId of
     Left _  -> "Blob"
     Right y -> "Blob#" ++ show y
 
@@ -56,7 +56,7 @@ lookupBlob repo oid =
 
 getBlobContents :: Blob -> IO (Blob, B.ByteString)
 getBlobContents b =
-  case b^.blobInfo^.gitId of
+  case b^.blobInfo.gitId of
     Left _     -> return $ (b, contents)
     Right hash ->
       if contents /= B.empty
@@ -78,7 +78,7 @@ getBlobContents b =
               Just blobPtr' -> getBlobContents blobPtr'
               Nothing       -> return (b, B.empty)
 
-  where repo     = b^.blobInfo^.gitRepo
+  where repo     = b^.blobInfo.gitRepo
         contents = b^.blobContents
 
 -- | Write out a blob to its repository.  If it has already been written,
@@ -101,7 +101,7 @@ doWriteBlob b = do
 
   where
     repo = fromMaybe (error "Repository invalid") $
-             b^.blobInfo^.gitRepo^.repoObj
+           b^.blobInfo.gitRepo.repoObj
 
     createFromBuffer ptr repoPtr =
       unsafeUseAsCStringLen (b^.blobContents) $

@@ -18,7 +18,7 @@ data Tag = Tag { _tagInfo :: Base Tag
 makeClassy ''Tag
 
 instance Show Tag where
-  show x = case x^.tagInfo^.gitId of
+  show x = case x^.tagInfo.gitId of
     Left _  -> "Tag"
     Right y -> "Tag#" ++ show y
 
