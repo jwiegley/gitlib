@@ -33,6 +33,7 @@ Test-suite smoke
     , hlibgit2
     , process
     , system-filepath >= 0.4.7
+    , system-fileio   >= 0.3.9
     , time            >= 1.4
     , text            >= 0.11.2
     , containers      >= 0.4.2
@@ -47,6 +48,7 @@ Library
       base            >= 3 && < 5
     , bindings-DSL    >= 1.0.11
     , system-filepath >= 0.4.7
+    , system-fileio   >= 0.3.9
     , time            >= 1.4
     , text            >= 0.11.2
     , containers      >= 0.4.2
@@ -96,7 +98,7 @@ Library
     Data.Git.Tag
     Data.Git.Tree
   other-modules:
-    Data.Git.Foreign
+    Data.Git.Internal
   c-sources:
     src/Bindings/Libgit2/Attr.hsc.helper.c
     src/Bindings/Libgit2/Blob.hsc.helper.c

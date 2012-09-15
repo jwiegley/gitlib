@@ -1,23 +1,32 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import           Bindings.Libgit2
-import           Control.Monad(when)
+import           Control.Monad
+import           Data.Foldable
 import           Data.Git
 import           Data.Text as T hiding (map)
+import           Data.Text.IO
 import qualified Data.Text.Encoding as E
 import           Filesystem.Path.CurrentOS
-import           Foreign
 import           Foreign.C.String
-import           Prelude hiding (FilePath)
+import           Foreign.Marshal.Alloc
+import           Foreign.Storable
+import           Prelude hiding (FilePath, putStr, putStrLn)
 import           System.Exit
 import           System.Process(system)
 
-main :: IO Blob
+default (Text)
+
+main :: IO ()
 main = do
   putStrLn "Creating Git repository..."
+
   _ <- system "git init smoke.git"
 
   putStrLn "Accessing directly..."
+
   alloca $ \ptr -> do
     withCString "smoke.git/.git" $ \str -> do
       r <- c'git_repository_open ptr str
@@ -25,5 +34,22 @@ main = do
       peek ptr >>= c'git_repository_free
 
   putStrLn "Accessing via higher-level types..."
-  repo <- openRepository (fromText (T.pack "smoke.git/.git"))
-  writeBlob $ createBlob repo (E.encodeUtf8 (T.pack "Hello, world!\n"))
+
+  repo <- openRepository (fromText "smoke.git/.git")
+  writeBlob_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
+
+  putStrLn "Looking up Blob..."
+
+  hash <- stringToOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+  for_ hash $ \hash' -> do
+    obj <- lookupObject repo hash'
+    case obj of
+      Just (BlobObj b) -> do
+        putStrLn "Found a blob, contents: "
+        (_, contents) <- getBlobContents b
+        putStr (E.decodeUtf8 contents)
+
+      Just _         -> putStrLn "Found something else..."
+      Nothing        -> putStrLn "Didn't find anything :("
+
+-- Main.hs ends here

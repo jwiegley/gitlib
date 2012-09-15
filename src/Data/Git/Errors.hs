@@ -11,6 +11,7 @@ import Prelude hiding (FilePath)
 data GitException = RepositoryNotExist String
                   | RepositoryInvalid
                   | BlobCreateFailed
+                  | ObjectLookupFailed
                   deriving (Show, Typeable)
 
 instance Exception GitException

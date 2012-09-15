@@ -6,14 +6,14 @@ module Data.Git.Tag where
 import Control.Lens
 import Data.Either
 import Data.Git.Common
-import Data.Git.Foreign
+import Data.Git.Internal
 import Data.Text as T hiding (map)
 import Prelude hiding (FilePath)
 
 default (Text)
 
 data Tag = Tag { _tagInfo :: Base Tag
-               , _tagRef  :: Hash }
+               , _tagRef  :: Oid }
 
 makeClassy ''Tag
 

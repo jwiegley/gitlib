@@ -18,7 +18,7 @@ module Data.Git (
     module Data.Git.Tree,
     -- module Data.Git.Odb,
     module Data.Git.Common,
-    -- module Data.Git.Object
+    module Data.Git.Object
 ) where
 
 import Data.Git.Repository
@@ -40,4 +40,4 @@ import Data.Git.Errors
 import Data.Git.Tree
 -- import Data.Git.Odb
 import Data.Git.Common
--- import Data.Git.Object
+import Data.Git.Object

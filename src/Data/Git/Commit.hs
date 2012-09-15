@@ -8,7 +8,7 @@ import Bindings.Libgit2
 import Control.Lens
 import Data.Either
 import Data.Git.Common
-import Data.Git.Foreign
+import Data.Git.Internal
 import Data.Git.Tree
 import Data.Text as T hiding (map)
 import Prelude hiding (FilePath)

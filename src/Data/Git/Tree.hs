@@ -8,10 +8,9 @@ import Bindings.Libgit2
 import Control.Lens
 import Data.Either
 import Data.Git.Common
-import Data.Git.Foreign
+import Data.Git.Internal
 import Data.Git.Blob
 import Data.Git.Errors
-import Data.Git.Repository
 import Data.Map as M hiding (map)
 import Data.Maybe
 import Data.Text as T hiding (map)
@@ -25,7 +24,7 @@ type TreeMap    = Map Text TreeOrBlob
 
 data Tree = Tree { _treeInfo     :: Base Tree
                  , _treeContents :: TreeMap
-                 , _treeObj      :: ObjPtr C'git_tree }
+                 , _treeObj      :: ObjPtr C'git_object }
 
 makeClassy ''Tree
 
@@ -44,7 +43,7 @@ newTreeBase t = newBase (t^.treeInfo^.gitRepo) doWriteTree
 createTree :: Repository -> FilePath -> TreeOrBlob -> Tree
 createTree repo path item = updateTree path item (emptyTree repo)
 
-doWriteTree :: Tree -> IO Hash
+doWriteTree :: Tree -> IO Oid
 doWriteTree = undefined
 {-
   alloca $ \ptr ->
