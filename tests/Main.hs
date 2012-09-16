@@ -2,7 +2,6 @@
 
 module Main where
 
-import           Bindings.Libgit2
 import           Control.Monad
 import           Data.Foldable
 import           Data.Git
@@ -21,21 +20,8 @@ default (Text)
 
 main :: IO ()
 main = do
-  putStrLn "Creating Git repository..."
-
-  _ <- system "git init smoke.git"
-
-  putStrLn "Accessing directly..."
-
-  alloca $ \ptr -> do
-    withCString "smoke.git/.git" $ \str -> do
-      r <- c'git_repository_open ptr str
-      when (r < 0) $ exitWith (ExitFailure 1)
-      peek ptr >>= c'git_repository_free
-
   putStrLn "Accessing via higher-level types..."
-
-  repo <- openRepository (fromText "smoke.git/.git")
+  repo <- createRepository (fromText "smoke.git") True
   update_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
 
   putStrLn "Looking up Blob by its full SHA..."

@@ -15,7 +15,7 @@ import Control.Exception
 import Control.Monad
 import Data.ByteString.Unsafe
 import Data.Git.Errors
-import Data.Git.Stringable
+import Data.Stringable as S
 import Foreign.ForeignPtr
 import System.IO.Unsafe
 
@@ -67,18 +67,17 @@ stringToOid :: CStringable a => a -> IO (Maybe Oid)
 stringToOid str
   | len > 40 = throwIO ObjectIdTooLong
   | otherwise = do
-      oid <- mallocForeignPtr
-      withCStringable str $ \cstr ->
-        withForeignPtr oid $ \ptr -> do
-          r <- if len == 40
-               then c'git_oid_fromstr ptr cstr
-               else c'git_oid_fromstrn ptr cstr (fromIntegral len)
-          if r < 0
-            then return Nothing
-            else return . Just $ if len == 40
-                                 then Oid (COid oid)
-                                 else PartialOid (COid oid) len
-
-  where len = lengthStr str
+    oid <- mallocForeignPtr
+    withCStringable str $ \cstr ->
+      withForeignPtr oid $ \ptr -> do
+        r <- if len == 40
+             then c'git_oid_fromstr ptr cstr
+             else c'git_oid_fromstrn ptr cstr (fromIntegral len)
+        if r < 0
+          then return Nothing
+          else return . Just $ if len == 40
+                               then Oid (COid oid)
+                               else PartialOid (COid oid) len
+  where len = S.length str
 
 -- Oid.hs

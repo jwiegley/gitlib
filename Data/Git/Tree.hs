@@ -4,25 +4,25 @@
 
 module Data.Git.Tree where
 
-import Bindings.Libgit2
-import Control.Lens
-import Data.Either
-import Data.Git.Common
-import Data.Git.Internal
-import Data.Git.Blob
-import Data.Git.Errors
-import Data.Map as M hiding (map)
-import Data.Text as T hiding (map)
-import Prelude hiding (FilePath)
+import           Bindings.Libgit2
+import           Control.Lens
+import           Data.Either
+import           Data.Git.Blob
+import           Data.Git.Common
+import           Data.Git.Errors
+import           Data.Git.Internal
+import qualified Data.Map as M hiding (map)
+import           Data.Text as T hiding (map)
+import           Filesystem.Path.CurrentOS as F
+import           Prelude hiding (FilePath)
 
 default (Text)
 
 type TreeOrBlob = Either Blob Tree
-type TreeMap    = Map Text TreeOrBlob
+type TreeMap    = M.Map Text TreeOrBlob
 
 data Tree = Tree { _treeInfo     :: Base Tree
-                 , _treeContents :: TreeMap
-                 , _treeBuilder  :: ObjPtr C'git_treebuilder }
+                 , _treeContents :: TreeMap }
 
 makeClassy ''Tree
 
@@ -32,7 +32,9 @@ instance Show Tree where
     Right y -> "Tree#" ++ show y
 
 instance Updatable Tree where
-  update = writeTree
+  update     = writeTree
+  --objectId t = return $ t^.treeInfo.gitId
+  objectId t = undefined
 
 newTreeBase :: Tree -> Base Tree
 newTreeBase t = newBase (t^.treeInfo.gitRepo) (Left doWriteTree) Nothing
@@ -50,8 +52,7 @@ lookupTree repo oid =
     (\coid obj _ ->
       return Tree { _treeInfo =
                        newBase repo (Right coid) (Just obj)
-                  , _treeContents = M.empty
-                  , _treeBuilder  = Nothing })
+                  , _treeContents = M.empty })
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
@@ -67,25 +68,26 @@ doWriteTree t = do
   -- when (r < 0) $ throwIO TreeCreateFailed
   return (COid ptr)
 
-  where
-    repo = fromMaybe (error "Repository invalid") $
-           t^.treeInfo.gitRepo.repoObj
+  where repo = fromMaybe (error "Repository invalid") $
+                         t^.treeInfo.gitRepo.repoObj
 
-    createFromTreeMap ptr repoPtr = undefined
+createFromTreeMap t repoPtr = alloca $ \ptr -> do
+  r <- c'git_treebuilder_create ptr nullPtr
+  when (r < 0) $ throwIO TreeBuilderCreateFailed
+  builder <- peek ptr
+  return undefined
 {-
-        tb <- c'git_treebuilder_create ptr str
-        when (r < 0) $ throwIO (RepositoryNotExist p)
-        ptr' <- peek ptr
-        let finalizer = newForeignPtr p'git_repository_free ptr'
-        return $ Repository { _repoPath = path
-                            , _repoObj  = finalizer }
+  for (M.toList (t^.treeContents)) $ \k v -> do
+    v'  <- update v               -- make sure the object is updated
+    oid <- objectId v'
+    withCStringable k $ \name ->
+      c'git_treebuilder_insert nullPtr builder name oid 0
 -}
 
 emptyTree :: Repository -> Tree
 emptyTree repo =
   Tree { _treeInfo     = newBase repo (Left doWriteTree) Nothing
-       , _treeContents = M.empty
-       , _treeBuilder  = Nothing }
+       , _treeContents = M.empty }
 
 doUpdateTree :: [Text] -> TreeOrBlob -> Tree -> Tree
 doUpdateTree (x:xs) item t =
@@ -94,8 +96,8 @@ doUpdateTree (x:xs) item t =
 
   where repo       = t^.treeInfo.gitRepo
         treeMap    = t^.treeContents
-        update' [] = insert x item treeMap
-        update' _  = insert x subTree treeMap
+        update' [] = M.insert x item treeMap
+        update' _  = M.insert x subTree treeMap
         subTree    = Right $ doUpdateTree xs item tree'
         tree'      = case M.lookup x treeMap of
                        Just (Right m) -> m
@@ -107,7 +109,7 @@ updateTree = doUpdateTree . splitPath
 
 splitPath :: FilePath -> [Text]
 splitPath path = splitOn "/" text
-  where text = case toText path of
+  where text = case F.toText path of
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 

@@ -21,36 +21,39 @@ module Data.Git.Internal
 
        , lookupObject'
 
+       , module F
        , module X )
        where
 
-import Bindings.Libgit2 as X
-import Control.Applicative as X
-import Control.Exception as X
-import Control.Lens as X hiding((<.>))
-import Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
-                                  forM, forM_, msum)
-import Data.Either as X
-import Data.Foldable as X
-import Data.Git.Errors as X
-import Data.Git.Oid as X
-import Data.Git.Stringable as X
-import Data.Maybe as X
-import Data.Monoid as X
-import Data.Text as T hiding (map)
-import Data.Traversable as X
-import Filesystem as X
-import Filesystem.Path.CurrentOS as X hiding (empty, concat)
-import Foreign.C.String as X
-import Foreign.C.Types as X
-import Foreign.ForeignPtr as X
-import Foreign.Marshal.Alloc as X
-import Foreign.Marshal.Utils as X
-import Foreign.Ptr as X
-import Foreign.StablePtr as X
-import Foreign.Storable as X
-import Prelude hiding (FilePath, mapM, mapM_, sequence, sequence_)
-import Unsafe.Coerce as X
+import           Bindings.Libgit2 as X
+import           Control.Applicative as X
+import           Control.Exception as X
+import           Control.Lens as X hiding((<.>))
+import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
+                                            forM, forM_, msum)
+import           Data.Either as X
+import           Data.Foldable as X
+import           Data.Git.Errors as X
+import           Data.Git.Oid as X
+import           Data.Maybe as X
+import           Data.Monoid as X
+import           Data.Stringable as X
+import           Data.Text as T hiding (map)
+import           Data.Traversable as X
+import           Filesystem as X
+import qualified Filesystem.Path.CurrentOS as F
+import           Filesystem.Path.CurrentOS as X hiding (empty, concat,
+                                                        toText, fromText)
+import           Foreign.C.String as X
+import           Foreign.C.Types as X
+import           Foreign.ForeignPtr as X
+import           Foreign.Marshal.Alloc as X
+import           Foreign.Marshal.Utils as X
+import           Foreign.Ptr as X
+import           Foreign.StablePtr as X
+import           Foreign.Storable as X
+import           Prelude hiding (FilePath, mapM, mapM_, sequence, sequence_)
+import           Unsafe.Coerce as X
 
 default (Text)
 
@@ -60,6 +63,7 @@ class Updatable a where
   update :: a -> IO a
   update_ :: a -> IO ()
   update_ x = void (update x)
+  objectId :: a -> IO Oid
 
 data Repository = Repository { _repoPath :: FilePath
                              , _repoObj  :: ObjPtr C'git_repository }
@@ -107,7 +111,7 @@ openRepositoryWith :: FilePath
                    -> (Ptr (Ptr C'git_repository) -> CString -> IO CInt)
                    -> IO Repository
 openRepositoryWith path fn = alloca $ \ptr ->
-  case toText path of
+  case F.toText path of
     Left p  -> doesNotExist p
     Right p ->
       withCStringable p $ \str -> do

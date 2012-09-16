@@ -1,0 +1,62 @@
+Name:                gitlib
+Version:             0.1.0
+Synopsis:            Higher-level types for working with hlibgit2
+Description:         Higher-level types for working with hlibgit2
+License-file:        LICENSE
+License:             MIT
+Author:              John Wiegley
+Maintainer:          johnw@newartisans.com
+Build-Type:          Simple
+Cabal-Version:       >=1.10
+Category:            FFI
+
+Source-repository head
+  type: git
+  location: git://github.com/jwiegley/gitlib.git
+
+Test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: tests
+  build-depends:
+      base >=3
+    , gitlib
+    , process
+    , system-filepath >= 0.4.7
+    , system-fileio   >= 0.3.9
+    , time            >= 1.4
+    , text            >= 0.11.2
+    , containers      >= 0.4.2
+    , bytestring      >= 0.9.2.1
+    , stringable      >= 0.1
+    , lens            >= 2.8
+
+Library
+  default-language: Haskell98
+  default-extensions:
+    ForeignFunctionInterface
+  build-depends:
+      base            >= 3 && < 5
+    , hlibgit2        >= 0.6
+    , system-filepath >= 0.4.7
+    , system-fileio   >= 0.3.9
+    , time            >= 1.4
+    , text            >= 0.11.2
+    , containers      >= 0.4.2
+    , bytestring      >= 0.9.2.1
+    , stringable      >= 0.1
+    , lens            >= 2.8
+  exposed-modules:
+    Data.Git
+    Data.Git.Blob
+    Data.Git.Commit
+    Data.Git.Common
+    Data.Git.Errors
+    Data.Git.Object
+    Data.Git.Oid
+    Data.Git.Repository
+    Data.Git.Tag
+    Data.Git.Tree
+  other-modules:
+    Data.Git.Internal

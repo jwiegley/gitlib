@@ -31,6 +31,7 @@ instance Show Blob where
 
 instance Updatable Blob where
   update = writeBlob
+  objectId = undefined
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
