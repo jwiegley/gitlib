@@ -32,13 +32,6 @@ Test-suite smoke
       base >=3
     , hlibgit2
     , process
-    , system-filepath >= 0.4.7
-    , system-fileio   >= 0.3.9
-    , time            >= 1.4
-    , text            >= 0.11.2
-    , containers      >= 0.4.2
-    , bytestring      >= 0.9.2.1
-    , lens            >= 2.8
 
 Library
   default-language: Haskell98
@@ -47,13 +40,6 @@ Library
   build-depends:
       base            >= 3 && < 5
     , bindings-DSL    >= 1.0.11
-    , system-filepath >= 0.4.7
-    , system-fileio   >= 0.3.9
-    , time            >= 1.4
-    , text            >= 0.11.2
-    , containers      >= 0.4.2
-    , bytestring      >= 0.9.2.1
-    , lens            >= 2.8
   exposed-modules:
     Bindings.Libgit2
     Bindings.Libgit2.Attr
@@ -88,28 +74,14 @@ Library
     Bindings.Libgit2.Types
     Bindings.Libgit2.Version
     Bindings.Libgit2.Windows
-    Data.Git
-    Data.Git.Blob
-    Data.Git.Commit
-    Data.Git.Common
-    Data.Git.Errors
-    Data.Git.Object
-    Data.Git.Oid
-    Data.Git.Repository
-    Data.Git.Tag
-    Data.Git.Tree
-  other-modules:
-    Data.Git.Internal
-    Data.Git.Stringable
   c-sources:
-    src/Bindings/Libgit2/Attr.hsc.helper.c
-    src/Bindings/Libgit2/Blob.hsc.helper.c
-    src/Bindings/Libgit2/Commit.hsc.helper.c
-    src/Bindings/Libgit2/Common.hsc.helper.c
-    src/Bindings/Libgit2/Tag.hsc.helper.c
-    src/Bindings/Libgit2/Tree.hsc.helper.c
+    Bindings/Libgit2/Attr.hsc.helper.c
+    Bindings/Libgit2/Blob.hsc.helper.c
+    Bindings/Libgit2/Commit.hsc.helper.c
+    Bindings/Libgit2/Common.hsc.helper.c
+    Bindings/Libgit2/Tag.hsc.helper.c
+    Bindings/Libgit2/Tree.hsc.helper.c
 
-  hs-source-dirs: src
   include-dirs: libgit2/include
   extra-libraries: git2
   if os(windows)
