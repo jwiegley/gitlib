@@ -1,12 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Data.Git.Internal
-       ( Oid
-       , Ident
-       , ObjPtr
+       ( ObjPtr
 
-       , Base(..), gitId, gitRepo
+       , Updatable(..)
+
+       , Base(..), gitId, gitRepo, gitObj
        , newBase
 
        , Repository
@@ -31,6 +33,8 @@ import Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
 import Data.Either as X
 import Data.Foldable as X
 import Data.Git.Errors as X
+import Data.Git.Oid as X
+import Data.Git.Stringable as X
 import Data.Maybe as X
 import Data.Monoid as X
 import Data.Text as T hiding (map)
@@ -50,21 +54,24 @@ import Unsafe.Coerce as X
 
 default (Text)
 
-type Oid      = ForeignPtr C'git_oid
-type Ident a  = Either (a -> IO Oid) Oid
 type ObjPtr a = Maybe (ForeignPtr a)
 
+class Updatable a where
+  update :: a -> IO a
+  update_ :: a -> IO ()
+  update_ x = void (update x)
+
 data Repository = Repository { _repoPath :: FilePath
                              , _repoObj  :: ObjPtr C'git_repository }
 
 makeClassy ''Repository
 
 instance Show Repository where
-  show x = T.unpack $
-           T.append "Repository " (either id id (toText (x^.repoPath)))
+  show x = "Repository " <> toString (x^.repoPath)
 
 data Base a = Base { _gitId   :: Ident a
-                   , _gitRepo :: Repository }
+                   , _gitRepo :: Repository
+                   , _gitObj  :: ObjPtr C'git_object }
 
 makeLenses ''Base
 
@@ -73,9 +80,10 @@ instance Show (Base a) where
     Left _  -> "Base"
     Right y -> "Base#" ++ show y
 
-newBase :: Repository -> (a -> IO Oid) -> Base a
-newBase repo f = Base { _gitId   = Left f
-                      , _gitRepo = repo }
+newBase :: Repository -> Ident a -> ObjPtr C'git_object -> Base a
+newBase repo oid obj = Base { _gitId   = oid
+                            , _gitRepo = repo
+                            , _gitObj  = obj }
 
 repositoryPtr :: Repository -> ForeignPtr C'git_repository
 repositoryPtr repo = fromMaybe (error "Repository invalid") (repo^.repoObj)
@@ -99,31 +107,43 @@ openRepositoryWith :: FilePath
                    -> (Ptr (Ptr C'git_repository) -> CString -> IO CInt)
                    -> IO Repository
 openRepositoryWith path fn = alloca $ \ptr ->
-  case T.unpack <$> toText path of
-    Left p  -> throwIO (RepositoryNotExist (T.unpack p))
+  case toText path of
+    Left p  -> doesNotExist p
     Right p ->
-      withCString p $ \str -> do
+      withCStringable p $ \str -> do
         r <- fn ptr str
-        when (r < 0) $ throwIO (RepositoryNotExist p)
+        when (r < 0) $ doesNotExist p
         ptr' <- peek ptr
         fptr <- newForeignPtr p'git_repository_free ptr'
         return Repository { _repoPath = path
                           , _repoObj  = Just fptr }
 
+  where doesNotExist = throwIO . RepositoryNotExist . toString
+
 lookupObject'
   :: Repository -> Oid
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
-  -> (ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
+  -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
+  -> (COid -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
   -> IO (Maybe b)
-lookupObject' repo oid lookupFn createFn = alloca $ \ptr -> do
+lookupObject' repo oid lookupFn lookupPrefixFn createFn = alloca $ \ptr -> do
   r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
-         withForeignPtr oid $ \oidPtr ->
-           lookupFn (castPtr ptr) repoPtr oidPtr
+         case oid of
+           Oid (COid oid') ->
+             withForeignPtr oid' $ \oidPtr ->
+               lookupFn (castPtr ptr) repoPtr oidPtr
+           PartialOid (COid oid') len ->
+             withForeignPtr oid' $ \oidPtr ->
+               lookupPrefixFn (castPtr ptr) repoPtr oidPtr (fromIntegral len)
   if (r < 0)
     then return Nothing
     else do
-      ptr' <- peek ptr
+      ptr'     <- peek ptr
+      coid     <- c'git_object_id ptr'
+      coidCopy <- mallocForeignPtr
+      withForeignPtr coidCopy $ flip c'git_oid_cpy coid
+
       fptr <- newForeignPtr p'git_object_free ptr'
-      Just <$> createFn fptr ptr'
+      Just <$> createFn (COid coidCopy) fptr ptr'
 
 -- Internal.hs

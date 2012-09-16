@@ -12,6 +12,8 @@ data GitException = RepositoryNotExist String
                   | RepositoryInvalid
                   | BlobCreateFailed
                   | ObjectLookupFailed
+                  | ObjectIdTooLong
+                  | OidCopyFailed
                   deriving (Show, Typeable)
 
 instance Exception GitException

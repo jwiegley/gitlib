@@ -12,9 +12,7 @@ import Data.Git.Internal
 import Data.Git.Blob
 import Data.Git.Errors
 import Data.Map as M hiding (map)
-import Data.Maybe
 import Data.Text as T hiding (map)
-import Filesystem.Path.CurrentOS
 import Prelude hiding (FilePath)
 
 default (Text)
@@ -23,8 +21,7 @@ type TreeOrBlob = Either Blob Tree
 type TreeMap    = Map Text TreeOrBlob
 
 data Tree = Tree { _treeInfo     :: Base Tree
-                 , _treeContents :: TreeMap
-                 , _treeObj      :: ObjPtr C'git_object }
+                 , _treeContents :: TreeMap }
 
 makeClassy ''Tree
 
@@ -34,7 +31,7 @@ instance Show Tree where
     Right y -> "Tree#" ++ show y
 
 newTreeBase :: Tree -> Base Tree
-newTreeBase t = newBase (t^.treeInfo.gitRepo) doWriteTree
+newTreeBase t = newBase (t^.treeInfo.gitRepo) (Left doWriteTree) Nothing
 
 -- | Create a new tree, starting it with the contents at the given path.
 --
@@ -43,7 +40,7 @@ newTreeBase t = newBase (t^.treeInfo.gitRepo) doWriteTree
 createTree :: Repository -> FilePath -> TreeOrBlob -> Tree
 createTree repo path item = updateTree path item (emptyTree repo)
 
-doWriteTree :: Tree -> IO Oid
+doWriteTree :: Tree -> IO COid
 doWriteTree = undefined
 {-
   alloca $ \ptr ->
@@ -56,9 +53,9 @@ doWriteTree = undefined
 -}
 
 emptyTree :: Repository -> Tree
-emptyTree repo = Tree { _treeInfo     = newBase repo doWriteTree
-                      , _treeContents = M.empty
-                      , _treeObj      = Nothing }
+emptyTree repo =
+  Tree { _treeInfo     = newBase repo (Left doWriteTree) Nothing
+       , _treeContents = M.empty }
 
 doUpdateTree :: [Text] -> TreeOrBlob -> Tree -> Tree
 doUpdateTree (x:xs) item t =

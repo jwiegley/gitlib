@@ -94,11 +94,13 @@ Library
     Data.Git.Common
     Data.Git.Errors
     Data.Git.Object
+    Data.Git.Oid
     Data.Git.Repository
     Data.Git.Tag
     Data.Git.Tree
   other-modules:
     Data.Git.Internal
+    Data.Git.Stringable
   c-sources:
     src/Bindings/Libgit2/Attr.hsc.helper.c
     src/Bindings/Libgit2/Blob.hsc.helper.c

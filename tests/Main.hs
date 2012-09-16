@@ -18,7 +18,7 @@ import           System.Exit
 import           System.Process(system)
 
 default (Text)
-
+
 main :: IO ()
 main = do
   putStrLn "Creating Git repository..."
@@ -36,11 +36,11 @@ main = do
   putStrLn "Accessing via higher-level types..."
 
   repo <- openRepository (fromText "smoke.git/.git")
-  writeBlob_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
+  update_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
 
   putStrLn "Looking up Blob..."
 
-  hash <- stringToOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+  hash <- stringToOid ("af5626b4a114abcb82d63db7c8082c3c4756e51b" :: Text)
   for_ hash $ \hash' -> do
     obj <- lookupObject repo hash'
     case obj of

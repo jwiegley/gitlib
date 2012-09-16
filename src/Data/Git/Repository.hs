@@ -6,6 +6,8 @@ module Data.Git.Repository
        , Ident
        , ObjPtr
 
+       , Updatable(..)
+
        , Repository
        , HasRepository(..)
 

@@ -5,8 +5,7 @@ module Data.Git.Blob
        ( Blob(..), HasBlob(..)
        , createBlob
        , getBlobContents
-       , writeBlob
-       , writeBlob_ )
+       , writeBlob )
        where
 
 import Bindings.Libgit2
@@ -21,8 +20,7 @@ import Prelude hiding (FilePath)
 default (Text)
 
 data Blob = Blob { _blobInfo     :: Base Blob
-                 , _blobContents :: B.ByteString
-                 , _blobObj      :: ObjPtr C'git_object }
+                 , _blobContents :: B.ByteString }
 
 makeClassy ''Blob
 
@@ -30,6 +28,9 @@ instance Show Blob where
   show x = case x^.blobInfo.gitId of
     Left _  -> "Blob"
     Right y -> "Blob#" ++ show y
+
+instance Updatable Blob where
+  update = writeBlob
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -38,21 +39,16 @@ instance Show Blob where
 createBlob :: Repository -> B.ByteString -> Blob
 createBlob repo text
   | text == B.empty = error "Cannot create an empty blob"
-  | otherwise = Blob { _blobInfo     = newBase repo doWriteBlob
-                     , _blobContents = text
-                     , _blobObj      = Nothing }
+  | otherwise = Blob { _blobInfo     = newBase repo (Left doWriteBlob) Nothing
+                     , _blobContents = text }
 
 lookupBlob :: Repository -> Oid -> IO (Maybe Blob)
 lookupBlob repo oid =
-  lookupObject' repo oid
-                (\x y z -> c'git_blob_lookup x y z)
-                (\x _ ->
-                  return Blob { _blobInfo     = newBase'
-                              , _blobContents = B.empty
-                              , _blobObj      = Just x })
-  where
-    newBase' = Base { _gitId   = Right oid
-                    , _gitRepo = repo }
+  lookupObject' repo oid c'git_blob_lookup c'git_blob_lookup_prefix
+                (\coid obj _ ->
+                  return Blob { _blobInfo     = newBase repo (Right coid)
+                                                             (Just obj)
+                              , _blobContents = B.empty })
 
 getBlobContents :: Blob -> IO (Blob, B.ByteString)
 getBlobContents b =
@@ -62,7 +58,7 @@ getBlobContents b =
       if contents /= B.empty
         then return (b, contents)
         else
-        case b^.blobObj of
+        case b^.blobInfo.gitObj of
           Just blobPtr ->
             withForeignPtr blobPtr $ \ptr -> do
               size <- c'git_blob_rawsize (castPtr ptr)
@@ -72,9 +68,8 @@ getBlobContents b =
               return (blobContents .~ bstr $ b, bstr)
 
           Nothing -> do
-            b' <- lookupBlob repo hash
+            b' <- lookupBlob repo (Oid hash)
             case b' of
-              -- Should this be returned back to the user?
               Just blobPtr' -> getBlobContents blobPtr'
               Nothing       -> return (b, B.empty)
 
@@ -89,15 +84,12 @@ writeBlob b = do hash <- doWriteBlob b
                  return $ blobInfo.gitId .~ Right hash $
                           blobContents   .~ B.empty    $ b
 
-writeBlob_ :: Blob -> IO ()
-writeBlob_ b = void (writeBlob b)
-
-doWriteBlob :: Blob -> IO Oid
+doWriteBlob :: Blob -> IO COid
 doWriteBlob b = do
   ptr <- mallocForeignPtr
   r   <- withForeignPtr repo (createFromBuffer ptr)
   when (r < 0) $ throwIO BlobCreateFailed
-  return ptr
+  return (COid ptr)
 
   where
     repo = fromMaybe (error "Repository invalid") $

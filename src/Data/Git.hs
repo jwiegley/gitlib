@@ -14,7 +14,7 @@ module Data.Git (
     -- module Data.Git.Signature,
     module Data.Git.Blob,
     module Data.Git.Errors,
-    -- module Data.Git.Oid,
+    module Data.Git.Oid,
     module Data.Git.Tree,
     -- module Data.Git.Odb,
     module Data.Git.Common,
@@ -36,7 +36,7 @@ import Data.Git.Repository
 -- import Data.Git.Signature
 import Data.Git.Blob
 import Data.Git.Errors
--- import Data.Git.Oid
+import Data.Git.Oid
 import Data.Git.Tree
 -- import Data.Git.Odb
 import Data.Git.Common
