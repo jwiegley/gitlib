@@ -60,9 +60,10 @@ default (Text)
 type ObjPtr a = Maybe (ForeignPtr a)
 
 class Updatable a where
-  update :: a -> IO a
+  update  :: a -> IO a
   update_ :: a -> IO ()
-  update_ x = void (update x)
+  update_ = void . update
+
   objectId :: a -> IO Oid
 
 data Repository = Repository { _repoPath :: FilePath

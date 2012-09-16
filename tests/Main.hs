@@ -2,19 +2,14 @@
 
 module Main where
 
-import           Control.Monad
 import           Data.Foldable
 import           Data.Git
+import           Data.Monoid
 import           Data.Text as T hiding (map)
 import           Data.Text.IO
 import qualified Data.Text.Encoding as E
 import           Filesystem.Path.CurrentOS
-import           Foreign.C.String
-import           Foreign.Marshal.Alloc
-import           Foreign.Storable
 import           Prelude hiding (FilePath, putStr, putStrLn)
-import           System.Exit
-import           System.Process(system)
 
 default (Text)
 
@@ -23,6 +18,11 @@ main = do
   putStrLn "Accessing via higher-level types..."
   repo <- createRepository (fromText "smoke.git") True
   update_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
+
+  let bl = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
+      tr = createTree repo "hello/world.txt" (BlobEntry bl False)
+  oid <- objectId tr
+  putStrLn $ "Wrote tree: " <> T.pack (show oid)
 
   putStrLn "Looking up Blob by its full SHA..."
   catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"

@@ -30,7 +30,10 @@ type Ident a = Either (a -> IO COid) COid
 
 data Oid = Oid COid
          | PartialOid COid Int
-         deriving Show
+
+instance Show Oid where
+  show (Oid x) = show x
+  show (PartialOid x l) = take l $ show x
 
 compareCOid :: COid -> COid -> Ordering
 (COid x) `compareCOid` (COid y) =

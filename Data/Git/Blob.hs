@@ -31,7 +31,9 @@ instance Show Blob where
 
 instance Updatable Blob where
   update = writeBlob
-  objectId = undefined
+  objectId b = case b^.blobInfo.gitId of
+    Left f  -> Oid <$> (f b)
+    Right x -> return $ Oid x
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --

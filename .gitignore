@@ -3,4 +3,4 @@ dist/
 *.o
 *~
 *.swp
-
+/smoke.git/
