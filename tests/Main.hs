@@ -38,9 +38,16 @@ main = do
   repo <- openRepository (fromText "smoke.git/.git")
   update_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
 
-  putStrLn "Looking up Blob..."
+  putStrLn "Looking up Blob by its full SHA..."
+  catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"
 
-  hash <- stringToOid ("af5626b4a114abcb82d63db7c8082c3c4756e51b" :: Text)
+  putStrLn "Looking up Blob by its short SHA..."
+  catBlob repo "af5626b"
+
+catBlob :: Repository -> Text -> IO ()
+catBlob repo sha = do
+  hash <- stringToOid sha
+  print hash
   for_ hash $ \hash' -> do
     obj <- lookupObject repo hash'
     case obj of
@@ -49,7 +56,7 @@ main = do
         (_, contents) <- getBlobContents b
         putStr (E.decodeUtf8 contents)
 
-      Just _         -> putStrLn "Found something else..."
-      Nothing        -> putStrLn "Didn't find anything :("
+      Just _  -> error "Found something else..."
+      Nothing -> error "Didn't find anything :("
 
 -- Main.hs ends here

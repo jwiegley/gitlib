@@ -3,11 +3,11 @@
 module Data.Git.Oid
        ( Oid(..)
        , COid(..)
+       , Ident
        , compareCOid
        , compareCOidLen
        , equalCOid
-       , stringToOid
-       , Ident )
+       , stringToOid )
        where
 
 import Bindings.Libgit2.Oid
@@ -75,7 +75,9 @@ stringToOid str
                else c'git_oid_fromstrn ptr cstr (fromIntegral len)
           if r < 0
             then return Nothing
-            else return (Just (Oid (COid oid)))
+            else return . Just $ if len == 40
+                                 then Oid (COid oid)
+                                 else PartialOid (COid oid) len
 
   where len = lengthStr str
 

@@ -40,19 +40,21 @@ revParse (Specifier r)   = undefined
 lookupObject :: Repository -> Oid -> IO (Maybe Object)
 lookupObject repo oid =
   lookupObject' repo oid
-                (\x y z    -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
-                (\x y z l  -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
-                (\coid x y -> c'git_object_type y >>= createObject repo coid x)
+    (\x y z    -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
+    (\x y z l  -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
+    (\coid x y -> c'git_object_type y >>= createObject repo coid x)
 
 createObject :: Repository -> COid -> ForeignPtr C'git_object -> C'git_otype
              -> IO Object
 createObject repo coid obj typ
   | typ == c'GIT_OBJ_BLOB =
-    return $ BlobObj Blob { _blobInfo     = newBase repo (Right coid) (Just obj)
+    return $ BlobObj Blob { _blobInfo =
+                               newBase repo (Right coid) (Just obj)
                           , _blobContents = B.empty }
 
   | typ == c'GIT_OBJ_TREE =
-    return $ TreeObj Tree { _treeInfo     = newBase repo (Right coid) (Just obj)
+    return $ TreeObj Tree { _treeInfo =
+                               newBase repo (Right coid) (Just obj)
                           , _treeContents = M.empty }
 
   | otherwise = return undefined

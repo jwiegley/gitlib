@@ -135,7 +135,7 @@ lookupObject' repo oid lookupFn lookupPrefixFn createFn = alloca $ \ptr -> do
            PartialOid (COid oid') len ->
              withForeignPtr oid' $ \oidPtr ->
                lookupPrefixFn (castPtr ptr) repoPtr oidPtr (fromIntegral len)
-  if (r < 0)
+  if r < 0
     then return Nothing
     else do
       ptr'     <- peek ptr
