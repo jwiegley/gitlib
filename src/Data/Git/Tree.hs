@@ -21,7 +21,8 @@ type TreeOrBlob = Either Blob Tree
 type TreeMap    = Map Text TreeOrBlob
 
 data Tree = Tree { _treeInfo     :: Base Tree
-                 , _treeContents :: TreeMap }
+                 , _treeContents :: TreeMap
+                 , _treeBuilder  :: ObjPtr C'git_treebuilder }
 
 makeClassy ''Tree
 
@@ -29,6 +30,9 @@ instance Show Tree where
   show x = case x^.treeInfo.gitId of
     Left _  -> "Tree"
     Right y -> "Tree#" ++ show y
+
+instance Updatable Tree where
+  update = writeTree
 
 newTreeBase :: Tree -> Base Tree
 newTreeBase t = newBase (t^.treeInfo.gitRepo) (Left doWriteTree) Nothing
@@ -40,11 +44,36 @@ newTreeBase t = newBase (t^.treeInfo.gitRepo) (Left doWriteTree) Nothing
 createTree :: Repository -> FilePath -> TreeOrBlob -> Tree
 createTree repo path item = updateTree path item (emptyTree repo)
 
+lookupTree :: Repository -> Oid -> IO (Maybe Tree)
+lookupTree repo oid =
+  lookupObject' repo oid c'git_tree_lookup c'git_tree_lookup_prefix
+    (\coid obj _ ->
+      return Tree { _treeInfo =
+                       newBase repo (Right coid) (Just obj)
+                  , _treeContents = M.empty
+                  , _treeBuilder  = Nothing })
+
+-- | Write out a tree to its repository.  If it has already been written,
+--   nothing will happen.
+writeTree :: Tree -> IO Tree
+writeTree t@(Tree { _treeInfo = Base { _gitId = Right _ } }) = return t
+writeTree t = do hash <- doWriteTree t
+                 return $ treeInfo.gitId .~ Right hash $ t
+
 doWriteTree :: Tree -> IO COid
-doWriteTree = undefined
+doWriteTree t = do
+  ptr <- mallocForeignPtr
+  r   <- withForeignPtr repo (createFromTreeMap ptr)
+  -- when (r < 0) $ throwIO TreeCreateFailed
+  return (COid ptr)
+
+  where
+    repo = fromMaybe (error "Repository invalid") $
+           t^.treeInfo.gitRepo.repoObj
+
+    createFromTreeMap ptr repoPtr = undefined
 {-
-  alloca $ \ptr ->
-  tb <- c'git_treebuilder_create ptr str
+        tb <- c'git_treebuilder_create ptr str
         when (r < 0) $ throwIO (RepositoryNotExist p)
         ptr' <- peek ptr
         let finalizer = newForeignPtr p'git_repository_free ptr'
@@ -55,7 +84,8 @@ doWriteTree = undefined
 emptyTree :: Repository -> Tree
 emptyTree repo =
   Tree { _treeInfo     = newBase repo (Left doWriteTree) Nothing
-       , _treeContents = M.empty }
+       , _treeContents = M.empty
+       , _treeBuilder  = Nothing }
 
 doUpdateTree :: [Text] -> TreeOrBlob -> Tree -> Tree
 doUpdateTree (x:xs) item t =

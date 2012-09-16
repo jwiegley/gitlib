@@ -11,6 +11,7 @@ import Prelude hiding (FilePath)
 data GitException = RepositoryNotExist String
                   | RepositoryInvalid
                   | BlobCreateFailed
+                  | TreeCreateFailed
                   | ObjectLookupFailed
                   | ObjectIdTooLong
                   | OidCopyFailed

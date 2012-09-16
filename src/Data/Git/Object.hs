@@ -55,7 +55,8 @@ createObject repo coid obj typ
   | typ == c'GIT_OBJ_TREE =
     return $ TreeObj Tree { _treeInfo =
                                newBase repo (Right coid) (Just obj)
-                          , _treeContents = M.empty }
+                          , _treeContents = M.empty
+                          , _treeBuilder  = Nothing }
 
   | otherwise = return undefined
 
