@@ -3,6 +3,7 @@
 
 module Data.Git.Blob
        ( Blob(..), HasBlob(..)
+       , newBlobBase
        , createBlob
        , getBlobContents
        , writeBlob )
@@ -24,17 +25,26 @@ data Blob = Blob { _blobInfo     :: Base Blob
 
 makeClassy ''Blob
 
+instance Eq Blob where
+  x == y = case (x^.blobInfo.gitId, y^.blobInfo.gitId) of
+             (Stored x2, Stored y2) -> x2 == y2
+             _ -> undefined
+
 instance Show Blob where
   show x = case x^.blobInfo.gitId of
-    Left _  -> "Blob"
-    Right y -> "Blob#" ++ show y
+    Pending _ -> "Blob"
+    Stored y  -> "Blob#" ++ show y
 
 instance Updatable Blob where
   update = writeBlob
   objectId b = case b^.blobInfo.gitId of
-    Left f  -> Oid <$> (f b)
-    Right x -> return $ Oid x
+    Pending f -> Oid <$> (f b)
+    Stored x  -> return $ Oid x
 
+newBlobBase :: Blob -> Base Blob
+newBlobBase b =
+  newBase (b^.blobInfo.gitRepo) (Pending doWriteBlob) Nothing
+
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
@@ -42,22 +52,23 @@ instance Updatable Blob where
 createBlob :: Repository -> B.ByteString -> Blob
 createBlob repo text
   | text == B.empty = error "Cannot create an empty blob"
-  | otherwise = Blob { _blobInfo     = newBase repo (Left doWriteBlob) Nothing
+  | otherwise = Blob { _blobInfo =
+                          newBase repo (Pending doWriteBlob) Nothing
                      , _blobContents = text }
 
 lookupBlob :: Repository -> Oid -> IO (Maybe Blob)
 lookupBlob repo oid =
   lookupObject' repo oid c'git_blob_lookup c'git_blob_lookup_prefix
                 (\coid obj _ ->
-                  return Blob { _blobInfo     = newBase repo (Right coid)
-                                                             (Just obj)
+                  return Blob { _blobInfo =
+                                   newBase repo (Stored coid) (Just obj)
                               , _blobContents = B.empty })
 
 getBlobContents :: Blob -> IO (Blob, B.ByteString)
 getBlobContents b =
   case b^.blobInfo.gitId of
-    Left _     -> return $ (b, contents)
-    Right hash ->
+    Pending _   -> return $ (b, contents)
+    Stored hash ->
       if contents /= B.empty
         then return (b, contents)
         else
@@ -82,9 +93,9 @@ getBlobContents b =
 -- | Write out a blob to its repository.  If it has already been written,
 --   nothing will happen.
 writeBlob :: Blob -> IO Blob
-writeBlob b@(Blob { _blobInfo = Base { _gitId = Right _ } }) = return b
+writeBlob b@(Blob { _blobInfo = Base { _gitId = Stored _ } }) = return b
 writeBlob b = do hash <- doWriteBlob b
-                 return $ blobInfo.gitId .~ Right hash $
+                 return $ blobInfo.gitId .~ Stored hash $
                           blobContents   .~ B.empty    $ b
 
 doWriteBlob :: Blob -> IO COid

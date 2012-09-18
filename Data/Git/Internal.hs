@@ -1,3 +1,4 @@
+{-# OPTIONS_HADDOCK hide #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -28,7 +29,7 @@ module Data.Git.Internal
 import           Bindings.Libgit2 as X
 import           Control.Applicative as X
 import           Control.Exception as X
-import           Control.Lens as X hiding((<.>))
+import           Control.Lens as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
                                             forM, forM_, msum)
 import           Data.Either as X
@@ -41,8 +42,8 @@ import           Data.Stringable as X
 import           Data.Text as T hiding (map)
 import           Data.Traversable as X
 import           Filesystem as X
-import qualified Filesystem.Path.CurrentOS as F
-import           Filesystem.Path.CurrentOS as X hiding (empty, concat,
+import qualified Filesystem.Path.CurrentOS as F hiding((<.>))
+import           Filesystem.Path.CurrentOS as X hiding ((<.>), empty, concat,
                                                         toText, fromText)
 import           Foreign.C.String as X
 import           Foreign.C.Types as X
@@ -82,8 +83,8 @@ makeLenses ''Base
 
 instance Show (Base a) where
   show x = case x^.gitId of
-    Left _  -> "Base"
-    Right y -> "Base#" ++ show y
+    Pending _ -> "Base"
+    Stored y  -> "Base#" ++ show y
 
 newBase :: Repository -> Ident a -> ObjPtr C'git_object -> Base a
 newBase repo oid obj = Base { _gitId   = oid
