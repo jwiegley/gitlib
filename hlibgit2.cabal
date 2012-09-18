@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.6.0
+Version:             0.6.1
 Synopsis:            Low-level bindings to libgit2.
 Description:         Bindings to libgit2 v0.16.0-471-g5b9fac3
 License-file:        LICENSE
@@ -17,11 +17,6 @@ Extra-source-files:
 Source-repository head
   type: git
   location: git://github.com/jwiegley/hlibgit2.git
-
-Source-repository this
-  type: git
-  location: git://github.com/jwiegley/hlibgit2.git
-  tag: hlibgit2-0.1-17-gd7b22d6
 
 Test-suite smoke
   default-language: Haskell98
