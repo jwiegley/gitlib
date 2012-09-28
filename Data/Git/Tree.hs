@@ -49,7 +49,7 @@ instance Show Tree where
 instance Updatable Tree where
   update     = writeTree
   objectId t = case t^.treeInfo.gitId of
-    Pending f -> Oid <$> (f t)
+    Pending f -> Oid <$> f t
     Stored x  -> return $ Oid x
 
 newTreeBase :: Tree -> Base Tree
@@ -191,6 +191,12 @@ doUpdateTree xs item t =
 
 updateTree :: FilePath -> TreeEntry -> Tree -> Tree
 updateTree = doUpdateTree . splitPath
+
+removeFromTree :: FilePath -> Tree -> Tree
+removeFromTree p tr =
+  case modifyTree p (const (Right Nothing)) False tr of
+    Right tr' -> tr'
+    _ -> undefined
 
 splitPath :: FilePath -> [Text]
 splitPath path = splitOn "/" text
