@@ -25,7 +25,7 @@ makeClassy ''Commit
 
 instance Show Commit where
   show x = case x^.commitInfo.gitId of
-    Left _  -> "Commit"
-    Right y -> "Commit#" ++ show y
+    Pending _ -> "Commit"
+    Stored y  -> "Commit#" ++ show y
 
 -- Commit.hs

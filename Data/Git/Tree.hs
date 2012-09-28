@@ -11,8 +11,9 @@ import           Control.Lens
 import           Data.Git.Blob
 import           Data.Git.Common
 import           Data.Git.Errors
-import           Data.Git.Internal hiding ((<.>))
-import qualified Data.Map as M hiding (map)
+import           Data.Git.Internal
+import           Data.List as L
+import qualified Data.Map as M
 import           Data.Text as T hiding (map)
 import           Filesystem.Path.CurrentOS as F hiding ((<.>))
 import           Prelude hiding (FilePath, sequence)
@@ -23,10 +24,10 @@ data TreeEntry = BlobEntry { blobEntry :: Blob
                            , blobEntryIsExe :: Bool }
                | TreeEntry { treeEntry :: Tree }
 
-instance Eq TreeEntry where
-  (BlobEntry x x2) == (BlobEntry y y2) = x == y && x2 == y2
-  (TreeEntry x) == (TreeEntry y) = x == y
-  _ == _ = False
+-- instance Eq TreeEntry where
+--   (BlobEntry x x2) == (BlobEntry y y2) = x == y && x2 == y2
+--   (TreeEntry x) == (TreeEntry y) = x == y
+--   _ == _ = False
 
 type TreeMap = M.Map Text TreeEntry
 
@@ -35,10 +36,10 @@ data Tree = Tree { _treeInfo     :: Base Tree
 
 makeClassy ''Tree
 
-instance Eq Tree where
-  x == y = case (x^.treeInfo.gitId, y^.treeInfo.gitId) of
-             (Stored x2, Stored y2) -> x2 == y2
-             _ -> undefined
+-- instance Eq Tree where
+--   x == y = case (x^.treeInfo.gitId, y^.treeInfo.gitId) of
+--              (Stored x2, Stored y2) -> x2 == y2
+--              _ -> undefined
 
 instance Show Tree where
   show x = case x^.treeInfo.gitId of
@@ -56,12 +57,15 @@ newTreeBase t =
   newBase (t^.treeInfo.gitRepo)
           (Pending (doWriteTree >=> return . snd)) Nothing
 
--- | Create a new tree, starting it with the contents at the given path.
+-- | Create a new, empty tree.
 --
---   Note that since empty trees cannot exist in Git, no means is provided for
---   creating one.
-createTree :: Repository -> FilePath -> TreeEntry -> Tree
-createTree repo path item = updateTree path item (emptyTree repo)
+--   Since empty trees cannot exist in Git, attempting to write out an empty
+--   tree is a no-op.
+createTree :: Repository -> Tree
+createTree repo =
+  Tree { _treeInfo     =
+            newBase repo (Pending (doWriteTree >=> return . snd)) Nothing
+       , _treeContents = M.empty }
 
 lookupTree :: Repository -> Oid -> IO (Maybe Tree)
 lookupTree repo oid =
@@ -122,57 +126,67 @@ doWriteTree t = alloca $ \ptr ->
 
       return obj'
 
-emptyTree :: Repository -> Tree
-emptyTree repo =
-  Tree { _treeInfo     =
-            newBase repo (Pending (doWriteTree >=> return . snd)) Nothing
-       , _treeContents = M.empty }
+doModifyTree
+  :: [Text] -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
+  -> Tree -> Either a Tree
+doModifyTree [] _ _ _     = throw TreeLookupFailed
+doModifyTree (name:names) f createIfNotExist t =
+  -- Lookup the current name in this tree.  If it doesn't exist, and there are
+  -- more names in the path and 'createIfNotExist' is True, create a new Tree
+  -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
+  -- {})@, and if not we'll have Nothing.
+  let y = case M.lookup name (t^.treeContents) of
+            Nothing ->
+              if createIfNotExist && not (L.null names)
+              then Just $ TreeEntry (createTree (t^.treeInfo.gitRepo))
+              else Nothing
+            j -> j
+  in if L.null names
+     then do
+       -- If there are no further names in the path, call the transformer
+       -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there
+       -- was a previous entry at this path.  It should return a 'Left' value
+       -- to propagate out a user-defined error, or a @Maybe TreeEntry@ to
+       -- indicate whether the entry at this path should be deleted or
+       -- replaced with something new.
+       --
+       -- NOTE: There is no provision for leaving the entry unchanged!  It is
+       -- assumed to always be changed, as we have no reliable method of
+       -- testing object equality that is not O(n).
+       z <- f y
+       return $
+         treeInfo     .~ newTreeBase t $
+         treeContents .~
+           (case z of
+              Nothing -> M.delete name (t^.treeContents)
+              Just z' -> M.insert name z' (t^.treeContents)) $ t
+     else
+       -- If there are further names in the path, descend them now.  If
+       -- 'createIfNotExist' was False and there is no 'Tree' under the
+       -- current name, or if we encountered a 'Blob' when a 'Tree' was
+       -- required, throw an exception to avoid colliding with user-defined
+       -- 'Left' values.
+       case y of
+         Nothing             -> throw TreeLookupFailed
+         Just (BlobEntry {}) -> throw TreeCannotTraverseBlob
+         Just (TreeEntry t') -> do
+           st <- doModifyTree names f createIfNotExist t'
+           return $
+             treeInfo     .~ newTreeBase t $
+             treeContents .~
+               (if M.null (st^.treeContents)
+                then M.delete name (t^.treeContents)
+                else M.insert name (TreeEntry st) (t^.treeContents)) $ t
 
-doModifyPathInTree :: [Text] -> (TreeEntry -> Maybe TreeEntry) -> Bool -> Tree
-                 -> Maybe TreeEntry
-doModifyPathInTree [] _ _ _     = Nothing
-doModifyPathInTree (x:xs) f createIfNotExist t = do
-  y <- case M.lookup x (t^.treeContents) of
-         Nothing ->
-           if createIfNotExist && not (Prelude.null xs)
-           then Just $ TreeEntry (emptyTree (t^.treeInfo.gitRepo))
-           else Nothing
-         j -> j
-
-  if Prelude.null xs
-    then do
-      z <- f y
-      if z == y
-        then return z
-        else
-          case z of
-            BlobEntry bl isExe ->
-              return $ BlobEntry (blobInfo .~ newBlobBase bl $ bl) isExe
-            TreeEntry tr ->
-              return $ TreeEntry (treeInfo .~ newTreeBase tr $ tr)
-
-    else
-      case y of
-        BlobEntry _ _ -> Nothing
-        TreeEntry t'  -> do
-          z <- doModifyPathInTree xs f createIfNotExist t'
-          if z == y
-            then return z
-            else
-              case z of
-                BlobEntry _ _ -> Nothing
-                TreeEntry tr  ->
-                  return $ TreeEntry (treeInfo     .~ newTreeBase tr $
-                                      treeContents .~ M.insert x z (tr^.treeContents) $ tr)
-
-modifyPathInTree :: FilePath -> (TreeEntry -> Maybe TreeEntry) -> Bool -> Tree
-                 -> Maybe TreeEntry
-modifyPathInTree = doModifyPathInTree . splitPath
+modifyTree
+  :: FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
+  -> Tree -> Either a Tree
+modifyTree = doModifyTree . splitPath
 
 doUpdateTree :: [Text] -> TreeEntry -> Tree -> Tree
 doUpdateTree xs item t =
-  case doModifyPathInTree xs (const (Just item)) True t of
-    Just (TreeEntry tr) -> tr
+  case doModifyTree xs (const (Right (Just item))) True t of
+    Right tr -> tr
     _ -> undefined
 
 updateTree :: FilePath -> TreeEntry -> Tree -> Tree

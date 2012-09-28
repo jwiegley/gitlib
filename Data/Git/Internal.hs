@@ -32,7 +32,7 @@ import           Control.Exception as X
 import           Control.Lens as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
                                             forM, forM_, msum)
-import           Data.Either as X
+import           Data.Either as X hiding (lefts, rights)
 import           Data.Foldable as X
 import           Data.Git.Errors as X
 import           Data.Git.Oid as X
@@ -41,7 +41,7 @@ import           Data.Monoid as X
 import           Data.Stringable as X
 import           Data.Text as T hiding (map)
 import           Data.Traversable as X
-import           Filesystem as X
+import           Filesystem as X hiding (createTree)
 import qualified Filesystem.Path.CurrentOS as F hiding((<.>))
 import           Filesystem.Path.CurrentOS as X hiding ((<.>), empty, concat,
                                                         toText, fromText)

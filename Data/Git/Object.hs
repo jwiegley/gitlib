@@ -49,12 +49,12 @@ createObject :: Repository -> COid -> ForeignPtr C'git_object -> C'git_otype
 createObject repo coid obj typ
   | typ == c'GIT_OBJ_BLOB =
     return $ BlobObj Blob { _blobInfo =
-                               newBase repo (Right coid) (Just obj)
+                               newBase repo (Stored coid) (Just obj)
                           , _blobContents = B.empty }
 
   | typ == c'GIT_OBJ_TREE =
     return $ TreeObj Tree { _treeInfo =
-                               newBase repo (Right coid) (Just obj)
+                               newBase repo (Stored coid) (Just obj)
                           , _treeContents = M.empty }
 
   | otherwise = return undefined

@@ -25,10 +25,10 @@ data Blob = Blob { _blobInfo     :: Base Blob
 
 makeClassy ''Blob
 
-instance Eq Blob where
-  x == y = case (x^.blobInfo.gitId, y^.blobInfo.gitId) of
-             (Stored x2, Stored y2) -> x2 == y2
-             _ -> undefined
+-- instance Eq Blob where
+--   x == y = case (x^.blobInfo.gitId, y^.blobInfo.gitId) of
+--              (Stored x2, Stored y2) -> x2 == y2
+--              _ -> undefined
 
 instance Show Blob where
   show x = case x^.blobInfo.gitId of
