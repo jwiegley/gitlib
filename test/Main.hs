@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
+{-# OPTIONS_GHC -fno-warn-wrong-do-bind #-}
 
 module Main where
 
+import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 import           Data.Git
@@ -40,7 +43,7 @@ catBlob repo sha = do
       Just _  -> error "Found something else..."
       Nothing -> error "Didn't find anything :("
 
-withRepository :: Text -> (Repository -> IO ()) -> IO ()
+withRepository :: Text -> (Repository -> Assertion) -> Assertion
 withRepository n f = do
   let p = fromText n
   exists <- isDirectory p
@@ -51,43 +54,49 @@ withRepository n f = do
 
   removeTree p
 
+checkOid :: Updatable a => a -> Text -> Assertion
+checkOid obj ident = void $
+  (@?=) <$> (T.pack . show <$> objectId obj)
+        <*> pure ident
+
 tests :: Test
 tests = test [
+
   "singleBlob" ~:
 
   withRepository "singleBlob.git" $ \repo -> do
     update_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
 
-    content <- catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"
-    content @?= Just "Hello, world!\n"
-
-    content' <- catBlob repo "af5626b"
-    content' @?= Just "Hello, world!\n"
-
+    (@?=) <$> catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+          <*> pure (Just "Hello, world!\n")
+    (@?=) <$> catBlob repo "af5626b"
+          <*> pure (Just "Hello, world!\n")
+    return ()
+
   , "singleTree" ~:
 
   withRepository "singleTree.git" $ \repo -> do
-    let bl = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-        nt = createTree repo
-        tr = updateTree "hello/world.txt" (BlobEntry bl False) nt
+    let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
+        tr    = updateTree "hello/world.txt"
+                           (BlobEntry hello False) (createTree repo)
 
-    oid <- objectId tr
-    T.pack (show oid) @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
+    checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
   , "twoTrees" ~:
 
   withRepository "twoTrees.git" $ \repo -> do
-    let hello   = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-        goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
-        tr      = updateTree "hello/world.txt"
-                             (BlobEntry hello False) (createTree repo)
-    oid <- objectId tr
-    T.pack (show oid) @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
+        tr    = updateTree "hello/world.txt"
+                           (BlobEntry hello False) (createTree repo)
 
-    oid' <- objectId $ updateTree "goodbye/files/world.txt"
-                                 (BlobEntry goodbye False) tr
-    T.pack (show oid') @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
+    let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
+        tr'     = updateTree "goodbye/files/world.txt"
+                             (BlobEntry goodbye False) tr
+
+    checkOid tr' "98c3f387f63c08e1ea1019121d623366ff04de7a"
+
   ]
 
 -- Main.hs ends here
