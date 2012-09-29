@@ -41,12 +41,11 @@ import           Data.Git.Oid as X
 import           Data.List as X hiding (foldl, foldl', foldl1, foldr1, foldl1',
                                         foldr, concat, maximum, minimum,
                                         product, sum, all, and, any, concatMap,
-                                        elem, length, notElem, or, find,
-                                        mapAccumL, mapAccumR, maximumBy,
-                                        minimumBy)
+                                        elem, notElem, or, find, mapAccumL,
+                                        mapAccumR, maximumBy, minimumBy)
 import           Data.Maybe as X
 import           Data.Monoid as X
-import           Data.Stringable as X
+import           Data.Stringable as X hiding (length)
 import           Data.Text as X (Text)
 import           Data.Tuple as X
 import           Data.Traversable as X
@@ -61,11 +60,9 @@ import           Foreign.Marshal.Utils as X
 import           Foreign.Ptr as X
 import           Foreign.StablePtr as X
 import           Foreign.Storable as X
-import           Prelude as X (undefined, error, otherwise,
-                               IO,
-                               Show, show,
-                               (<), (==), (/=),
-                               fromIntegral, toInteger)
+import           Prelude as X (undefined, error, otherwise, IO, Show, show,
+                               Eq, Ord, (<), (==), (/=), round,
+                               Integer, fromIntegral, fromInteger, toInteger)
 import           Unsafe.Coerce as X
 
 default (Text)
@@ -95,7 +92,7 @@ class Updatable a where
 
   loadObject :: Updatable b => ObjRef a -> b -> IO (Maybe a)
   loadObject (IdRef coid) y = lookupFunction (objectRepo y) (Oid coid)
-  loadObject (ObjRef x) _ = return (Just x)
+  loadObject (ObjRef x) _   = return (Just x)
 
   getObject :: ObjRef a -> Maybe a
   getObject (IdRef _)  = Nothing

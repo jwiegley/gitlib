@@ -1,20 +1,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-wrong-do-bind #-}
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 module Main where
 
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 import           Data.Git
 import           Data.Maybe
-import           Data.Monoid
 import           Data.Text as T hiding (map)
 import qualified Data.Text.Encoding as E
+import           Data.Time
 import           Data.Traversable
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS
+import qualified Prelude
 import           Prelude hiding (FilePath, putStr, putStrLn)
 import           System.Exit
 import           Test.HUnit
@@ -54,10 +55,8 @@ withRepository n f = do
 
   removeTree p
 
-checkOid :: Updatable a => a -> Text -> Assertion
-checkOid obj ident = void $
-  (@?=) <$> (T.pack . show <$> objectId obj)
-        <*> pure ident
+oid :: Updatable a => a -> IO Text
+oid = objectId >=> return . T.pack . show
 
 tests :: Test
 tests = test [
@@ -67,49 +66,88 @@ tests = test [
   withRepository "singleBlob.git" $ \repo -> do
     update_ $ createBlob repo (E.encodeUtf8 "Hello, world!\n")
 
-    (@?=) <$> catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"
-          <*> pure (Just "Hello, world!\n")
-    (@?=) <$> catBlob repo "af5626b"
-          <*> pure (Just "Hello, world!\n")
+    x <- catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+    (@?=) x (Just "Hello, world!\n")
+
+    x <- catBlob repo "af5626b"
+    (@?=) x (Just "Hello, world!\n")
+
     return ()
 
   , "singleTree" ~:
 
   withRepository "singleTree.git" $ \repo -> do
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-    tr <- updateTree "hello/world.txt" (blobRef hello)
-                    (createTree repo)
-    checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    tr <- updateTree "hello/world.txt" (blobRef hello) (createTree repo)
+    x  <- oid tr
+    (@?=) x "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
+    return()
 
   , "twoTrees" ~:
 
   withRepository "twoTrees.git" $ \repo -> do
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-    tr <- updateTree "hello/world.txt" (blobRef hello)
-                    (createTree repo)
-    checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    tr <- updateTree "hello/world.txt" (blobRef hello) (createTree repo)
+    x  <- oid tr
+    (@?=) x "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
     let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
-    tr' <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
-    checkOid tr' "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
+    x  <- oid tr
+    (@?=) x "7757b6029419d8d2f80c688b8403dfbb7e634003"
+
+    return()
 
   , "deleteTree" ~:
 
   withRepository "deleteTree.git" $ \repo -> do
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-    tr <- updateTree "hello/world.txt" (blobRef hello)
-                    (createTree repo)
-    checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    tr <- updateTree "hello/world.txt" (blobRef hello) (createTree repo)
+    x  <- oid tr
+    (@?=) x "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
     let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
-    tr' <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
-    checkOid tr' "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
+    x  <- oid tr
+    (@?=) x "7757b6029419d8d2f80c688b8403dfbb7e634003"
 
     -- Confirm that deleting world.txt also deletes the now-empty subtree
     -- goodbye/files, which also deletes the then-empty subtree goodbye,
     -- returning us back the original tree.
-    tr'' <- removeFromTree "goodbye/files/world.txt" tr'
-    checkOid tr'' "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    tr <- removeFromTree "goodbye/files/world.txt" tr
+    x  <- oid tr
+    (@?=) x "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
+    return()
+
+  , "createCommit" ~:
+
+  withRepository "createCommit.git" $ \repo -> do
+    let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
+    tr <- updateTree "hello/world.txt" (blobRef hello)
+                    (createTree repo)
+
+    let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
+    tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
+    tr <- removeFromTree "goodbye/files/world.txt" tr
+
+    -- The Oid has been cleared in tr, so this tests that it gets written as
+    -- needed.
+    now <- getCurrentTime
+    let sig = Signature { _signatureName  = "John Wiegley"
+                        , _signatureEmail = "johnw@newartisans.com"
+                        , _signatureWhen  = now }
+    c <- update
+         $ commitTree      .~ ObjRef tr
+         $ commitAuthor    .~ sig
+         $ commitCommitter .~ sig
+         $ commitLog       .~ "Sample log message."
+         $ createCommit repo
+    x <- oid c
+    (@?=) x "05831d8210899a4e25a03e52464f45b636bb0a2b"
+
+    return()
 
   ]
 

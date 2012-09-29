@@ -44,8 +44,7 @@ data ObjRef a = IdRef COid
               | ObjRef a
 
 wrapOidPtr :: Ptr C'git_oid -> IO (ObjRef a)
-wrapOidPtr oid = do ptr <- newForeignPtr_ oid
-                    return $ IdRef (COid ptr)
+wrapOidPtr = newForeignPtr_ >=> return . IdRef . COid
 
 -- | An 'Ident' abstracts the fact that some objects won't have an identifier
 --   until they are written to disk -- even if sufficient information exists

@@ -5,22 +5,28 @@
 module Data.Git.Commit where
 
 import           Bindings.Libgit2
-import           Control.Lens
 import qualified Data.ByteString as BS
+import           Data.ByteString.Unsafe
 import           Data.Git.Common
 import           Data.Git.Internal
 import           Data.Git.Tree
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as E
 import qualified Data.Text.ICU.Convert as U
+import           Foreign.Marshal.Array
 import qualified Prelude
 
 default (Text)
 
-data Commit = Commit { _commitInfo    :: Base Commit
-                     , _commitWho     :: WhoWhen
-                     , _commitLog     :: Text
-                     , _commitTree    :: Tree
-                     , _commitParents :: [ObjRef Commit]
-                     , _commitObj     :: ObjPtr C'git_commit }
+data Commit = Commit { _commitInfo      :: Base Commit
+                     , _commitAuthor    :: Signature
+                     , _commitCommitter :: Signature
+                     , _commitLog       :: Text
+                     , _commitEncoding  :: Prelude.String
+                     , _commitTree      :: ObjRef Tree
+                     , _commitParents   :: [ObjRef Commit]
+                     -- , _commitObj       :: ObjPtr C'git_commit
+                     }
 
 makeClassy ''Commit
 
@@ -33,14 +39,14 @@ instance Updatable Commit where
   getId x        = x^.commitInfo.gitId
   objectRepo x   = x^.commitInfo.gitRepo
   objectPtr x    = x^.commitInfo.gitObj
-  update         = writeCommit
+  update         = writeCommit Nothing
   lookupFunction = lookupCommit
 
 
 newCommitBase :: Commit -> Base Commit
 newCommitBase t =
   newBase (t^.commitInfo.gitRepo)
-          (Pending (doWriteCommit >=> return . snd)) Nothing
+          (Pending (doWriteCommit Nothing >=> return . snd)) Nothing
 
 -- | Create a new, empty commit.
 --
@@ -49,7 +55,14 @@ newCommitBase t =
 createCommit :: Repository -> Commit
 createCommit repo =
   Commit { _commitInfo     =
-            newBase repo (Pending (doWriteCommit >=> return . snd)) Nothing }
+            newBase repo (Pending (doWriteCommit Nothing >=> return . snd))
+                    Nothing
+         , _commitAuthor    = createSignature
+         , _commitCommitter = createSignature
+         , _commitTree      = ObjRef (createTree repo)
+         , _commitParents   = []
+         , _commitLog       = T.empty
+         , _commitEncoding  = "" }
 
 lookupCommit :: Repository -> Oid -> IO (Maybe Commit)
 lookupCommit repo oid =
@@ -63,52 +76,105 @@ lookupCommit repo oid =
                 then return "UTF-8"
                 else peekCString enc
         conv  <- U.open encs (Just False)
-        msg   <- c'git_commit_message c >>= BS.packCString
 
-        tm    <- c'git_commit_time c
-        toff  <- c'git_commit_time_offset c
-        comm  <- c'git_commit_committer c
-        auth  <- c'git_commit_author c
-        toid  <- c'git_commit_tree_oid c
+        msg   <- c'git_commit_message c   >>= BS.packCString
+        auth  <- c'git_commit_author c    >>= packSignature conv
+        comm  <- c'git_commit_committer c >>= packSignature conv
+        toid  <- c'git_commit_tree_oid c  >>= wrapOidPtr
 
         pn    <- c'git_commit_parentcount c
-        poids <- (sequence $
+        poids <- traverse wrapOidPtr =<<
+                (sequence $
                  zipWith ($) (replicate (fromIntegral (toInteger pn))
                                         (c'git_commit_parent_oid c)) [0..pn])
-                >>= traverse wrapOidPtr
 
-        return Commit { _commitInfo =
-                         newBase repo (Stored coid) (Just obj)
-                      , _commitParents = poids
-                      , _commitLog     = U.toUnicode conv msg }
+        return Commit { _commitInfo      = newBase repo (Stored coid) (Just obj)
+                      , _commitAuthor    = auth
+                      , _commitCommitter = comm
+                      , _commitTree      = toid
+                      , _commitParents   = poids
+                      , _commitLog       = U.toUnicode conv msg
+                      , _commitEncoding  = encs }
+
+withGitCommit :: Updatable b
+              => ObjRef Commit -> b -> (Ptr C'git_commit -> IO a) -> IO a
+withGitCommit cref obj f = do
+  c' <- loadObject cref obj
+  case c' of
+    Nothing -> error "Cannot find Git commit in repository"
+    Just co ->
+      case co^.commitInfo.gitObj of
+        Nothing  -> error "Cannot find Git commit id"
+        Just co' -> withForeignPtr co' (f . castPtr)
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-writeCommit :: Commit -> IO Commit
-writeCommit t@(Commit { _commitInfo = Base { _gitId = Stored _ } }) = return t
-writeCommit t = fst <$> doWriteCommit t
+writeCommit :: Maybe Text -> Commit -> IO Commit
+writeCommit _ c@(Commit { _commitInfo = Base { _gitId = Stored _ } }) =
+  return c
+writeCommit ref c = fst <$> doWriteCommit ref c
 
-doWriteCommit :: Commit -> IO (Commit, COid)
-doWriteCommit c = do
+doWriteCommit :: Maybe Text -> Commit -> IO (Commit, COid)
+doWriteCommit ref c = do
   coid <- withForeignPtr repo $ \repoPtr -> do
     coid <- mallocForeignPtr
     withForeignPtr coid $ \coid' -> do
-      r <- c'git_commit_create coid' repoPtr
-            undefined                     -- const char *update_ref
-            undefined                     -- const git_signature *author
-            undefined                     -- const git_signature *committer
-            undefined                     -- const char *message_encoding
-            undefined                     -- const char *message
-            undefined                     -- const git_tree *tree
-            undefined                     -- int parent_count
-            undefined                     -- const git_commit *parents[]
-      when (r < 0) $ throwIO CommitCreateFailed
-      return coid
+      conv <- U.open (c^.commitEncoding) (Just True)
+      BS.useAsCString (U.fromUnicode conv (c^.commitLog)) $ \message ->
+        withRef ref $ \update_ref ->
+          withSignature conv (c^.commitAuthor) $ \author ->
+            withSignature conv (c^.commitCommitter) $ \committer ->
+              withEncStr (c^.commitEncoding) $ \message_encoding ->
+                withGitTree (c^.commitTree) c $ \commit_tree -> do
+                  parentPtrs <- getCommitParentPtrs c
+                  flip finally (freeCommits parentPtrs) $ do
+                    parents <- newArray parentPtrs
+                    r <- c'git_commit_create coid' repoPtr
+                         update_ref author committer
+                         message_encoding message commit_tree
+                         (fromIntegral (length (c^.commitParents)))
+                         parents
+                    when (r < 0) $ throwIO CommitCreateFailed
+                    return coid
 
   return (commitInfo.gitId .~ Stored (COid coid) $ c, COid coid)
 
   where
-    repo = fromMaybe (error "Repository invalid") $
-                     c^.commitInfo.gitRepo.repoObj
+    repo = fromMaybe (error "Repository invalid")
+                     (c^.commitInfo.gitRepo.repoObj)
+
+    withRef refName =
+      if isJust refName
+      then unsafeUseAsCString (E.encodeUtf8 (fromJust refName))
+      else flip ($) nullPtr
+
+    withEncStr enc =
+      if null enc
+      then flip ($) nullPtr
+      else withCString enc
+
+    freeCommits = traverse c'git_commit_free
+
+getCommitParents :: Commit -> IO [Commit]
+getCommitParents c =
+  traverse (\p -> do parent <- loadObject p c
+                     case parent of
+                       Nothing -> error "Cannot find Git commit"
+                       Just p' -> return p')
+           (c^.commitParents)
+
+getCommitParentPtrs :: Commit -> IO [Ptr C'git_commit]
+getCommitParentPtrs c =
+  withForeignPtr (repositoryPtr (objectRepo c)) $ \repoPtr ->
+    for (c^.commitParents) $ \p -> do
+      Oid (COid oid) <- case p of
+        IdRef coid -> return $ Oid coid
+        ObjRef x   -> objectId x
+
+      withForeignPtr oid $ \commit_id ->
+        alloca $ \ptr -> do
+          r <- c'git_commit_lookup ptr repoPtr commit_id
+          when (r < 0) $ throwIO CommitLookupFailed
+          peek ptr
 
 -- Commit.hs

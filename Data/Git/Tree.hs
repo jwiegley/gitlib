@@ -54,11 +54,6 @@ data Tree = Tree { _treeInfo     :: Base Tree
 
 makeClassy ''Tree
 
--- instance Eq Tree where
---   x == y = case (x^.treeInfo.gitId, y^.treeInfo.gitId) of
---              (Stored x2, Stored y2) -> x2 == y2
---              _ -> undefined
-
 instance Show Tree where
   show x = case x^.treeInfo.gitId of
     Pending _ -> "Tree"
@@ -93,6 +88,29 @@ lookupTree repo oid =
       return Tree { _treeInfo =
                        newBase repo (Stored coid) (Just obj)
                   , _treeContents = M.empty }
+
+withGitTree :: Updatable b
+            => ObjRef Tree -> b -> (Ptr C'git_tree -> IO a) -> IO a
+withGitTree tref obj f =
+  withForeignPtr (repositoryPtr (objectRepo obj)) $ \repoPtr ->
+    case tref of
+      IdRef (COid oid) -> withGitTreeOid repoPtr oid
+
+      ObjRef (Tree { _treeInfo = Base { _gitId = Stored (COid oid) } }) ->
+        withGitTreeOid repoPtr oid
+
+      ObjRef (Tree { _treeInfo = Base { _gitObj = Just t } }) ->
+        withForeignPtr t (f . castPtr)
+
+      ObjRef t -> do t' <- update t
+                     withGitTree (ObjRef t') obj f
+
+  where withGitTreeOid repoPtr oid =
+          withForeignPtr oid $ \tree_id ->
+            alloca $ \ptr -> do
+              r <- c'git_tree_lookup ptr repoPtr tree_id
+              when (r < 0) $ throwIO TreeLookupFailed
+              f =<< peek ptr
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
