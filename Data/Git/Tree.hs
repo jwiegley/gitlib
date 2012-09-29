@@ -7,16 +7,14 @@
 module Data.Git.Tree where
 
 import           Bindings.Libgit2
-import           Control.Lens
 import           Data.Git.Blob
 import           Data.Git.Common
 import           Data.Git.Errors
 import           Data.Git.Internal
-import           Data.List as L
 import qualified Data.Map as M
-import           Data.Text as T hiding (map)
-import           Filesystem.Path.CurrentOS as F hiding ((<.>))
-import           Prelude hiding (FilePath, sequence)
+import qualified Data.Text as T
+import qualified Filesystem.Path.CurrentOS as F
+import qualified Prelude
 
 default (Text)
 
@@ -165,7 +163,7 @@ doModifyTree (name:names) f createIfNotExist t = do
   y <- case M.lookup name (t^.treeContents) of
     Nothing ->
       return $
-        if createIfNotExist && not (L.null names)
+        if createIfNotExist && not (null names)
         then Just . TreeEntry . ObjRef . createTree
              $ t^.treeInfo.gitRepo
         else Nothing
@@ -177,7 +175,7 @@ doModifyTree (name:names) f createIfNotExist t = do
         tr <- loadObject t' t
         for tr $ \x -> return $ TreeEntry (ObjRef x)
 
-  if L.null names
+  if null names
     then do
       -- If there are no further names in the path, call the transformer
       -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there
@@ -245,7 +243,7 @@ removeFromTree p tr = do
     _ -> undefined
 
 splitPath :: FilePath -> [Text]
-splitPath path = splitOn "/" text
+splitPath path = T.splitOn "/" text
   where text = case F.toText path of
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y

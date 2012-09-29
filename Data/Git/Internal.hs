@@ -22,29 +22,37 @@ module Data.Git.Internal
 
        , lookupObject'
 
-       , module F
        , module X )
        where
 
 import           Bindings.Libgit2 as X
 import           Control.Applicative as X
+import           Control.Category as X
 import           Control.Exception as X
 import           Control.Lens as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
-                                            forM, forM_, msum)
+                                  forM, forM_, msum)
+import           Data.Bool as X
 import           Data.Either as X hiding (lefts, rights)
 import           Data.Foldable as X
+import           Data.Function as X hiding ((.), id)
 import           Data.Git.Errors as X
 import           Data.Git.Oid as X
+import           Data.List as X hiding (foldl, foldl', foldl1, foldr1, foldl1',
+                                        foldr, concat, maximum, minimum,
+                                        product, sum, all, and, any, concatMap,
+                                        elem, length, notElem, or, find,
+                                        mapAccumL, mapAccumR, maximumBy,
+                                        minimumBy)
 import           Data.Maybe as X
 import           Data.Monoid as X
 import           Data.Stringable as X
-import           Data.Text as T hiding (map)
+import           Data.Text as X (Text)
+import           Data.Tuple as X
 import           Data.Traversable as X
 import           Filesystem as X hiding (createTree)
-import qualified Filesystem.Path.CurrentOS as F hiding((<.>))
-import           Filesystem.Path.CurrentOS as X hiding ((<.>), empty, concat,
-                                                        toText, fromText)
+import qualified Filesystem.Path.CurrentOS as F
+import           Filesystem.Path.CurrentOS as X (FilePath)
 import           Foreign.C.String as X
 import           Foreign.C.Types as X
 import           Foreign.ForeignPtr as X
@@ -53,7 +61,11 @@ import           Foreign.Marshal.Utils as X
 import           Foreign.Ptr as X
 import           Foreign.StablePtr as X
 import           Foreign.Storable as X
-import           Prelude hiding (FilePath, mapM, mapM_, sequence, sequence_)
+import           Prelude as X (undefined, error, otherwise,
+                               IO,
+                               Show, show,
+                               (<), (==), (/=),
+                               fromIntegral, toInteger)
 import           Unsafe.Coerce as X
 
 default (Text)

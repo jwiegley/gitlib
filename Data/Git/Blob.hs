@@ -9,14 +9,12 @@ module Data.Git.Blob
        , writeBlob )
        where
 
-import Bindings.Libgit2
-import Data.ByteString as B hiding (map)
-import Data.ByteString.Unsafe
-import Data.Git.Common
-import Data.Git.Errors
-import Data.Git.Internal
-import Data.Text as T hiding (map)
-import Prelude hiding (FilePath)
+import           Data.ByteString as B hiding (map)
+import           Data.ByteString.Unsafe
+import           Data.Git.Common
+import           Data.Git.Errors
+import           Data.Git.Internal
+import qualified Prelude
 
 default (Text)
 

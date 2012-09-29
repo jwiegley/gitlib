@@ -8,6 +8,7 @@ module Data.Git.Oid
        , COid(..)
        , ObjRef(..)
        , Ident(..)
+       , wrapOidPtr
        , compareCOid
        , compareCOidLen
        , equalCOid
@@ -20,6 +21,7 @@ import Control.Monad
 import Data.ByteString.Unsafe
 import Data.Git.Errors
 import Data.Stringable as S
+import Foreign.Ptr
 import Foreign.ForeignPtr
 import System.IO.Unsafe
 
@@ -40,6 +42,10 @@ instance Show COid where
 --   loadObject from the type class 'Updatable'.
 data ObjRef a = IdRef COid
               | ObjRef a
+
+wrapOidPtr :: Ptr C'git_oid -> IO (ObjRef a)
+wrapOidPtr oid = do ptr <- newForeignPtr_ oid
+                    return $ IdRef (COid ptr)
 
 -- | An 'Ident' abstracts the fact that some objects won't have an identifier
 --   until they are written to disk -- even if sufficient information exists

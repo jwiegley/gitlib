@@ -10,17 +10,17 @@ import qualified Data.ByteString as BS
 import           Data.Git.Common
 import           Data.Git.Internal
 import           Data.Git.Tree
-import           Data.Text as T hiding (map)
 import qualified Data.Text.ICU.Convert as U
-import           Prelude hiding (FilePath)
+import qualified Prelude
 
 default (Text)
 
-data Commit = Commit { _commitInfo :: Base Commit
-                     , _commitWho  :: WhoWhen
-                     , _commitLog  :: Text
-                     , _commitTree :: Tree
-                     , _commitObj  :: ObjPtr C'git_commit }
+data Commit = Commit { _commitInfo    :: Base Commit
+                     , _commitWho     :: WhoWhen
+                     , _commitLog     :: Text
+                     , _commitTree    :: Tree
+                     , _commitParents :: [ObjRef Commit]
+                     , _commitObj     :: ObjPtr C'git_commit }
 
 makeClassy ''Commit
 
@@ -57,15 +57,30 @@ lookupCommit repo oid =
     \coid obj _ ->
       withForeignPtr obj $ \cobj -> do
         let c = castPtr cobj
-        enc  <- c'git_commit_message_encoding c
-        encs <- if enc == nullPtr
-               then return "UTF-8"
-               else peekCString enc
-        conv <- U.open encs (Just False)
-        msg  <- c'git_commit_message c >>= BS.packCString
+
+        enc   <- c'git_commit_message_encoding c
+        encs  <- if enc == nullPtr
+                then return "UTF-8"
+                else peekCString enc
+        conv  <- U.open encs (Just False)
+        msg   <- c'git_commit_message c >>= BS.packCString
+
+        tm    <- c'git_commit_time c
+        toff  <- c'git_commit_time_offset c
+        comm  <- c'git_commit_committer c
+        auth  <- c'git_commit_author c
+        toid  <- c'git_commit_tree_oid c
+
+        pn    <- c'git_commit_parentcount c
+        poids <- (sequence $
+                 zipWith ($) (replicate (fromIntegral (toInteger pn))
+                                        (c'git_commit_parent_oid c)) [0..pn])
+                >>= traverse wrapOidPtr
+
         return Commit { _commitInfo =
                          newBase repo (Stored coid) (Just obj)
-                      , _commitLog = U.toUnicode conv msg }
+                      , _commitParents = poids
+                      , _commitLog     = U.toUnicode conv msg }
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.

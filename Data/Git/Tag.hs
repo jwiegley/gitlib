@@ -3,11 +3,11 @@
 
 module Data.Git.Tag where
 
-import Control.Lens
-import Data.Git.Common
-import Data.Git.Internal
-import Data.Text as T hiding (map)
-import Prelude hiding (FilePath)
+import           Control.Lens
+import           Data.Git.Common
+import           Data.Git.Internal
+import qualified Data.Text as T
+import qualified Prelude
 
 default (Text)
 
