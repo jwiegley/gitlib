@@ -21,8 +21,10 @@ data GitException = RepositoryNotExist String
                   | TreeBuilderWriteFailed
                   | TreeLookupFailed
                   | TreeCannotTraverseBlob
+                  | CommitCreateFailed
                   | ObjectLookupFailed
                   | ObjectIdTooLong
+                  | ObjectRefRequiresFullOid
                   | OidCopyFailed
                   deriving (Show, Typeable)
 

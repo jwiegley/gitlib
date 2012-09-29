@@ -2,7 +2,7 @@
 
 module Data.Git.Object
        ( Object(..)
-       , Ref(..)
+       , NamedRef(..)
        , revParse
        , lookupObject )
        where
@@ -20,15 +20,15 @@ data Object = BlobObj   Blob
             | CommitObj Commit
             | TagObj    Tag
 
-data Ref a = FullHash a
-           | PartialHash a
-           | BranchName a
-           | TagName a
-           | RefName a
-           | FullRefName a
-           | Specifier a
+data NamedRef a = FullHash a
+                | PartialHash a
+                | BranchName a
+                | TagName a
+                | RefName a
+                | FullRefName a
+                | Specifier a
 
-revParse :: CStringable a => Ref a -> IO (Maybe Oid)
+revParse :: CStringable a => NamedRef a -> IO (Maybe Oid)
 revParse (FullHash r)    = stringToOid r
 revParse (PartialHash r) = stringToOid r
 revParse (BranchName r)  = undefined

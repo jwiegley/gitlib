@@ -77,46 +77,38 @@ tests = test [
 
   withRepository "singleTree.git" $ \repo -> do
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-        tr    = updateTree "hello/world.txt"
-                           (BlobEntry hello False) (createTree repo)
-
+    tr <- updateTree "hello/world.txt" (blobRef hello)
+                    (createTree repo)
     checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   , "twoTrees" ~:
 
   withRepository "twoTrees.git" $ \repo -> do
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-        tr    = updateTree "hello/world.txt"
-                           (BlobEntry hello False) (createTree repo)
-
+    tr <- updateTree "hello/world.txt" (blobRef hello)
+                    (createTree repo)
     checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
     let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
-        tr'     = updateTree "goodbye/files/world.txt"
-                             (BlobEntry goodbye False) tr
-
+    tr' <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
     checkOid tr' "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   , "deleteTree" ~:
 
   withRepository "deleteTree.git" $ \repo -> do
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-        tr    = updateTree "hello/world.txt"
-                           (BlobEntry hello False) (createTree repo)
-
+    tr <- updateTree "hello/world.txt" (blobRef hello)
+                    (createTree repo)
     checkOid tr "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
     let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
-        tr'     = updateTree "goodbye/files/world.txt"
-                             (BlobEntry goodbye False) tr
-
+    tr' <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
     checkOid tr' "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
     -- Confirm that deleting world.txt also deletes the now-empty subtree
     -- goodbye/files, which also deletes the then-empty subtree goodbye,
     -- returning us back the original tree.
-    let tr'' = removeFromTree "goodbye/files/world.txt" tr'
-
+    tr'' <- removeFromTree "goodbye/files/world.txt" tr'
     checkOid tr'' "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   ]

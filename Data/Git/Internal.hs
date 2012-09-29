@@ -61,11 +61,33 @@ default (Text)
 type ObjPtr a = Maybe (ForeignPtr a)
 
 class Updatable a where
+  getId      :: a -> Ident a
+  objectRepo :: a -> Repository
+  objectPtr  :: a -> ObjPtr C'git_object
+
   update  :: a -> IO a
   update_ :: a -> IO ()
   update_ = void . update
 
   objectId :: a -> IO Oid
+  objectId x = case getId x of
+    Pending f -> Oid <$> f x
+    Stored y  -> return $ Oid y
+
+  maybeObjectId :: a -> Maybe Oid
+  maybeObjectId x = case getId x of
+    Pending _ -> Nothing
+    Stored y  -> Just (Oid y)
+
+  lookupFunction :: Repository -> Oid -> IO (Maybe a)
+
+  loadObject :: Updatable b => ObjRef a -> b -> IO (Maybe a)
+  loadObject (IdRef coid) y = lookupFunction (objectRepo y) (Oid coid)
+  loadObject (ObjRef x) _ = return (Just x)
+
+  getObject :: ObjRef a -> Maybe a
+  getObject (IdRef _)  = Nothing
+  getObject (ObjRef x) = Just x
 
 data Repository = Repository { _repoPath :: FilePath
                              , _repoObj  :: ObjPtr C'git_repository }

@@ -36,10 +36,11 @@ instance Show Blob where
     Stored y  -> "Blob#" ++ show y
 
 instance Updatable Blob where
-  update = writeBlob
-  objectId b = case b^.blobInfo.gitId of
-    Pending f -> Oid <$> (f b)
-    Stored x  -> return $ Oid x
+  getId x        = x^.blobInfo.gitId
+  objectRepo x   = x^.blobInfo.gitRepo
+  objectPtr x    = x^.blobInfo.gitObj
+  update         = writeBlob
+  lookupFunction = lookupBlob
 
 newBlobBase :: Blob -> Base Blob
 newBlobBase b =
@@ -58,11 +59,11 @@ createBlob repo text
 
 lookupBlob :: Repository -> Oid -> IO (Maybe Blob)
 lookupBlob repo oid =
-  lookupObject' repo oid c'git_blob_lookup c'git_blob_lookup_prefix
-                (\coid obj _ ->
-                  return Blob { _blobInfo =
-                                   newBase repo (Stored coid) (Just obj)
-                              , _blobContents = B.empty })
+  lookupObject' repo oid c'git_blob_lookup c'git_blob_lookup_prefix $
+    \coid obj _ ->
+      return Blob { _blobInfo =
+                       newBase repo (Stored coid) (Just obj)
+                  , _blobContents = B.empty }
 
 getBlobContents :: Blob -> IO (Blob, B.ByteString)
 getBlobContents b =

@@ -6,6 +6,7 @@
 module Data.Git.Oid
        ( Oid(..)
        , COid(..)
+       , ObjRef(..)
        , Ident(..)
        , compareCOid
        , compareCOidLen
@@ -30,6 +31,15 @@ instance Show COid where
   show (COid x) =
     toString $ unsafePerformIO $
       withForeignPtr x (unsafePackMallocCString <=< c'git_oid_allocfmt)
+
+-- | 'ObjRef' refers to either a Git object of a particular type (if it has
+--   already been loaded into memory), or it refers to the 'COid' of that
+--   object in the repository.  This permits deferred loading of objects
+--   within potentially very large structures, such as trees and commits.
+--   However, it also means that every access to a sub-object must use
+--   loadObject from the type class 'Updatable'.
+data ObjRef a = IdRef COid
+              | ObjRef a
 
 -- | An 'Ident' abstracts the fact that some objects won't have an identifier
 --   until they are written to disk -- even if sufficient information exists
