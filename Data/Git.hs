@@ -9,6 +9,7 @@ module Data.Git (
     module Data.Git.Errors,
     module Data.Git.Oid,
     module Data.Git.Tree,
+    module Data.Git.Reference,
     -- module Data.Git.Odb,
     module Data.Git.Common,
     module Data.Git.Object
@@ -24,6 +25,7 @@ import Data.Git.Blob
 import Data.Git.Errors
 import Data.Git.Oid
 import Data.Git.Tree
+import Data.Git.Reference
 -- import Data.Git.Odb
 import Data.Git.Common
 import Data.Git.Object

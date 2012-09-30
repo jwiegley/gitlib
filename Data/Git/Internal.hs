@@ -61,7 +61,7 @@ import           Foreign.Ptr as X
 import           Foreign.StablePtr as X
 import           Foreign.Storable as X
 import           Prelude as X (undefined, error, otherwise, IO, Show, show,
-                               Eq, Ord, (<), (==), (/=), round,
+                               Enum, Eq, Ord, (<), (==), (/=), round,
                                Integer, fromIntegral, fromInteger, toInteger)
 import           Unsafe.Coerce as X
 
@@ -88,10 +88,10 @@ class Updatable a where
     Pending _ -> Nothing
     Stored y  -> Just (Oid y)
 
-  lookupFunction :: Repository -> Oid -> IO (Maybe a)
+  lookupFunction :: Oid -> Repository -> IO (Maybe a)
 
   loadObject :: Updatable b => ObjRef a -> b -> IO (Maybe a)
-  loadObject (IdRef coid) y = lookupFunction (objectRepo y) (Oid coid)
+  loadObject (IdRef coid) y = lookupFunction (Oid coid) (objectRepo y)
   loadObject (ObjRef x) _   = return (Just x)
 
   getObject :: ObjRef a -> Maybe a
@@ -158,29 +158,30 @@ openRepositoryWith path fn = alloca $ \ptr ->
   where doesNotExist = throwIO . RepositoryNotExist . toString
 
 lookupObject'
-  :: Repository -> Oid
+  :: Oid -> Repository
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
   -> (COid -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
   -> IO (Maybe b)
-lookupObject' repo oid lookupFn lookupPrefixFn createFn = alloca $ \ptr -> do
-  r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
-         case oid of
-           Oid (COid oid') ->
-             withForeignPtr oid' $ \oidPtr ->
-               lookupFn (castPtr ptr) repoPtr oidPtr
-           PartialOid (COid oid') len ->
-             withForeignPtr oid' $ \oidPtr ->
-               lookupPrefixFn (castPtr ptr) repoPtr oidPtr (fromIntegral len)
-  if r < 0
-    then return Nothing
-    else do
-      ptr'     <- peek ptr
-      coid     <- c'git_object_id ptr'
-      coidCopy <- mallocForeignPtr
-      withForeignPtr coidCopy $ flip c'git_oid_cpy coid
+lookupObject' oid repo lookupFn lookupPrefixFn createFn =
+  alloca $ \ptr -> do
+    r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
+           case oid of
+             Oid (COid oid') ->
+               withForeignPtr oid' $ \oidPtr ->
+                 lookupFn (castPtr ptr) repoPtr oidPtr
+             PartialOid (COid oid') len ->
+               withForeignPtr oid' $ \oidPtr ->
+                 lookupPrefixFn (castPtr ptr) repoPtr oidPtr (fromIntegral len)
+    if r < 0
+      then return Nothing
+      else do
+        ptr'     <- peek ptr
+        coid     <- c'git_object_id ptr'
+        coidCopy <- mallocForeignPtr
+        withForeignPtr coidCopy $ flip c'git_oid_cpy coid
 
-      fptr <- newForeignPtr p'git_object_free ptr'
-      Just <$> createFn (COid coidCopy) fptr ptr'
+        fptr <- newForeignPtr p'git_object_free ptr'
+        Just <$> createFn (COid coidCopy) fptr ptr'
 
 -- Internal.hs

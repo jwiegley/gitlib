@@ -23,14 +23,14 @@ Test-suite smoke
       base >=3
     , gitlib
     , HUnit           >= 1.2.5
-    , system-filepath >= 0.4.7
-    , system-fileio   >= 0.3.9
-    , time            >= 1.4
-    , text            >= 0.11.2
-    , containers      >= 0.4.2
     , bytestring      >= 0.9.2.1
-    , stringable      >= 0.1.1
+    , containers      >= 0.4.2
     , lens            >= 2.8
+    , stringable      >= 0.1.1
+    , system-fileio   >= 0.3.9
+    , system-filepath >= 0.4.7
+    , text            >= 0.11.2
+    , time            >= 1.4
 
 test-suite doctests
   default-language: Haskell98
@@ -51,15 +51,15 @@ Library
   build-depends:
       base            >= 3 && < 5
     , hlibgit2        >= 0.6
-    , system-filepath >= 0.4.7
+    , bytestring      >= 0.9.2.1
+    , containers      >= 0.4.2
+    , lens            >= 2.8
+    , stringable      >= 0.1.1
     , system-fileio   >= 0.3.9
-    , time            >= 1.4
+    , system-filepath >= 0.4.7
     , text            >= 0.11.2
     , text-icu        >= 0.6.3
-    , containers      >= 0.4.2
-    , bytestring      >= 0.9.2.1
-    , stringable      >= 0.1.1
-    , lens            >= 2.8
+    , time            >= 1.4
   exposed-modules:
     Data.Git
     Data.Git.Blob
@@ -71,5 +71,6 @@ Library
     Data.Git.Repository
     Data.Git.Tag
     Data.Git.Tree
+    Data.Git.Reference
   other-modules:
     Data.Git.Internal

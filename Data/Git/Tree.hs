@@ -81,9 +81,9 @@ createTree repo =
             newBase repo (Pending (doWriteTree >=> return . snd)) Nothing
        , _treeContents = M.empty }
 
-lookupTree :: Repository -> Oid -> IO (Maybe Tree)
-lookupTree repo oid =
-  lookupObject' repo oid c'git_tree_lookup c'git_tree_lookup_prefix $
+lookupTree :: Oid -> Repository -> IO (Maybe Tree)
+lookupTree oid repo =
+  lookupObject' oid repo c'git_tree_lookup c'git_tree_lookup_prefix $
     \coid obj _ ->
       return Tree { _treeInfo =
                        newBase repo (Stored coid) (Just obj)
@@ -230,12 +230,12 @@ doModifyTree (name:names) f createIfNotExist t = do
             err@(Left _) -> return err
             Right st' ->
               return $ Right $
-                treeInfo     .~ newTreeBase t' $
+                treeInfo     .~ newTreeBase t $
                 treeContents .~
                   (if M.null (st'^.treeContents)
-                   then M.delete name (t'^.treeContents)
+                   then M.delete name (t^.treeContents)
                    else M.insert name (TreeEntry (ObjRef st'))
-                                 (t'^.treeContents)) $ t'
+                                 (t^.treeContents)) $ t
         _ -> throw TreeLookupFailed
 
 modifyTree

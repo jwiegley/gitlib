@@ -37,16 +37,16 @@ revParse (RefName r)     = undefined
 revParse (FullRefName r) = undefined
 revParse (Specifier r)   = undefined
 
-lookupObject :: Repository -> Oid -> IO (Maybe Object)
-lookupObject repo oid =
-  lookupObject' repo oid
+lookupObject :: Oid -> Repository -> IO (Maybe Object)
+lookupObject oid repo =
+  lookupObject' oid repo
     (\x y z    -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
     (\x y z l  -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
-    (\coid x y -> c'git_object_type y >>= createObject repo coid x)
+    (\coid x y -> c'git_object_type y >>= createObject coid x repo)
 
-createObject :: Repository -> COid -> ForeignPtr C'git_object -> C'git_otype
+createObject :: COid -> ForeignPtr C'git_object -> Repository -> C'git_otype
              -> IO Object
-createObject repo coid obj typ
+createObject coid obj repo typ
   | typ == c'GIT_OBJ_BLOB =
     return $ BlobObj Blob { _blobInfo =
                                newBase repo (Stored coid) (Just obj)

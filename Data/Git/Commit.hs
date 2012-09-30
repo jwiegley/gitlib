@@ -41,7 +41,6 @@ instance Updatable Commit where
   objectPtr x    = x^.commitInfo.gitObj
   update         = writeCommit Nothing
   lookupFunction = lookupCommit
-
 
 newCommitBase :: Commit -> Base Commit
 newCommitBase t =
@@ -64,9 +63,9 @@ createCommit repo =
          , _commitLog       = T.empty
          , _commitEncoding  = "" }
 
-lookupCommit :: Repository -> Oid -> IO (Maybe Commit)
-lookupCommit repo oid =
-  lookupObject' repo oid c'git_commit_lookup c'git_commit_lookup_prefix $
+lookupCommit :: Oid -> Repository -> IO (Maybe Commit)
+lookupCommit oid repo =
+  lookupObject' oid repo c'git_commit_lookup c'git_commit_lookup_prefix $
     \coid obj _ ->
       withForeignPtr obj $ \cobj -> do
         let c = castPtr cobj

@@ -23,6 +23,9 @@ data GitException = RepositoryNotExist String
                   | TreeCannotTraverseBlob
                   | CommitCreateFailed
                   | CommitLookupFailed
+                  | ReferenceCreateFailed
+                  | RefCannotCreateFromPartialOid
+                  | ReferenceLookupFailed
                   | ObjectLookupFailed
                   | ObjectIdTooLong
                   | ObjectRefRequiresFullOid

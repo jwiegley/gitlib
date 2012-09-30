@@ -43,16 +43,16 @@ newBlobBase b =
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the give string is 'empty', it is an error.
-createBlob :: Repository -> B.ByteString -> Blob
-createBlob repo text
+createBlob :: B.ByteString -> Repository -> Blob
+createBlob text repo
   | text == B.empty = error "Cannot create an empty blob"
   | otherwise =
     Blob { _blobInfo     = newBase repo (Pending doWriteBlob) Nothing
          , _blobContents = text }
 
-lookupBlob :: Repository -> Oid -> IO (Maybe Blob)
-lookupBlob repo oid =
-  lookupObject' repo oid c'git_blob_lookup c'git_blob_lookup_prefix $
+lookupBlob :: Oid -> Repository -> IO (Maybe Blob)
+lookupBlob oid repo =
+  lookupObject' oid repo c'git_blob_lookup c'git_blob_lookup_prefix $
     \coid obj _ ->
       return Blob { _blobInfo     = newBase repo (Stored coid) (Just obj)
                   , _blobContents = B.empty }
@@ -75,7 +75,7 @@ getBlobContents b =
               return (blobContents .~ bstr $ b, bstr)
 
           Nothing -> do
-            b' <- lookupBlob repo (Oid hash)
+            b' <- lookupBlob (Oid hash) repo
             case b' of
               Just blobPtr' -> getBlobContents blobPtr'
               Nothing       -> return (b, B.empty)
@@ -99,8 +99,8 @@ doWriteBlob b = do
   return (COid ptr)
 
   where
-    repo = fromMaybe (error "Repository invalid") $
-           b^.blobInfo.gitRepo.repoObj
+    repo = fromMaybe (error "Repository invalid")
+                     (b^.blobInfo.gitRepo.repoObj)
 
     createFromBuffer ptr repoPtr =
       unsafeUseAsCStringLen (b^.blobContents) $
