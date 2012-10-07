@@ -13,6 +13,8 @@ import           Data.Git.Tree
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.ICU.Convert as U
+import qualified Foreign.Concurrent as FC
+import qualified Foreign.ForeignPtr.Unsafe as FU
 import           Foreign.Marshal.Array
 import qualified Prelude
 
@@ -25,8 +27,7 @@ data Commit = Commit { _commitInfo      :: Base Commit
                      , _commitEncoding  :: Prelude.String
                      , _commitTree      :: ObjRef Tree
                      , _commitParents   :: [ObjRef Commit]
-                     -- , _commitObj       :: ObjPtr C'git_commit
-                     }
+                     , _commitObj       :: ObjPtr C'git_commit }
 
 makeClassy ''Commit
 
@@ -61,7 +62,8 @@ createCommit repo =
          , _commitTree      = ObjRef (createTree repo)
          , _commitParents   = []
          , _commitLog       = T.empty
-         , _commitEncoding  = "" }
+         , _commitEncoding  = ""
+         , _commitObj       = Nothing }
 
 lookupCommit :: Oid -> Repository -> IO (Maybe Commit)
 lookupCommit oid repo =
@@ -82,10 +84,11 @@ lookupCommit oid repo =
         toid  <- c'git_commit_tree_oid c  >>= wrapOidPtr
 
         pn    <- c'git_commit_parentcount c
-        poids <- traverse wrapOidPtr =<<
-                sequence
-                  (zipWith ($) (replicate (fromIntegral (toInteger pn))
-                                          (c'git_commit_parent_oid c)) [0..pn])
+        poids <- traverse wrapOidPtr
+                =<< sequence
+                      (zipWith ($) (replicate (fromIntegral (toInteger pn))
+                                              (c'git_commit_parent_oid c))
+                                   [0..pn])
 
         return Commit { _commitInfo      = newBase repo (Stored coid) (Just obj)
                       , _commitAuthor    = auth
@@ -93,7 +96,8 @@ lookupCommit oid repo =
                       , _commitTree      = toid
                       , _commitParents   = poids
                       , _commitLog       = U.toUnicode conv msg
-                      , _commitEncoding  = encs }
+                      , _commitEncoding  = encs
+                      , _commitObj       = Just $ unsafeCoerce obj }
 
 withGitCommit :: Updatable b
               => ObjRef Commit -> b -> (Ptr C'git_commit -> IO a) -> IO a
@@ -126,15 +130,15 @@ doWriteCommit ref c = do
               withEncStr (c^.commitEncoding) $ \message_encoding ->
                 withGitTree (c^.commitTree) c $ \commit_tree -> do
                   parentPtrs <- getCommitParentPtrs c
-                  flip finally (freeCommits parentPtrs) $ do
-                    parents <- newArray parentPtrs
-                    r <- c'git_commit_create coid' repoPtr
-                         update_ref author committer
-                         message_encoding message commit_tree
-                         (fromIntegral (length (c^.commitParents)))
-                         parents
-                    when (r < 0) $ throwIO CommitCreateFailed
-                    return coid
+                  parents    <- newArray $
+                               map FU.unsafeForeignPtrToPtr parentPtrs
+                  r <- c'git_commit_create coid' repoPtr
+                        update_ref author committer
+                        message_encoding message commit_tree
+                        (fromIntegral (length (c^.commitParents)))
+                        parents
+                  when (r < 0) $ throwIO CommitCreateFailed
+                  return coid
 
   return (commitInfo.gitId .~ Stored (COid coid) $ c, COid coid)
 
@@ -152,8 +156,6 @@ doWriteCommit ref c = do
       then flip ($) nullPtr
       else withCString enc
 
-    freeCommits = traverse c'git_commit_free
-
 getCommitParents :: Commit -> IO [Commit]
 getCommitParents c =
   traverse (\p -> do parent <- loadObject p c
@@ -162,19 +164,24 @@ getCommitParents c =
                        Just p' -> return p')
            (c^.commitParents)
 
-getCommitParentPtrs :: Commit -> IO [Ptr C'git_commit]
+getCommitParentPtrs :: Commit -> IO [ForeignPtr C'git_commit]
 getCommitParentPtrs c =
   withForeignPtr (repositoryPtr (objectRepo c)) $ \repoPtr ->
-    for (c^.commitParents) $ \p -> do
-      Oid (COid oid) <- case p of
-        IdRef coid -> return $ Oid coid
-        ObjRef x   -> objectId x
+    for (c^.commitParents) $ \p ->
+      case p of
+        ObjRef (Commit { _commitObj = Just obj }) -> return obj
+        _ -> do
+          Oid (COid oid) <-
+            case p of
+              IdRef coid -> return $ Oid coid
+              ObjRef x   -> objectId x
 
-      withForeignPtr oid $ \commit_id ->
-        alloca $ \ptr -> do
-          r <- c'git_commit_lookup ptr repoPtr commit_id
-          when (r < 0) $ throwIO CommitLookupFailed
-          peek ptr
+          withForeignPtr oid $ \commit_id ->
+            alloca $ \ptr -> do
+              r <- c'git_commit_lookup ptr repoPtr commit_id
+              when (r < 0) $ throwIO CommitLookupFailed
+              ptr' <- peek ptr
+              FC.newForeignPtr ptr' (c'git_commit_free ptr')
 
 doUpdateCommit :: [Text] -> TreeEntry -> Commit -> IO Commit
 doUpdateCommit xs item c = do

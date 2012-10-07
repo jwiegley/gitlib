@@ -46,9 +46,9 @@ createRef name target repo =
 lookupRef :: Text -> Repository -> IO (Maybe Reference)
 lookupRef name repo = alloca $ \ptr -> do
   r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
-    withCStringable name $ \namePtr ->
-      c'git_reference_lookup ptr repoPtr namePtr
-  if (r < 0)
+        withCStringable name $ \namePtr ->
+          c'git_reference_lookup ptr repoPtr namePtr
+  if r < 0
     then return Nothing
     else do
     ref  <- peek ptr
