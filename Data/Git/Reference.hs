@@ -147,8 +147,29 @@ lookupId name repos = alloca $ \ptr ->
 
 --packallRefs = c'git_reference_packall
 
+data ListFlags = ListFlags { _invalid :: Bool
+                           , _oid :: Bool
+                           , _symbolic :: Bool
+                           , _packed :: Bool
+                           , _has_peel :: Bool }
+               deriving Show
+
+listAll = ListFlags {
+  _invalid=False,
+  _oid=True,
+  _symbolic=True,
+  _packed=True,
+  _has_peel=False }
+
+makeClassy ''ListFlags
+
 -- int git_reference_list(git_strarray *array, git_repository *repo,
 --   unsigned int list_flags)
+
+-- use peekArray
+
+listRefNames :: Repository -> ListFlags -> IO [ Text ]
+listRefNames repo flags = undefined -- alloca $
 
 --listRefs = c'git_reference_list
 
