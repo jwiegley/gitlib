@@ -9,7 +9,8 @@ module Data.Git.Reference
        , createRef
        , lookupRef
        , lookupId
-       , writeRef )
+       , writeRef
+       , writeRef_ )
        where
 
 import           Bindings.Libgit2
@@ -81,6 +82,9 @@ writeRef ref = alloca $ \ptr -> do
 
   where
     repo = fromMaybe (error "Repository invalid") (ref^.refRepo.repoObj)
+
+writeRef_ :: Reference -> IO ()
+writeRef_ = void . writeRef
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)

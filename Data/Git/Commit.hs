@@ -83,9 +83,9 @@ lookupCommit oid repo =
 
         pn    <- c'git_commit_parentcount c
         poids <- traverse wrapOidPtr =<<
-                (sequence $
-                 zipWith ($) (replicate (fromIntegral (toInteger pn))
-                                        (c'git_commit_parent_oid c)) [0..pn])
+                sequence
+                  (zipWith ($) (replicate (fromIntegral (toInteger pn))
+                                          (c'git_commit_parent_oid c)) [0..pn])
 
         return Commit { _commitInfo      = newBase repo (Stored coid) (Just obj)
                       , _commitAuthor    = auth
@@ -175,5 +175,19 @@ getCommitParentPtrs c =
           r <- c'git_commit_lookup ptr repoPtr commit_id
           when (r < 0) $ throwIO CommitLookupFailed
           peek ptr
+
+doUpdateCommit :: [Text] -> TreeEntry -> Commit -> IO Commit
+doUpdateCommit xs item c = do
+  t <- loadObject (c^.commitTree) c
+  case t of
+    Nothing -> error "Failed to load tree for commit"
+    Just t' -> do
+      tr <- doModifyTree xs (const (Right (Just item))) True t'
+      case tr of
+        Right tr' -> return $ commitTree .~ ObjRef tr' $ c
+        _ -> undefined
+
+updateCommit :: FilePath -> TreeEntry -> Commit -> IO Commit
+updateCommit = doUpdateCommit . splitPath
 
 -- Commit.hs
