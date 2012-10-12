@@ -1,5 +1,5 @@
 Name:                gitlib
-Version:             0.3.0
+Version:             0.4.0
 Synopsis:            Higher-level types for working with hlibgit2
 Description:         Higher-level types for working with hlibgit2
 License-file:        LICENSE
@@ -38,7 +38,7 @@ test-suite doctests
   main-is: doctests.hs
   build-depends:
       base == 4.*
-    , directory >= 1.0 && < 1.2
+    , directory >= 1.0 && < 1.3
     , doctest   >= 0.8 && <= 0.10
     , filepath  >= 1.3 && < 1.4
   ghc-options: -Wall -Werror
