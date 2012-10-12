@@ -89,6 +89,34 @@ lookupTree oid repo =
                        newBase repo (Stored coid) (Just obj)
                   , _treeContents = M.empty }
 
+doLookupTreeEntry :: [Text] -> Tree -> IO (Maybe TreeEntry)
+doLookupTreeEntry [] _ = throw TreeEntryLookupFailed
+doLookupTreeEntry (name:names) t = do
+  -- Lookup the current name in this tree.  If it doesn't exist, and there are
+  -- more names in the path and 'createIfNotExist' is True, create a new Tree
+  -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
+  -- {})@, and if not we'll have Nothing.
+  y <- case M.lookup name (t^.treeContents) of
+    Nothing -> return Nothing
+    Just j  -> case j of
+      BlobEntry b mode -> do
+        bl <- loadObject b t
+        for bl $ \x -> return $ BlobEntry (ObjRef x) mode
+      TreeEntry t' -> do
+        tr <- loadObject t' t
+        for tr $ \x -> return $ TreeEntry (ObjRef x)
+
+  if null names
+    then return y
+    else
+      case y of
+        Just (BlobEntry {}) -> throw TreeCannotTraverseBlob
+        Just (TreeEntry (ObjRef t')) -> doLookupTreeEntry names t'
+        _ -> throw TreeEntryLookupFailed
+
+lookupTreeEntry :: FilePath -> Tree -> IO (Maybe TreeEntry)
+lookupTreeEntry = doLookupTreeEntry . splitPath
+
 withGitTree :: Updatable b
             => ObjRef Tree -> b -> (Ptr C'git_tree -> IO a) -> IO a
 withGitTree tref obj f =
