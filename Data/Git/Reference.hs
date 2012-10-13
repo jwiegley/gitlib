@@ -10,6 +10,7 @@ module Data.Git.Reference
        , createRef
        , lookupRef
        , listRefNames
+       , listAll
        , lookupId
        , writeRef )
        where
@@ -159,6 +160,7 @@ data ListFlags = ListFlags { _invalid :: Bool
                            , _hasPeel :: Bool }
                deriving Show
 
+listAll :: ListFlags
 listAll = ListFlags {
   _invalid=False,
   _oid=True,
