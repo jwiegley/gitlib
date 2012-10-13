@@ -178,7 +178,7 @@ doWriteTree t = alloca $ \ptr ->
     repo = fromMaybe (error "Repository invalid") $
                      t^.treeInfo.gitRepo.repoObj
 
-    insertObject :: (CStringable a, Updatable b)
+    insertObject :: (CStringable a, Updatable b, Show b)
                  => Ptr C'git_treebuilder -> a -> ObjRef b -> CUInt
                  -> IO (ObjRef b)
     insertObject builder key obj attrs = do
@@ -188,7 +188,7 @@ doWriteTree t = alloca $ \ptr ->
           oid <- objectId x
           case oid of
             Oid (COid y) -> return y
-            _ -> error "Unexpected"
+            _ -> error $ "Failed to determine object id for: " ++ show x
 
       withForeignPtr coid $ \coid' ->
         withCStringable key $ \name -> do

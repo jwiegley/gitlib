@@ -42,6 +42,7 @@ instance Show COid where
 --   loadObject from the type class 'Updatable'.
 data ObjRef a = IdRef COid
               | ObjRef a
+              deriving Show
 
 wrapOidPtr :: Ptr C'git_oid -> IO (ObjRef a)
 wrapOidPtr = newForeignPtr_ >=> return . IdRef . COid

@@ -99,17 +99,6 @@ lookupCommit oid repo =
                       , _commitEncoding  = encs
                       , _commitObj       = Just $ unsafeCoerce obj }
 
-withGitCommit :: Updatable b
-              => ObjRef Commit -> b -> (Ptr C'git_commit -> IO a) -> IO a
-withGitCommit cref obj f = do
-  c' <- loadObject cref obj
-  case c' of
-    Nothing -> error "Cannot find Git commit in repository"
-    Just co ->
-      case co^.commitInfo.gitObj of
-        Nothing  -> error "Cannot find Git commit id"
-        Just co' -> withForeignPtr co' (f . castPtr)
-
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
 writeCommit :: Maybe Text -> Commit -> IO Commit
@@ -182,6 +171,22 @@ getCommitParentPtrs c =
               when (r < 0) $ throwIO CommitLookupFailed
               ptr' <- peek ptr
               FC.newForeignPtr ptr' (c'git_commit_free ptr')
+
+modifyCommitTree
+  :: FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
+  -> Commit -> IO (Either a Commit)
+modifyCommitTree path f createIfNotExist c =
+  withObject (c^.commitTree) c $ \tr -> do
+    result <- modifyTree path f createIfNotExist tr
+    case result of
+      Left x    -> return (Left x)
+      Right tr' -> return $ Right $ commitTree .~ ObjRef tr' $ c
+
+removeFromCommitTree :: FilePath -> Commit -> IO Commit
+removeFromCommitTree path c =
+  withObject (c^.commitTree) c $ \tr -> do
+    tr' <- removeFromTree path tr
+    return $ commitTree .~ ObjRef tr' $ c
 
 doUpdateCommit :: [Text] -> TreeEntry -> Commit -> IO Commit
 doUpdateCommit xs item c = do

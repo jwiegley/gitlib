@@ -15,7 +15,12 @@ module Data.Git.Repository
 
        , openRepository
        , createRepository
-       , openOrCreateRepository )
+       , openOrCreateRepository
+
+       , lookupObject'
+       , withObject
+       , withObjectPtr
+       )
        where
 
 import Data.Git.Internal

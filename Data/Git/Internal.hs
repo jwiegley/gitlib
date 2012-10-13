@@ -21,6 +21,8 @@ module Data.Git.Internal
        , repositoryPtr
 
        , lookupObject'
+       , withObject
+       , withObjectPtr
 
        , module X )
        where
@@ -156,6 +158,21 @@ openRepositoryWith path fn = alloca $ \ptr ->
                           , _repoObj  = Just fptr }
 
   where doesNotExist = throwIO . RepositoryNotExist . toString
+
+withObject :: (Updatable a, Updatable b) => ObjRef a -> b -> (a -> IO c) -> IO c
+withObject objRef parent f = do
+  obj <- loadObject objRef parent
+  case obj of
+    Nothing   -> error "Cannot find Git object in repository"
+    Just obj' -> f obj'
+
+withObjectPtr :: (Updatable a, Updatable b)
+              => ObjRef a -> b -> (Ptr c -> IO d) -> IO d
+withObjectPtr objRef parent f =
+  withObject objRef parent $ \obj ->
+    case objectPtr obj of
+      Nothing     -> error "Cannot find Git object id"
+      Just objPtr -> withForeignPtr objPtr (f . castPtr)
 
 lookupObject'
   :: Oid -> Repository
