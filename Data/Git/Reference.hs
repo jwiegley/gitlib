@@ -170,15 +170,12 @@ makeClassy ''ListFlags
 
 gitStrArray2List :: Ptr C'git_strarray -> IO [ Text ]
 gitStrArray2List gitStrs =
-  do
+   do
      count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
      strings <- peek $ p'git_strarray'strings gitStrs
      r0 :: [ CString ] <- Foreign.Marshal.Array.peekArray count strings
-     sequence (
-       let r1 :: [ IO Prelude.String ] = fmap peekCString r0
-           r2 :: [ IO Text ] = fmap ( fmap T.pack ) r1
-       in r2
-       )
+     r1 :: [ Prelude.String ] <- sequence $ fmap peekCString r0
+     return $ fmap T.pack r1
 
 listRefNames :: Repository -> ListFlags -> IO [ Text ]
 listRefNames repo flags =
