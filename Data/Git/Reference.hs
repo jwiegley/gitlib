@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Git.Reference
        ( RefTarget(..)
@@ -17,6 +18,7 @@ import           Data.Git.Common
 import           Data.Git.Internal
 import           Data.Git.Object
 import qualified Prelude
+import           Prelude (Int,(+))
 
 default (Text)
 
@@ -151,7 +153,7 @@ data ListFlags = ListFlags { _invalid :: Bool
                            , _oid :: Bool
                            , _symbolic :: Bool
                            , _packed :: Bool
-                           , _has_peel :: Bool }
+                           , _hasPeel :: Bool }
                deriving Show
 
 listAll = ListFlags {
@@ -159,7 +161,7 @@ listAll = ListFlags {
   _oid=True,
   _symbolic=True,
   _packed=True,
-  _has_peel=False }
+  _hasPeel=False }
 
 makeClassy ''ListFlags
 
@@ -169,7 +171,18 @@ makeClassy ''ListFlags
 -- use peekArray
 
 listRefNames :: Repository -> ListFlags -> IO [ Text ]
-listRefNames repo flags = undefined -- alloca $
+listRefNames repo flags =
+  let intFlags :: CUInt = (
+        if flags^.oid then 1 else 0) + (
+        if flags^.symbolic then 2 else 0) + (
+        if flags^.packed then 4 else 0) + (
+        if flags^.hasPeel then 8 else 0)
+  in alloca $ \strarray -> do
+
+   withForeignPtr (repositoryPtr repo) $  \repoPtr -> do
+     r <- c'git_reference_list strarray repoPtr intFlags
+     when (r < 0) $ throwIO ReferenceLookupFailed
+     return [ "Foo" ]
 
 --listRefs = c'git_reference_list
 
