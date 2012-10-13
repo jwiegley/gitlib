@@ -21,6 +21,7 @@ import           Data.Git.Object
 import qualified Prelude
 import           Prelude ((+),(-))
 import qualified Data.Text as T
+import           Foreign.Marshal.Array
 
 default (Text)
 
@@ -167,12 +168,17 @@ listAll = ListFlags {
 
 makeClassy ''ListFlags
 
-gitStrarrayToList :: CSize -> Ptr CString -> IO [ Text ]
-gitStrarrayToList count strings
-  = if count == 0 then return [] else do
-    first <- peekCString `liftM` peek strings
-    rest <- gitStrarrayToList (count-1) (plusPtr strings (sizeOf strings))
-    (\x->T.pack x : rest) `liftM` first
+gitStrArray2List :: Ptr C'git_strarray -> IO [ Text ]
+gitStrArray2List gitStrs =
+  do
+     count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
+     strings <- peek $ p'git_strarray'strings gitStrs
+     r0 :: [ CString ] <- Foreign.Marshal.Array.peekArray count strings
+     sequence (
+       let r1 :: [ IO Prelude.String ] = fmap peekCString r0
+           r2 :: [ IO Text ] = fmap ( fmap T.pack ) r1
+       in r2
+       )
 
 listRefNames :: Repository -> ListFlags -> IO [ Text ]
 listRefNames repo flags =
@@ -185,9 +191,7 @@ listRefNames repo flags =
    withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
      r <- c'git_reference_list c'refs repoPtr intFlags
      when (r < 0) $ throwIO ReferenceLookupFailed
-     count <- peek $ p'git_strarray'count c'refs
-     strings <- peek $ p'git_strarray'strings c'refs
-     refs <- gitStrarrayToList count strings
+     refs <- gitStrArray2List c'refs
      c'git_strarray_free c'refs
      return refs
 
