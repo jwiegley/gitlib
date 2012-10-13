@@ -9,6 +9,7 @@ module Data.Git.Reference
 
        , createRef
        , lookupRef
+       , listRefNames
        , lookupId
        , writeRef )
        where
@@ -18,7 +19,8 @@ import           Data.Git.Common
 import           Data.Git.Internal
 import           Data.Git.Object
 import qualified Prelude
-import           Prelude (Int,(+))
+import           Prelude ((+),(-))
+import qualified Data.Text as T
 
 default (Text)
 
@@ -165,10 +167,12 @@ listAll = ListFlags {
 
 makeClassy ''ListFlags
 
--- int git_reference_list(git_strarray *array, git_repository *repo,
---   unsigned int list_flags)
-
--- use peekArray
+gitStrarrayToList :: CSize -> Ptr CString -> IO [ Text ]
+gitStrarrayToList count strings
+  = if count == 0 then return [] else do
+    first <- peekCString `liftM` peek strings
+    rest <- gitStrarrayToList (count-1) (plusPtr strings (sizeOf strings))
+    (\x->T.pack x : rest) `liftM` first
 
 listRefNames :: Repository -> ListFlags -> IO [ Text ]
 listRefNames repo flags =
@@ -177,12 +181,15 @@ listRefNames repo flags =
         if flags^.symbolic then 2 else 0) + (
         if flags^.packed then 4 else 0) + (
         if flags^.hasPeel then 8 else 0)
-  in alloca $ \strarray -> do
-
-   withForeignPtr (repositoryPtr repo) $  \repoPtr -> do
-     r <- c'git_reference_list strarray repoPtr intFlags
+  in alloca $ \c'refs ->
+   withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+     r <- c'git_reference_list c'refs repoPtr intFlags
      when (r < 0) $ throwIO ReferenceLookupFailed
-     return [ "Foo" ]
+     count <- peek $ p'git_strarray'count c'refs
+     strings <- peek $ p'git_strarray'strings c'refs
+     refs <- gitStrarrayToList count strings
+     c'git_strarray_free c'refs
+     return refs
 
 --listRefs = c'git_reference_list
 
