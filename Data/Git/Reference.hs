@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Git.Reference
        ( RefTarget(..)
@@ -8,6 +9,8 @@ module Data.Git.Reference
 
        , createRef
        , lookupRef
+       , listRefNames
+       , listAll
        , lookupId
        , writeRef
        , writeRef_ )
@@ -18,6 +21,9 @@ import           Data.Git.Common
 import           Data.Git.Internal
 import           Data.Git.Object
 import qualified Prelude
+import           Prelude ((+),(-))
+import qualified Data.Text as T
+import           Foreign.Marshal.Array
 
 default (Text)
 
@@ -151,8 +157,46 @@ lookupId name repos = alloca $ \ptr ->
 
 --packallRefs = c'git_reference_packall
 
--- int git_reference_list(git_strarray *array, git_repository *repo,
---   unsigned int list_flags)
+data ListFlags = ListFlags { _invalid :: Bool
+                           , _oid :: Bool
+                           , _symbolic :: Bool
+                           , _packed :: Bool
+                           , _hasPeel :: Bool }
+               deriving Show
+
+listAll :: ListFlags
+listAll = ListFlags {
+  _invalid=False,
+  _oid=True,
+  _symbolic=True,
+  _packed=True,
+  _hasPeel=False }
+
+makeClassy ''ListFlags
+
+gitStrArray2List :: Ptr C'git_strarray -> IO [ Text ]
+gitStrArray2List gitStrs =
+   do
+     count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
+     strings <- peek $ p'git_strarray'strings gitStrs
+     r0 :: [ CString ] <- Foreign.Marshal.Array.peekArray count strings
+     r1 :: [ Prelude.String ] <- sequence $ fmap peekCString r0
+     return $ fmap T.pack r1
+
+listRefNames :: Repository -> ListFlags -> IO [ Text ]
+listRefNames repo flags =
+  let intFlags :: CUInt = (
+        if flags^.oid then 1 else 0) + (
+        if flags^.symbolic then 2 else 0) + (
+        if flags^.packed then 4 else 0) + (
+        if flags^.hasPeel then 8 else 0)
+  in alloca $ \c'refs ->
+   withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+     r <- c'git_reference_list c'refs repoPtr intFlags
+     when (r < 0) $ throwIO ReferenceLookupFailed
+     refs <- gitStrArray2List c'refs
+     c'git_strarray_free c'refs
+     return refs
 
 --listRefs = c'git_reference_list
 
