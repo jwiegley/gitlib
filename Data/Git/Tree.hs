@@ -7,6 +7,7 @@
 module Data.Git.Tree where
 
 import           Bindings.Libgit2
+import           Control.Concurrent.ParallelIO
 import           Data.Git.Blob
 import           Data.Git.Common
 import           Data.Git.Errors
@@ -59,6 +60,10 @@ instance Show Tree where
     Pending _ -> "Tree"
     Stored y  -> "Tree#" ++ show y
 
+instance Show TreeEntry where
+  show be@(BlobEntry {}) = show be
+  show te@(TreeEntry {}) = show te
+
 instance Updatable Tree where
   getId x        = x^.treeInfo.gitId
   objectRepo x   = x^.treeInfo.gitRepo
@@ -84,18 +89,43 @@ createTree repo =
 lookupTree :: Oid -> Repository -> IO (Maybe Tree)
 lookupTree oid repo =
   lookupObject' oid repo c'git_tree_lookup c'git_tree_lookup_prefix $
-    \coid obj _ ->
+    \coid obj _ -> do
+      entriesMap <- withForeignPtr obj $ \treePtr -> do
+        entryCount <- c'git_tree_entrycount (castPtr treePtr)
+        foldM
+          (\m idx -> do
+              entry   <- c'git_tree_entry_byindex (castPtr treePtr)
+                                                 (fromIntegral idx)
+              entryId <- c'git_tree_entry_id entry
+              coid    <- mallocForeignPtr
+              withForeignPtr coid $ \coid' ->
+                c'git_oid_cpy coid' entryId
+
+              entryName  <- c'git_tree_entry_name entry
+                            >>= peekCString >>= return . T.pack
+              entryAttrs <- c'git_tree_entry_attributes entry
+              entryType  <- c'git_tree_entry_type entry
+
+              let entryObj = if entryType == c'GIT_OBJ_BLOB
+                             then BlobEntry (IdRef (COid coid)) False
+                             else TreeEntry (IdRef (COid coid))
+
+              return $ M.insert entryName entryObj m)
+          M.empty [1..entryCount]
       return Tree { _treeInfo =
                        newBase repo (Stored coid) (Just obj)
-                  , _treeContents = M.empty }
+                  , _treeContents = entriesMap }
 
 doLookupTreeEntry :: [Text] -> Tree -> IO (Maybe TreeEntry)
-doLookupTreeEntry [] _ = throw TreeEntryLookupFailed
+doLookupTreeEntry [] t = return (Just (TreeEntry (ObjRef t)))
 doLookupTreeEntry (name:names) t = do
   -- Lookup the current name in this tree.  If it doesn't exist, and there are
   -- more names in the path and 'createIfNotExist' is True, create a new Tree
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
+  Prelude.putStrLn $ "Tree: " ++ show t
+  Prelude.putStrLn $ "Tree Entries: " ++ show (t^.treeContents)
+  Prelude.putStrLn $ "Lookup: " ++ toString name
   y <- case M.lookup name (t^.treeContents) of
     Nothing -> return Nothing
     Just j  -> case j of
@@ -106,13 +136,15 @@ doLookupTreeEntry (name:names) t = do
         tr <- loadObject t' t
         for tr $ \x -> return $ TreeEntry (ObjRef x)
 
+  Prelude.putStrLn $ "Result: " ++ show y
+  Prelude.putStrLn $ "Names: " ++ show names
   if null names
     then return y
     else
       case y of
         Just (BlobEntry {}) -> throw TreeCannotTraverseBlob
         Just (TreeEntry (ObjRef t')) -> doLookupTreeEntry names t'
-        _ -> throw TreeEntryLookupFailed
+        _ -> return Nothing
 
 lookupTreeEntry :: FilePath -> Tree -> IO (Maybe TreeEntry)
 lookupTreeEntry = doLookupTreeEntry . splitPath
@@ -153,18 +185,27 @@ doWriteTree t = alloca $ \ptr ->
     when (r < 0) $ throwIO TreeBuilderCreateFailed
     builder <- peek ptr
 
-    newList <-
-      for (M.toList (t^.treeContents)) $ \(k, v) -> do
-        newObj <-
-          case v of
-            BlobEntry bl exe ->
-              flip BlobEntry exe <$>
-                insertObject builder k bl (if exe
-                                           then 0o100755
-                                           else 0o100644)
-            TreeEntry tr ->
-              TreeEntry <$> insertObject builder k tr 0o040000
-        return (k, newObj)
+    -- jww (2012-10-14): With the loose object backend, there should be no
+    -- race conditions here as there will never be a request to access the
+    -- same file by multiple threads.  If that ever does happen, or if this
+    -- code is changed to write to the packed object backend, simply change
+    -- the function 'parallel' to 'sequence' here.
+    oids <- parallel $
+           flip map (M.toList (t^.treeContents)) $ \(k, v) ->
+             case v of
+               BlobEntry bl exe ->
+                 withObject bl t $ \bl' -> do
+                   (Oid coid) <- objectId bl'
+                   return (k, BlobEntry (IdRef coid) exe, coid,
+                           if exe then 0o100755 else 0o100644)
+               TreeEntry tr ->
+                 withObject tr t $ \tr' -> do
+                   (Oid coid) <- objectId tr'
+                   return (k, TreeEntry (IdRef coid), coid, 0o040000)
+
+    newList <- for oids $ \(k, entry, coid, flags) -> do
+                insertObject builder k coid flags
+                return (k, entry)
 
     coid <- mallocForeignPtr
     withForeignPtr coid $ \coid' -> do
@@ -178,24 +219,13 @@ doWriteTree t = alloca $ \ptr ->
     repo = fromMaybe (error "Repository invalid") $
                      t^.treeInfo.gitRepo.repoObj
 
-    insertObject :: (CStringable a, Updatable b, Show b)
-                 => Ptr C'git_treebuilder -> a -> ObjRef b -> CUInt
-                 -> IO (ObjRef b)
-    insertObject builder key obj attrs = do
-      coid <- case obj of
-        IdRef (COid x) -> return x
-        ObjRef x -> do
-          oid <- objectId x
-          case oid of
-            Oid (COid y) -> return y
-            _ -> error $ "Failed to determine object id for: " ++ show x
-
+    insertObject :: (CStringable a)
+                 => Ptr C'git_treebuilder -> a -> COid -> CUInt -> IO ()
+    insertObject builder key (COid coid) attrs =
       withForeignPtr coid $ \coid' ->
         withCStringable key $ \name -> do
           r2 <- c'git_treebuilder_insert nullPtr builder name coid' attrs
           when (r2 < 0) $ throwIO TreeBuilderInsertFailed
-
-      return (IdRef (COid coid))
 
 doModifyTree
   :: [Text] -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool

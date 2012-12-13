@@ -56,6 +56,10 @@ wrapOidPtr = newForeignPtr_ >=> return . IdRef . COid
 data Ident a = Pending (a -> IO COid)
              | Stored COid
 
+instance Show (Ident a) where
+  show (Pending _) = "Pending"
+  show (Stored coid) = show coid
+
 -- | 'Oid' represents either a full or partial SHA1 hash code used to identify
 --   Git objects.
 data Oid = Oid COid

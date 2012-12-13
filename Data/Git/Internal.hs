@@ -85,6 +85,13 @@ class Updatable a where
     Pending f -> Oid <$> f x
     Stored y  -> return $ Oid y
 
+  objectRef :: a -> IO (ObjRef a)
+  objectRef x = do
+    oid <- objectId x
+    case oid of
+      Oid coid -> return (IdRef coid)
+      PartialOid _ _ -> error "Did not expect to see a PartialOid"
+
   maybeObjectId :: a -> Maybe Oid
   maybeObjectId x = case getId x of
     Pending _ -> Nothing
