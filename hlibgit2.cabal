@@ -22,7 +22,7 @@ Test-suite smoke
   default-language: Haskell98
   type: exitcode-stdio-1.0
   main-is: Main.hs
-  hs-source-dirs: tests
+  hs-source-dirs: test
   build-depends:
       base >=3
     , hlibgit2
