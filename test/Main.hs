@@ -6,6 +6,7 @@
 module Main where
 
 import           Control.Applicative
+import           Control.Concurrent.ParallelIO
 import           Control.Lens
 import           Control.Monad
 import           Data.Git
@@ -31,6 +32,7 @@ main = do
       if errors' > 0 || failures' > 0
       then exitFailure
       else exitSuccess
+  stopGlobalPool
 
 catBlob :: Repository -> Text -> IO (Maybe Text)
 catBlob repo sha = do
