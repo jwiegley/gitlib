@@ -1,10 +1,12 @@
 {-# OPTIONS_HADDOCK hide #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
 module Data.Git.Internal
        ( ObjPtr
+       , ByteSource
 
        , Updatable(..)
 
@@ -30,10 +32,12 @@ import           Control.Exception as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
                                   forM, forM_, msum)
 import           Data.Bool as X
+import           Data.ByteString as B hiding (map)
+import           Data.Conduit
 import           Data.Either as X hiding (lefts, rights)
 import           Data.Foldable as X
 import           Data.Function as X hiding ((.), id)
-import           Data.Git.Errors as X
+import           Data.Git.Error as X
 import           Data.Git.Oid as X
 import           Data.List as X hiding (foldl, foldl', foldl1, foldr1, foldl1',
                                         foldr, concat, maximum, minimum,
@@ -65,6 +69,8 @@ import           Unsafe.Coerce as X
 default (Text)
 
 type ObjPtr a = Maybe (ForeignPtr a)
+
+type ByteSource = GSource IO B.ByteString
 
 class Updatable a where
   getId      :: a -> Ident a

@@ -19,7 +19,7 @@ import Bindings.Libgit2.Oid
 import Control.Exception
 import Control.Monad
 import Data.ByteString.Unsafe
-import Data.Git.Errors
+import Data.Git.Error
 import Data.Stringable as S
 import Foreign.Ptr
 import Foreign.ForeignPtr

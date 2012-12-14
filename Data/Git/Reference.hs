@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Data.Git.Reference
        ( RefTarget(..)
@@ -7,20 +8,28 @@ module Data.Git.Reference
        , createRef
        , lookupRef
        , listRefNames
-       , listAll
+       , allRefsFlag
+       , oidRefsFlag
+       , looseOidRefsFlag
+       , symbolicRefsFlag
+       , mapRefs
+       , mapAllRefs
+       , mapOidRefs
+       , mapLooseOidRefs
+       , mapSymbolicRefs
        , lookupId
        , writeRef
        , writeRef_ )
        where
 
 import           Bindings.Libgit2
-import           Data.Git.Common
+import           Data.ByteString.Unsafe
 import           Data.Git.Internal
-import           Data.Git.Object
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as E
+import           Foreign.Marshal.Array
 import qualified Prelude
 import           Prelude ((+),(-))
-import qualified Data.Text as T
-import           Foreign.Marshal.Array
 
 default (Text)
 
@@ -152,21 +161,42 @@ lookupId name repos = alloca $ \ptr ->
 
 --packallRefs = c'git_reference_packall
 
-data ListFlags = ListFlags { invalid  :: Bool
-                           , oid      :: Bool
-                           , symbolic :: Bool
-                           , packed   :: Bool
-                           , hasPeel  :: Bool }
-               deriving Show
+data ListFlags = ListFlags { listFlagInvalid  :: Bool
+                           , listFlagOid      :: Bool
+                           , listFlagSymbolic :: Bool
+                           , listFlagPacked   :: Bool
+                           , listFlagHasPeel  :: Bool }
+               deriving (Show, Eq)
 
-listAll :: ListFlags
-listAll = ListFlags { invalid  = False
-                    , oid      = True
-                    , symbolic = True
-                    , packed   = True
-                    , hasPeel  = False }
+allRefsFlag :: ListFlags
+allRefsFlag = ListFlags { listFlagInvalid  = False
+                        , listFlagOid      = True
+                        , listFlagSymbolic = True
+                        , listFlagPacked   = True
+                        , listFlagHasPeel  = False }
 
-gitStrArray2List :: Ptr C'git_strarray -> IO [ Text ]
+symbolicRefsFlag :: ListFlags
+symbolicRefsFlag = ListFlags { listFlagInvalid  = False
+                             , listFlagOid      = False
+                             , listFlagSymbolic = True
+                             , listFlagPacked   = False
+                             , listFlagHasPeel  = False }
+
+oidRefsFlag :: ListFlags
+oidRefsFlag = ListFlags { listFlagInvalid  = False
+                        , listFlagOid      = True
+                        , listFlagSymbolic = False
+                        , listFlagPacked   = True
+                        , listFlagHasPeel  = False }
+
+looseOidRefsFlag :: ListFlags
+looseOidRefsFlag = ListFlags { listFlagInvalid  = False
+                             , listFlagOid      = True
+                             , listFlagSymbolic = False
+                             , listFlagPacked   = False
+                             , listFlagHasPeel  = False }
+
+gitStrArray2List :: Ptr C'git_strarray -> IO [Text]
 gitStrArray2List gitStrs = do
   count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
   strings <- peek $ p'git_strarray'strings gitStrs
@@ -175,15 +205,17 @@ gitStrArray2List gitStrs = do
   r1 <- sequence $ fmap peekCString r0
   return $ fmap T.pack r1
 
-listRefNames :: Repository -> ListFlags -> IO [ Text ]
+flagsToInt :: ListFlags -> CUInt
+flagsToInt flags = (if listFlagOid flags      then 1 else 0)
+                 + (if listFlagSymbolic flags then 2 else 0)
+                 + (if listFlagPacked flags   then 4 else 0)
+                 + (if listFlagHasPeel flags  then 8 else 0)
+
+listRefNames :: Repository -> ListFlags -> IO [Text]
 listRefNames repo flags =
-  let intFlags = (if oid flags then 1 else 0)
-               + (if symbolic flags then 2 else 0)
-               + (if packed flags then 4 else 0)
-               + (if hasPeel flags then 8 else 0)
-  in alloca $ \c'refs ->
+  alloca $ \c'refs ->
     withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
-      r <- c'git_reference_list c'refs repoPtr intFlags
+      r <- c'git_reference_list c'refs repoPtr (flagsToInt flags)
       when (r < 0) $ throwIO ReferenceLookupFailed
 
       refs <- gitStrArray2List c'refs
@@ -195,7 +227,52 @@ listRefNames repo flags =
 -- int git_reference_foreach(git_repository *repo, unsigned int list_flags,
 --   int (*callback)(const char *, void *), void *payload)
 
---foreachRef = c'git_reference_foreach
+type ForeachRefCallback = Text -> IO ()
+
+foreachRefCallbackThunk :: ForeachRefCallback -> CString -> Ptr () -> IO CInt
+foreachRefCallbackThunk callback name _ = do
+  nameText <- E.decodeUtf8 <$> unsafePackCString name
+  callback nameText
+  return 0
+
+mapRefs :: Repository -> ListFlags -> ForeachRefCallback -> IO ()
+mapRefs repo flags cb =
+    withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+      fun <- mk'git_reference_foreach_callback (foreachRefCallbackThunk cb)
+      r <- c'git_reference_foreach repoPtr (flagsToInt flags) fun nullPtr
+      -- jww (2012-12-14): Does the return type mean anything here?
+      when (r < 0) $ return ()
+      return ()
+
+mapAllRefs :: Repository -> ForeachRefCallback -> IO ()
+mapAllRefs repo = mapRefs repo allRefsFlag
+mapOidRefs :: Repository -> ForeachRefCallback -> IO ()
+mapOidRefs repo = mapRefs repo oidRefsFlag
+mapLooseOidRefs :: Repository -> ForeachRefCallback -> IO ()
+mapLooseOidRefs repo = mapRefs repo looseOidRefsFlag
+mapSymbolicRefs :: Repository -> ForeachRefCallback -> IO ()
+mapSymbolicRefs repo = mapRefs repo symbolicRefsFlag
+
+{-
+foreachRefCallbackThunk :: Storable a =>
+                           ForeachRefCallback a -> CString -> Ptr () -> IO CInt
+foreachRefCallbackThunk callback name payload = do
+  nameText <- E.decodeUtf8 <$> unsafePackCString name
+  payloadValue <- peek (castPtr payload)
+  maybe (-1) (const 0) <$> callback nameText payloadValue
+
+mapRefsWith ::
+  Storable a => Repository -> ListFlags -> a -> ForeachRefCallback a -> IO ()
+mapRefsWith repo flags payload cb =
+    withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+      fun <- mk'git_reference_foreach_callback (foreachRefCallbackThunk cb)
+      with payload $ \payloadPtr -> do
+        r <- c'git_reference_foreach repoPtr (flagsToInt flags) fun
+                                    (castPtr payloadPtr)
+        -- jww (2012-12-14): Does the return type mean anything here?
+        when (r < 0) $ return ()
+        return ()
+-}
 
 -- int git_reference_is_packed(git_reference *ref)
 

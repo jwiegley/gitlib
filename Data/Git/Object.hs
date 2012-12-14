@@ -2,6 +2,7 @@
 
 module Data.Git.Object
        ( Object(..)
+       , ObjectType(..)
        , NamedRef(..)
        , revParse
        , lookupObject )
@@ -15,6 +16,8 @@ import           Data.Git.Tag
 import           Data.Git.Tree
 import qualified Data.Map as M
 
+data ObjectType = BlobType | TreeType | CommitType | TagType
+
 data Object = BlobObj   Blob
             | TreeObj   Tree
             | CommitObj Commit
@@ -50,7 +53,7 @@ createObject coid obj repo typ
   | typ == c'GIT_OBJ_BLOB =
     return $ BlobObj Blob { blobInfo =
                               newBase repo (Stored coid) (Just obj)
-                          , blobContents = B.empty }
+                          , blobContents = BlobEmpty }
 
   | typ == c'GIT_OBJ_TREE =
     return $ TreeObj Tree { treeInfo =

@@ -41,7 +41,10 @@ catBlob repo sha = do
     case obj of
       Just (BlobObj b) -> do
         (_, contents) <- getBlobContents b
-        return (E.decodeUtf8 contents)
+        str <- blobSourceToString contents
+        case str of
+          Nothing   -> return T.empty
+          Just str' -> return (E.decodeUtf8 str')
 
       Just _  -> error "Found something else..."
       Nothing -> error "Didn't find anything :("
@@ -198,6 +201,8 @@ tests = test [
 
     x <- oidToText <$> lookupId "refs/heads/master" repo
     (@?=) x "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+
+    mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
 
     return()
 

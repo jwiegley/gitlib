@@ -9,7 +9,7 @@ import           Bindings.Libgit2
 import           Control.Concurrent.ParallelIO
 import           Data.Git.Blob
 import           Data.Git.Common
-import           Data.Git.Errors
+import           Data.Git.Error
 import           Data.Git.Internal
 import qualified Data.Map as M
 import qualified Data.Text as T
