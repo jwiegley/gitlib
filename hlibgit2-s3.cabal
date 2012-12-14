@@ -1,0 +1,34 @@
+Name:                hlibgit2-s3
+Version:             0.0.1
+Synopsis:            A repository backend for storing Git objects in Amazon S3
+Description:         A repository backend for storing Git objects in Amazon S3.
+License-file:        LICENSE
+License:             MIT
+Author:              John Wiegley
+Maintainer:          johnw@fpcomplete.com
+Build-Type:          Simple
+Cabal-Version:       >=1.10
+Category:            Git
+
+Source-repository head
+  type: git
+  location: git://github.com/jwiegley/hlibgit2-s3.git
+
+Test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  build-depends:
+      base >=3
+    , hlibgit2
+    , hS3 >= 0.5.6
+    , process
+
+Library
+  hs-source-dirs: .
+  default-language: Haskell98
+  build-depends:
+      base            >= 3 && < 5
+  exposed-modules:
+    Data.Git.Backend.S3
