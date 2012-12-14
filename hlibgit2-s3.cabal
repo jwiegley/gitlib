@@ -14,14 +14,14 @@ Source-repository head
   type: git
   location: git://github.com/jwiegley/hlibgit2-s3.git
 
-Test-suite smoke
-  default-language: Haskell98
-  type: exitcode-stdio-1.0
-  main-is: Main.hs
-  hs-source-dirs: test
-  build-depends:
-      base >=3
-    , process
+-- Test-suite smoke
+--   default-language: Haskell98
+--   type: exitcode-stdio-1.0
+--   main-is: Main.hs
+--   hs-source-dirs: test
+--   build-depends:
+--       base >=3
+--     , process
 
 Library
   hs-source-dirs: .
