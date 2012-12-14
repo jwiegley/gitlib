@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | Interface for opening and creating repositories.  Repository objects are
 --   immutable, and serve only to refer to the given repository.  Any data
@@ -11,8 +10,6 @@ module Data.Git.Repository
        , Updatable(..)
 
        , Repository
-       , HasRepository(..)
-
        , openRepository
        , createRepository
        , openOrCreateRepository

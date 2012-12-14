@@ -1,6 +1,5 @@
 {-# OPTIONS_HADDOCK hide #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
@@ -9,12 +8,9 @@ module Data.Git.Internal
 
        , Updatable(..)
 
-       , Base(..), gitId, gitRepo, gitObj
-       , newBase
+       , Base(..), newBase
 
-       , Repository
-       , HasRepository(..)
-
+       , Repository(..)
        , openRepository
        , createRepository
        , openOrCreateRepository
@@ -31,7 +27,6 @@ import           Bindings.Libgit2 as X
 import           Control.Applicative as X
 import           Control.Category as X
 import           Control.Exception as X
-import           Control.Lens as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
                                   forM, forM_, msum)
 import           Data.Bool as X
@@ -107,32 +102,28 @@ class Updatable a where
   getObject (IdRef _)  = Nothing
   getObject (ObjRef x) = Just x
 
-data Repository = Repository { _repoPath :: FilePath
-                             , _repoObj  :: ObjPtr C'git_repository }
-
-makeClassy ''Repository
+data Repository = Repository { repoPath :: FilePath
+                             , repoObj  :: ObjPtr C'git_repository }
 
 instance Show Repository where
-  show x = "Repository " <> toString (x^.repoPath)
+  show x = "Repository " <> toString (repoPath x)
 
-data Base a = Base { _gitId   :: Ident a
-                   , _gitRepo :: Repository
-                   , _gitObj  :: ObjPtr C'git_object }
-
-makeLenses ''Base
+data Base a = Base { gitId   :: Ident a
+                   , gitRepo :: Repository
+                   , gitObj  :: ObjPtr C'git_object }
 
 instance Show (Base a) where
-  show x = case x^.gitId of
+  show x = case gitId x of
     Pending _ -> "Base"
     Stored y  -> "Base#" ++ show y
 
 newBase :: Repository -> Ident a -> ObjPtr C'git_object -> Base a
-newBase repo oid obj = Base { _gitId   = oid
-                            , _gitRepo = repo
-                            , _gitObj  = obj }
+newBase repo oid obj = Base { gitId   = oid
+                            , gitRepo = repo
+                            , gitObj  = obj }
 
 repositoryPtr :: Repository -> ForeignPtr C'git_repository
-repositoryPtr repo = fromMaybe (error "Repository invalid") (repo^.repoObj)
+repositoryPtr repo = fromMaybe (error "Repository invalid") (repoObj repo)
 
 openRepository :: FilePath -> IO Repository
 openRepository path =
@@ -161,8 +152,8 @@ openRepositoryWith path fn = alloca $ \ptr ->
         when (r < 0) $ doesNotExist p
         ptr' <- peek ptr
         fptr <- newForeignPtr p'git_repository_free ptr'
-        return Repository { _repoPath = path
-                          , _repoObj  = Just fptr }
+        return Repository { repoPath = path
+                          , repoObj  = Just fptr }
 
   where doesNotExist = throwIO . RepositoryNotExist . toString
 

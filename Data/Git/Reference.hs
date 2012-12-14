@@ -1,12 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Git.Reference
        ( RefTarget(..)
-       , Reference(..), HasReference(..)
-
+       , Reference(..)
        , createRef
        , lookupRef
        , listRefNames
@@ -31,23 +28,21 @@ data RefTarget = RefTargetId Oid
                | RefTargetSymbolic Text
                deriving (Show, Eq)
 
-data Reference = Reference { _refRepo   :: Repository
-                           , _refName   :: Text
-                           , _refTarget :: RefTarget
-                           , _refObj    :: ObjPtr C'git_reference }
+data Reference = Reference { refRepo   :: Repository
+                           , refName   :: Text
+                           , refTarget :: RefTarget
+                           , refObj    :: ObjPtr C'git_reference }
                deriving Show
-
-makeClassy ''Reference
 
 -- int git_reference_lookup(git_reference **reference_out,
 --   git_repository *repo, const char *name)
 
 createRef :: Text -> RefTarget -> Repository -> Reference
 createRef name target repo =
-  Reference { _refRepo   = repo
-            , _refName   = name
-            , _refTarget = target
-            , _refObj    = Nothing }
+  Reference { refRepo   = repo
+            , refName   = name
+            , refTarget = target
+            , refObj    = Nothing }
 
 lookupRef :: Text -> Repository -> IO (Maybe Reference)
 lookupRef name repo = alloca $ \ptr -> do
@@ -59,16 +54,16 @@ lookupRef name repo = alloca $ \ptr -> do
     else do
     ref  <- peek ptr
     fptr <- newForeignPtr p'git_reference_free ref
-    return $ Just $ Reference { _refRepo   = repo
-                              , _refName   = name
-                              , _refTarget = undefined
-                              , _refObj    = Just fptr }
+    return $ Just $ Reference { refRepo   = repo
+                              , refName   = name
+                              , refTarget = undefined
+                              , refObj    = Just fptr }
 
 writeRef :: Reference -> IO Reference
 writeRef ref = alloca $ \ptr -> do
   withForeignPtr repo $ \repoPtr ->
-    withCStringable (ref^.refName) $ \namePtr -> do
-      r <- case ref^.refTarget of
+    withCStringable (refName ref) $ \namePtr -> do
+      r <- case refTarget ref of
         RefTargetId (PartialOid {}) ->
           throwIO RefCannotCreateFromPartialOid
 
@@ -84,10 +79,10 @@ writeRef ref = alloca $ \ptr -> do
       when (r < 0) $ throwIO ReferenceCreateFailed
 
   fptr <- newForeignPtr_ =<< peek ptr
-  return $ refObj .~ Just fptr $ ref
+  return ref { refObj = Just fptr }
 
   where
-    repo = fromMaybe (error "Repository invalid") (ref^.refRepo.repoObj)
+    repo = fromMaybe (error "Repository invalid") (repoObj (refRepo ref))
 
 writeRef_ :: Reference -> IO ()
 writeRef_ = void . writeRef
@@ -104,7 +99,7 @@ lookupId name repos = alloca $ \ptr ->
       Oid <$> COid <$> newForeignPtr_ ptr
 
   where
-    repo = fromMaybe (error "Repository invalid") (repos^.repoObj)
+    repo = fromMaybe (error "Repository invalid") (repoObj repos)
 
 -- int git_reference_create_symbolic(git_reference **ref_out,
 --   git_repository *repo, const char *name, const char *target, int force)
@@ -157,46 +152,43 @@ lookupId name repos = alloca $ \ptr ->
 
 --packallRefs = c'git_reference_packall
 
-data ListFlags = ListFlags { _invalid :: Bool
-                           , _oid :: Bool
-                           , _symbolic :: Bool
-                           , _packed :: Bool
-                           , _hasPeel :: Bool }
+data ListFlags = ListFlags { invalid  :: Bool
+                           , oid      :: Bool
+                           , symbolic :: Bool
+                           , packed   :: Bool
+                           , hasPeel  :: Bool }
                deriving Show
 
 listAll :: ListFlags
-listAll = ListFlags {
-  _invalid=False,
-  _oid=True,
-  _symbolic=True,
-  _packed=True,
-  _hasPeel=False }
-
-makeClassy ''ListFlags
+listAll = ListFlags { invalid  = False
+                    , oid      = True
+                    , symbolic = True
+                    , packed   = True
+                    , hasPeel  = False }
 
 gitStrArray2List :: Ptr C'git_strarray -> IO [ Text ]
-gitStrArray2List gitStrs =
-   do
-     count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
-     strings <- peek $ p'git_strarray'strings gitStrs
-     r0 :: [ CString ] <- Foreign.Marshal.Array.peekArray count strings
-     r1 :: [ Prelude.String ] <- sequence $ fmap peekCString r0
-     return $ fmap T.pack r1
+gitStrArray2List gitStrs = do
+  count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
+  strings <- peek $ p'git_strarray'strings gitStrs
+
+  r0 <- Foreign.Marshal.Array.peekArray count strings
+  r1 <- sequence $ fmap peekCString r0
+  return $ fmap T.pack r1
 
 listRefNames :: Repository -> ListFlags -> IO [ Text ]
 listRefNames repo flags =
-  let intFlags :: CUInt = (
-        if flags^.oid then 1 else 0) + (
-        if flags^.symbolic then 2 else 0) + (
-        if flags^.packed then 4 else 0) + (
-        if flags^.hasPeel then 8 else 0)
+  let intFlags = (if oid flags then 1 else 0)
+               + (if symbolic flags then 2 else 0)
+               + (if packed flags then 4 else 0)
+               + (if hasPeel flags then 8 else 0)
   in alloca $ \c'refs ->
-   withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
-     r <- c'git_reference_list c'refs repoPtr intFlags
-     when (r < 0) $ throwIO ReferenceLookupFailed
-     refs <- gitStrArray2List c'refs
-     c'git_strarray_free c'refs
-     return refs
+    withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+      r <- c'git_reference_list c'refs repoPtr intFlags
+      when (r < 0) $ throwIO ReferenceLookupFailed
+
+      refs <- gitStrArray2List c'refs
+      c'git_strarray_free c'refs
+      return refs
 
 --listRefs = c'git_reference_list
 

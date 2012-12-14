@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module Data.Git.Commit where
 
@@ -20,32 +19,30 @@ import qualified Prelude
 
 default (Text)
 
-data Commit = Commit { _commitInfo      :: Base Commit
-                     , _commitAuthor    :: Signature
-                     , _commitCommitter :: Signature
-                     , _commitLog       :: Text
-                     , _commitEncoding  :: Prelude.String
-                     , _commitTree      :: ObjRef Tree
-                     , _commitParents   :: [ObjRef Commit]
-                     , _commitObj       :: ObjPtr C'git_commit }
-
-makeClassy ''Commit
+data Commit = Commit { commitInfo      :: Base Commit
+                     , commitAuthor    :: Signature
+                     , commitCommitter :: Signature
+                     , commitLog       :: Text
+                     , commitEncoding  :: Prelude.String
+                     , commitTree      :: ObjRef Tree
+                     , commitParents   :: [ObjRef Commit]
+                     , commitObj       :: ObjPtr C'git_commit }
 
 instance Show Commit where
-  show x = case x^.commitInfo.gitId of
+  show x = case gitId (commitInfo x) of
     Pending _ -> "Commit"
     Stored y  -> "Commit#" ++ show y
 
 instance Updatable Commit where
-  getId x        = x^.commitInfo.gitId
-  objectRepo x   = x^.commitInfo.gitRepo
-  objectPtr x    = x^.commitInfo.gitObj
+  getId x        = gitId (commitInfo x)
+  objectRepo x   = gitRepo (commitInfo x)
+  objectPtr x    = gitObj (commitInfo x)
   update         = writeCommit Nothing
   lookupFunction = lookupCommit
 
 newCommitBase :: Commit -> Base Commit
 newCommitBase t =
-  newBase (t^.commitInfo.gitRepo)
+  newBase (gitRepo (commitInfo t))
           (Pending (doWriteCommit Nothing >=> return . snd)) Nothing
 
 -- | Create a new, empty commit.
@@ -54,16 +51,16 @@ newCommitBase t =
 --   commit is a no-op.
 createCommit :: Repository -> Commit
 createCommit repo =
-  Commit { _commitInfo     =
-            newBase repo (Pending (doWriteCommit Nothing >=> return . snd))
-                    Nothing
-         , _commitAuthor    = createSignature
-         , _commitCommitter = createSignature
-         , _commitTree      = ObjRef (createTree repo)
-         , _commitParents   = []
-         , _commitLog       = T.empty
-         , _commitEncoding  = ""
-         , _commitObj       = Nothing }
+  Commit { commitInfo     =
+           newBase repo (Pending (doWriteCommit Nothing >=> return . snd))
+                   Nothing
+         , commitAuthor    = createSignature
+         , commitCommitter = createSignature
+         , commitTree      = ObjRef (createTree repo)
+         , commitParents   = []
+         , commitLog       = T.empty
+         , commitEncoding  = ""
+         , commitObj       = Nothing }
 
 lookupCommit :: Oid -> Repository -> IO (Maybe Commit)
 lookupCommit oid repo =
@@ -90,19 +87,19 @@ lookupCommit oid repo =
                                               (c'git_commit_parent_oid c))
                                    [0..pn])
 
-        return Commit { _commitInfo      = newBase repo (Stored coid) (Just obj)
-                      , _commitAuthor    = auth
-                      , _commitCommitter = comm
-                      , _commitTree      = toid
-                      , _commitParents   = poids
-                      , _commitLog       = U.toUnicode conv msg
-                      , _commitEncoding  = encs
-                      , _commitObj       = Just $ unsafeCoerce obj }
+        return Commit { commitInfo      = newBase repo (Stored coid) (Just obj)
+                      , commitAuthor    = auth
+                      , commitCommitter = comm
+                      , commitTree      = toid
+                      , commitParents   = poids
+                      , commitLog       = U.toUnicode conv msg
+                      , commitEncoding  = encs
+                      , commitObj       = Just $ unsafeCoerce obj }
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
 writeCommit :: Maybe Text -> Commit -> IO Commit
-writeCommit _ c@(Commit { _commitInfo = Base { _gitId = Stored _ } }) =
+writeCommit _ c@(Commit { commitInfo = Base { gitId = Stored _ } }) =
   return c
 writeCommit ref c = fst <$> doWriteCommit ref c
 
@@ -111,29 +108,30 @@ doWriteCommit ref c = do
   coid <- withForeignPtr repo $ \repoPtr -> do
     coid <- mallocForeignPtr
     withForeignPtr coid $ \coid' -> do
-      conv <- U.open (c^.commitEncoding) (Just True)
-      BS.useAsCString (U.fromUnicode conv (c^.commitLog)) $ \message ->
+      conv <- U.open (commitEncoding c) (Just True)
+      BS.useAsCString (U.fromUnicode conv (commitLog c)) $ \message ->
         withRef ref $ \update_ref ->
-          withSignature conv (c^.commitAuthor) $ \author ->
-            withSignature conv (c^.commitCommitter) $ \committer ->
-              withEncStr (c^.commitEncoding) $ \message_encoding ->
-                withGitTree (c^.commitTree) c $ \commit_tree -> do
+          withSignature conv (commitAuthor c) $ \author ->
+            withSignature conv (commitCommitter c) $ \committer ->
+              withEncStr (commitEncoding c) $ \message_encoding ->
+                withGitTree (commitTree c) c $ \commit_tree -> do
                   parentPtrs <- getCommitParentPtrs c
                   parents    <- newArray $
                                map FU.unsafeForeignPtrToPtr parentPtrs
                   r <- c'git_commit_create coid' repoPtr
                         update_ref author committer
                         message_encoding message commit_tree
-                        (fromIntegral (length (c^.commitParents)))
+                        (fromIntegral (length (commitParents c)))
                         parents
                   when (r < 0) $ throwIO CommitCreateFailed
                   return coid
 
-  return (commitInfo.gitId .~ Stored (COid coid) $ c, COid coid)
+  return (c { commitInfo = (commitInfo c) { gitId = Stored (COid coid) } }
+         , COid coid)
 
   where
     repo = fromMaybe (error "Repository invalid")
-                     (c^.commitInfo.gitRepo.repoObj)
+                     (repoObj (gitRepo (commitInfo c)))
 
     withRef refName =
       if isJust refName
@@ -151,14 +149,14 @@ getCommitParents c =
                      case parent of
                        Nothing -> error "Cannot find Git commit"
                        Just p' -> return p')
-           (c^.commitParents)
+           (commitParents c)
 
 getCommitParentPtrs :: Commit -> IO [ForeignPtr C'git_commit]
 getCommitParentPtrs c =
   withForeignPtr (repositoryPtr (objectRepo c)) $ \repoPtr ->
-    for (c^.commitParents) $ \p ->
+    for (commitParents c) $ \p ->
       case p of
-        ObjRef (Commit { _commitObj = Just obj }) -> return obj
+        ObjRef (Commit { commitObj = Just obj }) -> return obj
         _ -> do
           Oid (COid oid) <-
             case p of
@@ -176,27 +174,27 @@ modifyCommitTree
   :: FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
   -> Commit -> IO (Either a Commit)
 modifyCommitTree path f createIfNotExist c =
-  withObject (c^.commitTree) c $ \tr -> do
+  withObject (commitTree c) c $ \tr -> do
     result <- modifyTree path f createIfNotExist tr
     case result of
       Left x    -> return (Left x)
-      Right tr' -> return $ Right $ commitTree .~ ObjRef tr' $ c
+      Right tr' -> return $ Right $ c { commitTree = ObjRef tr' }
 
 removeFromCommitTree :: FilePath -> Commit -> IO Commit
 removeFromCommitTree path c =
-  withObject (c^.commitTree) c $ \tr -> do
+  withObject (commitTree c) c $ \tr -> do
     tr' <- removeFromTree path tr
-    return $ commitTree .~ ObjRef tr' $ c
+    return c { commitTree = ObjRef tr' }
 
 doUpdateCommit :: [Text] -> TreeEntry -> Commit -> IO Commit
 doUpdateCommit xs item c = do
-  t <- loadObject (c^.commitTree) c
+  t <- loadObject (commitTree c) c
   case t of
     Nothing -> error "Failed to load tree for commit"
     Just t' -> do
       tr <- doModifyTree xs (const (Right (Just item))) True t'
       case tr of
-        Right tr' -> return $ commitTree .~ ObjRef tr' $ c
+        Right tr' -> return c { commitTree = ObjRef tr' }
         _ -> undefined
 
 updateCommit :: FilePath -> TreeEntry -> Commit -> IO Commit

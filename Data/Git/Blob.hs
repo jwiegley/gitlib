@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module Data.Git.Blob
-       ( Blob(..), HasBlob(..)
+       ( Blob(..)
        , newBlobBase
        , createBlob
        , getBlobContents
@@ -18,26 +17,24 @@ import qualified Prelude
 
 default (Text)
 
-data Blob = Blob { _blobInfo     :: Base Blob
-                 , _blobContents :: B.ByteString }
-
-makeClassy ''Blob
+data Blob = Blob { blobInfo     :: Base Blob
+                 , blobContents :: B.ByteString }
 
 instance Show Blob where
-  show x = case x^.blobInfo.gitId of
+  show x = case gitId (blobInfo x) of
     Pending _ -> "Blob"
     Stored y  -> "Blob#" ++ show y
 
 instance Updatable Blob where
-  getId x        = x^.blobInfo.gitId
-  objectRepo x   = x^.blobInfo.gitRepo
-  objectPtr x    = x^.blobInfo.gitObj
+  getId x        = gitId (blobInfo x)
+  objectRepo x   = gitRepo (blobInfo x)
+  objectPtr x    = gitObj (blobInfo x)
   update         = writeBlob
   lookupFunction = lookupBlob
 
 newBlobBase :: Blob -> Base Blob
 newBlobBase b =
-  newBase (b^.blobInfo.gitRepo) (Pending doWriteBlob) Nothing
+  newBase (gitRepo (blobInfo b)) (Pending doWriteBlob) Nothing
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -47,32 +44,32 @@ createBlob :: B.ByteString -> Repository -> Blob
 createBlob text repo
   | text == B.empty = error "Cannot create an empty blob"
   | otherwise =
-    Blob { _blobInfo     = newBase repo (Pending doWriteBlob) Nothing
-         , _blobContents = text }
+    Blob { blobInfo     = newBase repo (Pending doWriteBlob) Nothing
+         , blobContents = text }
 
 lookupBlob :: Oid -> Repository -> IO (Maybe Blob)
 lookupBlob oid repo =
   lookupObject' oid repo c'git_blob_lookup c'git_blob_lookup_prefix $
     \coid obj _ ->
-      return Blob { _blobInfo     = newBase repo (Stored coid) (Just obj)
-                  , _blobContents = B.empty }
+      return Blob { blobInfo     = newBase repo (Stored coid) (Just obj)
+                  , blobContents = B.empty }
 
 getBlobContents :: Blob -> IO (Blob, B.ByteString)
 getBlobContents b =
-  case b^.blobInfo.gitId of
-    Pending _   -> return $ (b, contents)
+  case gitId (blobInfo b) of
+    Pending _   -> return (b, contents)
     Stored hash ->
       if contents /= B.empty
         then return (b, contents)
         else
-        case b^.blobInfo.gitObj of
+        case gitObj (blobInfo b) of
           Just blobPtr ->
             withForeignPtr blobPtr $ \ptr -> do
               size <- c'git_blob_rawsize (castPtr ptr)
               buf  <- c'git_blob_rawcontent (castPtr ptr)
               bstr <- curry unsafePackCStringLen (castPtr buf)
                             (fromIntegral size)
-              return (blobContents .~ bstr $ b, bstr)
+              return (b { blobContents = bstr }, bstr)
 
           Nothing -> do
             b' <- lookupBlob (Oid hash) repo
@@ -80,16 +77,16 @@ getBlobContents b =
               Just blobPtr' -> getBlobContents blobPtr'
               Nothing       -> return (b, B.empty)
 
-  where repo     = b^.blobInfo.gitRepo
-        contents = b^.blobContents
+  where repo     = gitRepo (blobInfo b)
+        contents = blobContents b
 
 -- | Write out a blob to its repository.  If it has already been written,
 --   nothing will happen.
 writeBlob :: Blob -> IO Blob
-writeBlob b@(Blob { _blobInfo = Base { _gitId = Stored _ } }) = return b
+writeBlob b@(Blob { blobInfo = Base { gitId = Stored _ } }) = return b
 writeBlob b = do hash <- doWriteBlob b
-                 return $ blobInfo.gitId .~ Stored hash $
-                          blobContents   .~ B.empty    $ b
+                 return b { blobInfo     = (blobInfo b) { gitId = Stored hash }
+                          , blobContents = B.empty }
 
 doWriteBlob :: Blob -> IO COid
 doWriteBlob b = do
@@ -100,10 +97,10 @@ doWriteBlob b = do
 
   where
     repo = fromMaybe (error "Repository invalid")
-                     (b^.blobInfo.gitRepo.repoObj)
+                     (repoObj (gitRepo (blobInfo b)))
 
     createFromBuffer ptr repoPtr =
-      unsafeUseAsCStringLen (b^.blobContents) $
+      unsafeUseAsCStringLen (blobContents b) $
         uncurry (\cstr len ->
                   withForeignPtr ptr $ \ptr' ->
                     c'git_blob_create_frombuffer

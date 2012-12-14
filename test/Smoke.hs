@@ -7,7 +7,6 @@ module Main where
 
 import           Control.Applicative
 import           Control.Concurrent.ParallelIO
-import           Control.Lens
 import           Control.Monad
 import           Data.Git
 import           Data.Maybe
@@ -63,6 +62,13 @@ oid = objectId >=> return . oidToText
 
 oidToText :: Oid -> Text
 oidToText = T.pack . show
+
+sampleCommit :: Repository -> Tree -> Signature -> Commit
+sampleCommit repo tr sig =
+    (createCommit repo) { commitTree      = ObjRef tr
+                        , commitAuthor    = sig
+                        , commitCommitter = sig
+                        , commitLog       = "Sample log message." }
 
 tests :: Test
 tests = test [
@@ -141,15 +147,11 @@ tests = test [
     -- The Oid has been cleared in tr, so this tests that it gets written as
     -- needed.
     let sig  = Signature {
-            _signatureName  = "John Wiegley"
-          , _signatureEmail = "johnw@newartisans.com"
-          , _signatureWhen  = posixSecondsToUTCTime 1348980883 }
+            signatureName  = "John Wiegley"
+          , signatureEmail = "johnw@newartisans.com"
+          , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
-    x <- oid $ commitTree      .~ ObjRef tr
-            $ commitAuthor    .~ sig
-            $ commitCommitter .~ sig
-            $ commitLog       .~ "Sample log message."
-            $ createCommit repo
+    x <- oid $ sampleCommit repo tr sig
     (@?=) x "44381a5e564d19893d783a5d5c59f9c745155b56"
 
     return()
@@ -168,14 +170,10 @@ tests = test [
     -- The Oid has been cleared in tr, so this tests that it gets written as
     -- needed.
     let sig = Signature {
-            _signatureName  = "John Wiegley"
-          , _signatureEmail = "johnw@newartisans.com"
-          , _signatureWhen  = posixSecondsToUTCTime 1348980883 }
-        c   = commitTree      .~ ObjRef tr
-            $ commitAuthor    .~ sig
-            $ commitCommitter .~ sig
-            $ commitLog       .~ "Sample log message."
-            $ createCommit repo
+            signatureName  = "John Wiegley"
+          , signatureEmail = "johnw@newartisans.com"
+          , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+        c   = sampleCommit repo tr sig
     x <- oid c
     (@?=) x "44381a5e564d19893d783a5d5c59f9c745155b56"
 
@@ -185,15 +183,12 @@ tests = test [
     (@?=) x "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
     let sig = Signature {
-            _signatureName  = "John Wiegley"
-          , _signatureEmail = "johnw@newartisans.com"
-          , _signatureWhen  = posixSecondsToUTCTime 1348981883 }
-        c2  = commitTree      .~ ObjRef tr
-            $ commitAuthor    .~ sig
-            $ commitCommitter .~ sig
-            $ commitLog       .~ "Second sample log message."
-            $ commitParents   .~ [ObjRef c]
-            $ createCommit repo
+            signatureName  = "John Wiegley"
+          , signatureEmail = "johnw@newartisans.com"
+          , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+        c2  = (sampleCommit repo tr sig) {
+                  commitLog       = "Second sample log message."
+                , commitParents   = [ObjRef c] }
     x <- oid c2
     (@?=) x "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 

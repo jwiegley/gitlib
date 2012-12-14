@@ -1,6 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
@@ -50,13 +49,11 @@ treeIdRef (PartialOid {}) = throw ObjectRefRequiresFullOid
 
 type TreeMap = M.Map Text TreeEntry
 
-data Tree = Tree { _treeInfo     :: Base Tree
-                 , _treeContents :: TreeMap }
-
-makeClassy ''Tree
+data Tree = Tree { treeInfo     :: Base Tree
+                 , treeContents :: TreeMap }
 
 instance Show Tree where
-  show x = case x^.treeInfo.gitId of
+  show x = case gitId (treeInfo x) of
     Pending _ -> "Tree"
     Stored y  -> "Tree#" ++ show y
 
@@ -65,15 +62,15 @@ instance Show TreeEntry where
   show te@(TreeEntry {}) = show te
 
 instance Updatable Tree where
-  getId x        = x^.treeInfo.gitId
-  objectRepo x   = x^.treeInfo.gitRepo
-  objectPtr x    = x^.treeInfo.gitObj
+  getId x        = gitId (treeInfo x)
+  objectRepo x   = gitRepo (treeInfo x)
+  objectPtr x    = gitObj (treeInfo x)
   update         = writeTree
   lookupFunction = lookupTree
 
 newTreeBase :: Tree -> Base Tree
 newTreeBase t =
-  newBase (t^.treeInfo.gitRepo)
+  newBase (gitRepo (treeInfo t))
           (Pending (doWriteTree >=> return . snd)) Nothing
 
 -- | Create a new, empty tree.
@@ -82,9 +79,9 @@ newTreeBase t =
 --   tree is a no-op.
 createTree :: Repository -> Tree
 createTree repo =
-  Tree { _treeInfo     =
+  Tree { treeInfo     =
             newBase repo (Pending (doWriteTree >=> return . snd)) Nothing
-       , _treeContents = M.empty }
+       , treeContents = M.empty }
 
 lookupTree :: Oid -> Repository -> IO (Maybe Tree)
 lookupTree oid repo =
@@ -112,9 +109,9 @@ lookupTree oid repo =
 
               return $ M.insert entryName entryObj m)
           M.empty [1..entryCount]
-      return Tree { _treeInfo =
+      return Tree { treeInfo =
                        newBase repo (Stored coid) (Just obj)
-                  , _treeContents = entriesMap }
+                  , treeContents = entriesMap }
 
 doLookupTreeEntry :: [Text] -> Tree -> IO (Maybe TreeEntry)
 doLookupTreeEntry [] t = return (Just (TreeEntry (ObjRef t)))
@@ -124,9 +121,9 @@ doLookupTreeEntry (name:names) t = do
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
   Prelude.putStrLn $ "Tree: " ++ show t
-  Prelude.putStrLn $ "Tree Entries: " ++ show (t^.treeContents)
+  Prelude.putStrLn $ "Tree Entries: " ++ show (treeContents t)
   Prelude.putStrLn $ "Lookup: " ++ toString name
-  y <- case M.lookup name (t^.treeContents) of
+  y <- case M.lookup name (treeContents t) of
     Nothing -> return Nothing
     Just j  -> case j of
       BlobEntry b mode -> do
@@ -156,10 +153,10 @@ withGitTree tref obj f =
     case tref of
       IdRef (COid oid) -> withGitTreeOid repoPtr oid
 
-      ObjRef (Tree { _treeInfo = Base { _gitId = Stored (COid oid) } }) ->
+      ObjRef (Tree { treeInfo = Base { gitId = Stored (COid oid) } }) ->
         withGitTreeOid repoPtr oid
 
-      ObjRef (Tree { _treeInfo = Base { _gitObj = Just t } }) ->
+      ObjRef (Tree { treeInfo = Base { gitObj = Just t } }) ->
         withForeignPtr t (f . castPtr)
 
       ObjRef t -> do t' <- update t
@@ -175,7 +172,7 @@ withGitTree tref obj f =
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 writeTree :: Tree -> IO Tree
-writeTree t@(Tree { _treeInfo = Base { _gitId = Stored _ } }) = return t
+writeTree t@(Tree { treeInfo = Base { gitId = Stored _ } }) = return t
 writeTree t = fst <$> doWriteTree t
 
 doWriteTree :: Tree -> IO (Tree, COid)
@@ -191,7 +188,7 @@ doWriteTree t = alloca $ \ptr ->
     -- code is changed to write to the packed object backend, simply change
     -- the function 'parallel' to 'sequence' here.
     oids <- parallel $
-           flip map (M.toList (t^.treeContents)) $ \(k, v) ->
+           flip map (M.toList (treeContents t)) $ \(k, v) ->
              case v of
                BlobEntry bl exe ->
                  withObject bl t $ \bl' -> do
@@ -212,12 +209,12 @@ doWriteTree t = alloca $ \ptr ->
       r3 <- c'git_treebuilder_write coid' repoPtr builder
       when (r3 < 0) $ throwIO TreeBuilderWriteFailed
 
-    return (treeInfo.gitId .~ Stored (COid coid) $
-            treeContents   .~ M.fromList newList $ t, COid coid)
+    return (t { treeInfo     = (treeInfo t) { gitId = Stored (COid coid) }
+              , treeContents = M.fromList newList }, COid coid)
 
   where
-    repo = fromMaybe (error "Repository invalid") $
-                     t^.treeInfo.gitRepo.repoObj
+    repo = fromMaybe (error "Repository invalid")
+                     (repoObj (gitRepo (treeInfo t)))
 
     insertObject :: (CStringable a)
                  => Ptr C'git_treebuilder -> a -> COid -> CUInt -> IO ()
@@ -236,12 +233,12 @@ doModifyTree (name:names) f createIfNotExist t = do
   -- more names in the path and 'createIfNotExist' is True, create a new Tree
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
-  y <- case M.lookup name (t^.treeContents) of
+  y <- case M.lookup name (treeContents t) of
     Nothing ->
       return $
         if createIfNotExist && not (null names)
         then Just . TreeEntry . ObjRef . createTree
-             $ t^.treeInfo.gitRepo
+             $ gitRepo (treeInfo t)
         else Nothing
     Just j -> case j of
       BlobEntry b mode -> do
@@ -268,11 +265,11 @@ doModifyTree (name:names) f createIfNotExist t = do
       Left err -> return $ Left err
       Right z ->
         return $ Right $
-          treeInfo     .~ newTreeBase t $
-          treeContents .~
-            (case z of
-               Nothing -> M.delete name (t^.treeContents)
-               Just z' -> M.insert name z' (t^.treeContents)) $ t
+          t { treeInfo     = newTreeBase t
+            , treeContents =
+              case z of
+                Nothing -> M.delete name (treeContents t)
+                Just z' -> M.insert name z' (treeContents t) }
 
     else
       -- If there are further names in the path, descend them now.  If
@@ -288,12 +285,12 @@ doModifyTree (name:names) f createIfNotExist t = do
             err@(Left _) -> return err
             Right st' ->
               return $ Right $
-                treeInfo     .~ newTreeBase t $
-                treeContents .~
-                  (if M.null (st'^.treeContents)
-                   then M.delete name (t^.treeContents)
-                   else M.insert name (TreeEntry (ObjRef st'))
-                                 (t^.treeContents)) $ t
+                t { treeInfo     = newTreeBase t
+                  , treeContents =
+                    if M.null (treeContents st')
+                    then M.delete name (treeContents t)
+                    else M.insert name (TreeEntry (ObjRef st'))
+                                  (treeContents t) }
         _ -> throw TreeLookupFailed
 
 modifyTree
