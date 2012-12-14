@@ -1,18 +1,30 @@
 module Data.Git.Backend.S3 where
 
-import Bindings.Libgit2.OdbBackend
-import Bindings.Libgit2.Types
-import Bindings.Libgit2.Oid
-import Foreign.C.String
-import Foreign.C.Types
-import Foreign.ForeignPtr
-import Foreign.Ptr
-import Network.AWS.AWSConnection
-import Network.AWS.AWSResult
-import Network.AWS.S3Bucket
+import           Aws
+import           Aws.S3
+import           Bindings.Libgit2.OdbBackend
+import           Bindings.Libgit2.Oid
+import           Bindings.Libgit2.Types
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
+-- import           Data.Conduit.Binary
+-- import           Data.Conduit.Filesystem
+import           Data.Text (Text)
+import qualified Data.Text as T
+-- import           Filesystem
+-- import           Filesystem.Path.CurrentOS
+import           Foreign.C.String
+import           Foreign.C.Types
+import           Foreign.ForeignPtr
+import           Foreign.Ptr
+import           Network.HTTP.Conduit (RequestBody (RequestBodyLBS),
+                                       responseBody, Manager)
 
-data GitS3Backend = GitS3Backend { parent :: ForeignPtr C'git_odb_backend
-                                 , s3conn :: AWSConnection }
+data GitS3Backend =
+  GitS3Backend { parent      :: ForeignPtr C'git_odb_backend
+               , bucket      :: Text
+               , credentials :: Credentials
+               , manager     :: Manager }
 
 gitS3_backend__read_header ::
   Ptr CSize -> Ptr C'git_otype -> Ptr C'git_odb_backend -> Ptr C'git_oid
@@ -161,7 +173,7 @@ gitS3_backend__free _backend = undefined
   -- free(backend);
 
 git_odb_backend_s3 :: String -> String -> String -> GitS3Backend
-git_odb_backend_s3 accessKey secretAccessKey bucketName = undefined
+git_odb_backend_s3 access secret bucket = undefined
   -- Ptr (Ptr C'git_odb_backend>)
   -- backend = calloc(1, sizeof (gitS3_backend));
   -- if (backend == NULL)
