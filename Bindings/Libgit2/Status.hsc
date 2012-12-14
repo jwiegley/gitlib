@@ -23,7 +23,8 @@ import Bindings.Libgit2.Types
 #num GIT_STATUS_WT_MODIFIED
 #num GIT_STATUS_WT_DELETED
 #num GIT_STATUS_IGNORED
-#ccall git_status_foreach , Ptr <git_repository> -> FunPtr (CString -> CUInt -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#callback git_status_foreach_callback , CString -> CUInt -> Ptr () -> IO CInt
+#ccall git_status_foreach , Ptr <git_repository> -> <git_status_foreach_callback> -> Ptr () -> IO (CInt)
 {- typedef enum {
             GIT_STATUS_SHOW_INDEX_AND_WORKDIR = 0,
             GIT_STATUS_SHOW_INDEX_ONLY = 1,
@@ -55,6 +56,7 @@ import Bindings.Libgit2.Types
 #field flags , CUInt
 #field pathspec , <git_strarray>
 #stoptype
-#ccall git_status_foreach_ext , Ptr <git_repository> -> Ptr <git_status_options> -> FunPtr (CString -> CUInt -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#callback git_status_foreach_ext_callback , CString -> CUInt -> Ptr () -> IO CInt
+#ccall git_status_foreach_ext , Ptr <git_repository> -> Ptr <git_status_options> -> <git_status_foreach_ext_callback> -> Ptr () -> IO (CInt)
 #ccall git_status_file , Ptr CUInt -> Ptr <git_repository> -> CString -> IO (CInt)
 #ccall git_status_should_ignore , Ptr CInt -> Ptr <git_repository> -> CString -> IO (CInt)

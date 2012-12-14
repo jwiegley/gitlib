@@ -19,4 +19,5 @@ import Bindings.Libgit2.Types
 #field blob_oid , <git_oid>
 #field annotated_object_oid , <git_oid>
 #stoptype
-#ccall git_note_foreach , Ptr <git_repository> -> CString -> FunPtr (Ptr <git_note_data> -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#callback git_note_foreach_callback , Ptr <git_note_data> -> Ptr () -> IO CInt
+#ccall git_note_foreach , Ptr <git_repository> -> CString -> <git_note_foreach_callback> -> Ptr () -> IO (CInt)

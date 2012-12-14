@@ -27,7 +27,8 @@ import Bindings.Libgit2.Object
 #ccall git_treebuilder_get , Ptr <git_treebuilder> -> CString -> IO (Ptr <git_tree_entry>)
 #ccall git_treebuilder_insert , Ptr (Ptr <git_tree_entry>) -> Ptr <git_treebuilder> -> CString -> Ptr <git_oid> -> CUInt -> IO (CInt)
 #ccall git_treebuilder_remove , Ptr <git_treebuilder> -> CString -> IO (CInt)
-#ccall git_treebuilder_filter , Ptr <git_treebuilder> -> FunPtr (Ptr <git_tree_entry> -> Ptr () -> CInt) -> Ptr () -> IO ()
+#callback git_treebuilder_filter_callback , Ptr <git_tree_entry> -> Ptr () -> IO CInt
+#ccall git_treebuilder_filter , Ptr <git_treebuilder> -> <git_treebuilder_filter_callback> -> Ptr () -> IO ()
 #ccall git_treebuilder_write , Ptr <git_oid> -> Ptr <git_repository> -> Ptr <git_treebuilder> -> IO (CInt)
 #ccall git_tree_get_subtree , Ptr (Ptr <git_tree>) -> Ptr <git_tree> -> CString -> IO (CInt)
 {- typedef int (* git_treewalk_cb)(const char * root,

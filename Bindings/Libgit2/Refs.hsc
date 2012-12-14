@@ -22,7 +22,8 @@ import Bindings.Libgit2.Oid
 #ccall git_reference_delete , Ptr <git_reference> -> IO (CInt)
 #ccall git_reference_packall , Ptr <git_repository> -> IO (CInt)
 #ccall git_reference_list , Ptr <git_strarray> -> Ptr <git_repository> -> CUInt -> IO (CInt)
-#ccall git_reference_foreach , Ptr <git_repository> -> CUInt -> FunPtr (CString -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#callback git_reference_foreach_callback , CString -> Ptr () -> IO CInt
+#ccall git_reference_foreach , Ptr <git_repository> -> CUInt -> <git_reference_foreach_callback> -> Ptr () -> IO (CInt)
 #ccall git_reference_is_packed , Ptr <git_reference> -> IO (CInt)
 #ccall git_reference_reload , Ptr <git_reference> -> IO (CInt)
 #ccall git_reference_free , Ptr <git_reference> -> IO ()

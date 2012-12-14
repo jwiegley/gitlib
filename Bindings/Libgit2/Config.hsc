@@ -29,16 +29,26 @@ import Bindings.Libgit2.Types
                     void * data);
     void (* free)(struct git_config_file *);
 }; -}
+#callback git_config_open_callback , Ptr <git_config_file> -> IO CInt
+#callback git_config_get_callback , Ptr <git_config_file> -> CString -> Ptr (CString) -> IO CInt
+#callback git_config_get_multivar_inner_callback , CString -> Ptr () -> IO CInt
+#callback git_config_get_multivar_callback , Ptr <git_config_file> -> CString -> CString -> <git_config_get_multivar_inner_callback> -> Ptr () -> IO CInt
+#callback git_config_set_callback , Ptr <git_config_file> -> CString -> CString -> IO CInt
+#callback git_config_set_multivar_callback , Ptr <git_config_file> -> CString -> CString -> CString -> IO CInt
+#callback git_config_del_callback , Ptr <git_config_file> -> CString -> IO CInt
+#callback git_config_foreach_inner_callback , CString -> CString -> Ptr () -> IO CInt
+#callback git_config_foreach_callback , Ptr <git_config_file> -> <git_config_foreach_inner_callback> -> Ptr () -> IO CInt
+#callback git_config_free_callback , Ptr <git_config_file> -> IO ()
 #starttype git_config_file
 #field cfg , Ptr <git_config>
-#field open , FunPtr (Ptr <git_config_file> -> CInt)
-#field get , FunPtr (Ptr <git_config_file> -> CString -> Ptr (CString) -> CInt)
-#field get_multivar , FunPtr (Ptr <git_config_file> -> CString -> CString -> FunPtr (CString -> Ptr () -> CInt) -> Ptr () -> CInt)
-#field set , FunPtr (Ptr <git_config_file> -> CString -> CString -> CInt)
-#field set_multivar , FunPtr (Ptr <git_config_file> -> CString -> CString -> CString -> CInt)
-#field del , FunPtr (Ptr <git_config_file> -> CString -> CInt)
-#field foreach , FunPtr (Ptr <git_config_file> -> FunPtr (CString -> CString -> Ptr () -> CInt) -> Ptr () -> CInt)
-#field free , FunPtr (Ptr <git_config_file>)
+#field open , <git_config_open_callback>
+#field get , <git_config_get_callback>
+#field get_multivar , <git_config_get_multivar_callback>
+#field set , <git_config_set_callback>
+#field set_multivar , <git_config_set_multivar_callback>
+#field del , <git_config_del_callback>
+#field foreach , <git_config_foreach_callback>
+#field free , <git_config_free_callback>
 #stoptype
 {- typedef enum {
             GIT_CVAR_FALSE = 0,
@@ -72,12 +82,12 @@ import Bindings.Libgit2.Types
 #ccall git_config_get_int64 , Ptr CLong -> Ptr <git_config> -> CString -> IO (CInt)
 #ccall git_config_get_bool , Ptr CInt -> Ptr <git_config> -> CString -> IO (CInt)
 #ccall git_config_get_string , Ptr (CString) -> Ptr <git_config> -> CString -> IO (CInt)
-#ccall git_config_get_multivar , Ptr <git_config> -> CString -> CString -> FunPtr (CString -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#ccall git_config_get_multivar , Ptr <git_config> -> CString -> CString -> <git_config_get_multivar_inner_callback> -> Ptr () -> IO (CInt)
 #ccall git_config_set_int32 , Ptr <git_config> -> CString -> CInt -> IO (CInt)
 #ccall git_config_set_int64 , Ptr <git_config> -> CString -> CLong -> IO (CInt)
 #ccall git_config_set_bool , Ptr <git_config> -> CString -> CInt -> IO (CInt)
 #ccall git_config_set_string , Ptr <git_config> -> CString -> CString -> IO (CInt)
 #ccall git_config_set_multivar , Ptr <git_config> -> CString -> CString -> CString -> IO (CInt)
 #ccall git_config_delete , Ptr <git_config> -> CString -> IO (CInt)
-#ccall git_config_foreach , Ptr <git_config> -> FunPtr (CString -> CString -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#ccall git_config_foreach , Ptr <git_config> -> <git_config_foreach_inner_callback> -> Ptr () -> IO (CInt)
 #ccall git_config_get_mapped , Ptr CInt -> Ptr <git_config> -> CString -> Ptr <git_cvar_map> -> CSize -> IO (CInt)

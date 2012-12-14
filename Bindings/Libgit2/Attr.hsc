@@ -13,6 +13,7 @@ import Bindings.Libgit2.Types
 
 #ccall git_attr_get , Ptr (CString) -> Ptr <git_repository> -> CUInt -> CString -> CString -> IO (CInt)
 #ccall git_attr_get_many , Ptr (CString) -> Ptr <git_repository> -> CUInt -> CString -> CSize -> Ptr (CString) -> IO (CInt)
-#ccall git_attr_foreach , Ptr <git_repository> -> CUInt -> CString -> FunPtr (CString -> CString -> Ptr () -> CInt) -> Ptr () -> IO (CInt)
+#callback git_attr_foreach_callback , CString -> CString -> Ptr () -> IO CInt
+#ccall git_attr_foreach , Ptr <git_repository> -> CUInt -> CString -> <git_attr_foreach_callback> -> Ptr () -> IO (CInt)
 #ccall git_attr_cache_flush , Ptr <git_repository> -> IO ()
 #ccall git_attr_add_macro , Ptr <git_repository> -> CString -> CString -> IO (CInt)
