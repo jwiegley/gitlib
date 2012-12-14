@@ -1,7 +1,7 @@
 Name:                hlibgit2
 Version:             0.17.0.2
-Synopsis:            Low-level bindings to libgit2.
-Description:         Bindings to libgit2 v0.17.0
+Synopsis:            Low-level bindings to libgit2
+Description:         Bindings to libgit2 v0.17.0.
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
