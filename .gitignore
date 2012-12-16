@@ -3,5 +3,5 @@ dist/
 *.o
 *~
 *.swp
-/smoke.git/
+/*.git/
 /.hpc/

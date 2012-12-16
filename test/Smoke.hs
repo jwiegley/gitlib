@@ -9,6 +9,8 @@ import           Control.Applicative
 import           Control.Concurrent.ParallelIO
 import           Control.Monad
 import           Data.Git
+import           Data.Git.Backend
+import           Data.Git.Backend.Trace
 import           Data.Maybe
 import           Data.Text as T hiding (map)
 import qualified Data.Text.Encoding as E
@@ -16,6 +18,7 @@ import           Data.Time.Clock.POSIX
 import           Data.Traversable
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS
+import           Prelude (putStrLn)
 import qualified Prelude
 import           Prelude hiding (FilePath, putStr, putStrLn)
 import           System.Exit
@@ -162,13 +165,22 @@ tests = test [
   , "createTwoCommits" ~:
 
   withRepository "createTwoCommits.git" $ \repo -> do
+    odbBackendAdd repo traceBackend 3
+
+    putStrLn "step outer 1.."
     let hello = createBlob (E.encodeUtf8 "Hello, world!\n") repo
+    putStrLn "step outer 2.."
     tr <- updateTree "hello/world.txt" (blobRef hello) (createTree repo)
 
+    putStrLn "step outer 3.."
     let goodbye = createBlob (E.encodeUtf8 "Goodbye, world!\n") repo
+    putStrLn "step outer 4.."
     tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
+    putStrLn "step outer 5.."
     x  <- oid tr
+    putStrLn "step outer 6.."
     (@?=) x "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    putStrLn "step outer 7.."
 
     -- The Oid has been cleared in tr, so this tests that it gets written as
     -- needed.
@@ -185,6 +197,7 @@ tests = test [
     x  <- oid tr
     (@?=) x "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
+    putStrLn "step outer 8.."
     let sig = Signature {
             signatureName  = "John Wiegley"
           , signatureEmail = "johnw@newartisans.com"
@@ -195,15 +208,19 @@ tests = test [
     x <- oid c2
     (@?=) x "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
+    putStrLn "step outer 9.."
     cid <- objectId c2
     writeRef $ createRef "refs/heads/master" (RefTargetId cid) repo
     writeRef $ createRef "HEAD" (RefTargetSymbolic "refs/heads/master") repo
 
+    putStrLn "step outer 10.."
     x <- oidToText <$> lookupId "refs/heads/master" repo
     (@?=) x "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
+    putStrLn "step outer 11.."
     mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
 
+    putStrLn "step outer 12.."
     return()
 
   ]

@@ -62,7 +62,7 @@ import           Foreign.Ptr as X
 import           Foreign.StablePtr as X
 import           Foreign.Storable as X
 import           Prelude as X (undefined, error, otherwise, IO, Show, show,
-                               Enum, Eq, Ord, (<), (==), (/=), round,
+                               Enum, Eq, Ord, (<), (==), (/=), round, Int,
                                Integer, fromIntegral, fromInteger, toInteger)
 import           Unsafe.Coerce as X
 

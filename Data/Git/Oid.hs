@@ -6,6 +6,7 @@
 module Data.Git.Oid
        ( Oid(..)
        , COid(..)
+       , oidToStr
        , ObjRef(..)
        , Ident(..)
        , wrapOidPtr
@@ -15,24 +16,28 @@ module Data.Git.Oid
        , stringToOid )
        where
 
-import Bindings.Libgit2.Oid
-import Control.Exception
-import Control.Monad
-import Data.ByteString.Unsafe
-import Data.Git.Error
-import Data.Stringable as S
-import Foreign.Ptr
-import Foreign.ForeignPtr
-import System.IO.Unsafe
+import           Bindings.Libgit2.Oid
+import           Control.Applicative
+import           Control.Exception
+import           Control.Monad
+import qualified Data.ByteString.Char8 as BC
+import           Data.ByteString.Unsafe
+import           Data.Git.Error
+import           Data.Stringable as S
+import           Foreign.C.String
+import           Foreign.ForeignPtr
+import           Foreign.Ptr
+import           System.IO.Unsafe
 
 -- | 'COid' is a type wrapper for a foreign pointer to libgit2's 'git_oid'
 --   structure.  Users should not have to deal with this type.
 newtype COid = COid (ForeignPtr C'git_oid)
 
+oidToStr :: Ptr C'git_oid -> IO String
+oidToStr = peekCString <=< c'git_oid_allocfmt
+
 instance Show COid where
-  show (COid x) =
-    toString $ unsafePerformIO $
-      withForeignPtr x (unsafePackMallocCString <=< c'git_oid_allocfmt)
+  show (COid coid) = unsafePerformIO $ withForeignPtr coid oidToStr
 
 -- | 'ObjRef' refers to either a Git object of a particular type (if it has
 --   already been loaded into memory), or it refers to the 'COid' of that
