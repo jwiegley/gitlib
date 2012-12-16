@@ -3,7 +3,7 @@
 -- | Error types which may be thrown during Git operations, using
 --   'Control.Exception.throwIO'.
 module Data.Git.Error
-       ( GitException(..), GitError(..) )
+       ( GitException(..), ErrorMsg(..), Result )
        where
 
 import Control.Exception
@@ -35,24 +35,10 @@ data GitException = RepositoryNotExist String
                   | OidCopyFailed
                   deriving (Show, Typeable)
 
-data GitErrorClass = GitErrorNoMemory
-                   | GitErrorOS
-                   | GitErrorInvalid
-                   | GitErrorReference
-                   | GitErrorZLib
-                   | GitErrorRepository
-                   | GitErrorConfig
-                   | GitErrorRegex
-                   | GitErrorODB
-                   | GitErrorIndex
-                   | GitErrorObject
-                   | GitErrorNet
-                   | GitErrorTag
-                   | GitErrorTree
-                   | GitErrorIndexer
+data ErrorMsg = ErrorMsg { errorMessage :: Text
+                         , errorCode    :: Int }
 
-data GitError = GitError { errorMessage :: Text
-                         , errorClass   :: GitErrorClass }
+type Result a = Either ErrorMsg a
 
 instance Exception GitException
 

@@ -74,6 +74,7 @@ Library
   exposed-modules:
     Data.Git
     Data.Git.Backend
+    Data.Git.Backend.Trace
     Data.Git.Blob
     Data.Git.Commit
     Data.Git.Common
