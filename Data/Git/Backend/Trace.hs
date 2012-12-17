@@ -90,8 +90,7 @@ traceBackend be = do
   existsFun <-
     mk'git_odb_backend_exists_callback (traceBackendExistsCallback be)
 
-  tracer <- malloc
-  poke tracer $ C'git_odb_backend {
+  new C'git_odb_backend {
       c'git_odb_backend'odb         = nullPtr
     , c'git_odb_backend'read        = readFun
     , c'git_odb_backend'read_prefix = readPrefixFun
@@ -101,6 +100,5 @@ traceBackend be = do
     , c'git_odb_backend'writestream = nullFunPtr
     , c'git_odb_backend'exists      = existsFun
     , c'git_odb_backend'free        = nullFunPtr }
-  return tracer
 
 -- Trace.hs
