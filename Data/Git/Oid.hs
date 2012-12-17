@@ -34,7 +34,7 @@ import           System.IO.Unsafe
 newtype COid = COid (ForeignPtr C'git_oid)
 
 oidToStr :: Ptr C'git_oid -> IO String
-oidToStr = peekCString <=< c'git_oid_allocfmt
+oidToStr = c'git_oid_allocfmt >=> peekCString
 
 instance Show COid where
   show (COid coid) = unsafePerformIO $ withForeignPtr coid oidToStr
