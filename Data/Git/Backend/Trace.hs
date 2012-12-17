@@ -58,12 +58,16 @@ traceBackendReadHeaderCallback len_p type_p be oid = do
 
 traceBackendWriteCallback :: F'git_odb_backend_write_callback
 traceBackendWriteCallback oid be obj_data len obj_type = do
-  oidStr <- oidToStr oid
-  putStrLn $ "Write " ++ oidStr ++ " len " ++ show len
-  tb <- peek (castPtr be :: Ptr TraceBackend)
-  tn <- peek (traceNext tb)
-  (mK'git_odb_backend_write_callback (c'git_odb_backend'write tn))
-    oid (traceNext tb) obj_data len obj_type
+  r <- c'git_odb_hash oid obj_data len obj_type
+  case r of
+    0 -> do
+      oidStr <- oidToStr oid
+      putStrLn $ "Write " ++ oidStr ++ " len " ++ show len
+      tb <- peek (castPtr be :: Ptr TraceBackend)
+      tn <- peek (traceNext tb)
+      (mK'git_odb_backend_write_callback (c'git_odb_backend'write tn))
+        oid (traceNext tb) obj_data len obj_type
+    n -> return n
 
 traceBackendExistsCallback :: F'git_odb_backend_exists_callback
 traceBackendExistsCallback be oid = do
