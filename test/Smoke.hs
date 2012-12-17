@@ -9,8 +9,8 @@ import           Control.Applicative
 import           Control.Concurrent.ParallelIO
 import           Control.Monad
 import           Data.Git
-import           Data.Git.Backend
-import           Data.Git.Backend.Trace
+-- import           Data.Git.Backend
+-- import           Data.Git.Backend.Trace
 import           Data.Maybe
 import           Data.Text as T hiding (map)
 import qualified Data.Text.Encoding as E
@@ -165,7 +165,7 @@ tests = test [
   , "createTwoCommits" ~:
 
   withRepository "createTwoCommits.git" $ \repo -> do
-    odbBackendAdd repo traceBackend 3
+    -- odbBackendAdd repo traceBackend 3
 
     putStrLn "step outer 1.."
     let hello = createBlob (E.encodeUtf8 "Hello, world!\n") repo
