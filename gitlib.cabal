@@ -1,5 +1,5 @@
 Name:                gitlib
-Version:             0.5.0
+Version:             0.5.1
 Synopsis:            Higher-level types for working with hlibgit2
 Description:         Higher-level types for working with hlibgit2
 License-file:        LICENSE
