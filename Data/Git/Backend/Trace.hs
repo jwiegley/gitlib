@@ -10,23 +10,24 @@ import Data.Git.Backend
 import Data.Git.Error
 import Data.Git.Internal
 import Data.Git.Oid
+import Debug.Trace (trace)
 import Prelude hiding ((.), mapM_)
 
 data TraceBackend = TraceBackend { traceParent :: C'git_odb_backend
                                  , traceNext   :: Ptr C'git_odb_backend }
 
 instance Storable TraceBackend where
-  sizeOf p = sizeOf (traceParent p) + sizeOf (traceNext p)
-  alignment p = alignment (traceNext p)
+  sizeOf p = sizeOf (undefined :: C'git_odb_backend) +
+             sizeOf (undefined :: Ptr C'git_odb_backend)
+  alignment p = alignment (traceParent p)
   peek p = do
-    p' <- peek p
     v0 <- peekByteOff p 0
-    v1 <- peekByteOff p (sizeOf (traceParent p'))
+    v1 <- peekByteOff p (sizeOf (undefined :: C'git_odb_backend))
     return (TraceBackend v0 v1)
   poke p (TraceBackend v0 v1) = do
     p' <- peek p
     pokeByteOff p 0 v0
-    pokeByteOff p (sizeOf (traceParent p')) v1
+    pokeByteOff p (sizeOf (undefined :: C'git_odb_backend)) v1
     return ()
 
 traceBackendReadCallback :: F'git_odb_backend_read_callback
