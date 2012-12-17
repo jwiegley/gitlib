@@ -25,7 +25,6 @@ instance Storable TraceBackend where
     v1 <- peekByteOff p (sizeOf (undefined :: C'git_odb_backend))
     return (TraceBackend v0 v1)
   poke p (TraceBackend v0 v1) = do
-    p' <- peek p
     pokeByteOff p 0 v0
     pokeByteOff p (sizeOf (undefined :: C'git_odb_backend)) v1
     return ()
