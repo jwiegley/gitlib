@@ -10,95 +10,105 @@ import Data.Git.Backend
 import Data.Git.Error
 import Data.Git.Internal
 import Data.Git.Oid
+import Prelude hiding ((.), mapM_)
 
--- data TraceBackend
+data TraceBackend = TraceBackend { traceParent :: C'git_odb_backend
+                                 , traceNext   :: Ptr C'git_odb_backend }
 
-traceBackendReadCallback ::
-  Ptr C'git_odb_backend ->
-    Ptr (Ptr ()) -> Ptr CSize -> Ptr C'git_otype -> Ptr C'git_odb_backend
-      -> Ptr C'git_oid -> IO CInt
-traceBackendReadCallback be data_p len_p type_p _ oid = do
+instance Storable TraceBackend where
+  sizeOf p = sizeOf (traceParent p) + sizeOf (traceNext p)
+  alignment p = alignment (traceNext p)
+  peek p = do
+    p' <- peek p
+    v0 <- peekByteOff p 0
+    v1 <- peekByteOff p (sizeOf (traceParent p'))
+    return (TraceBackend v0 v1)
+  poke p (TraceBackend v0 v1) = do
+    p' <- peek p
+    pokeByteOff p 0 v0
+    pokeByteOff p (sizeOf (traceParent p')) v1
+    return ()
+
+traceBackendReadCallback :: F'git_odb_backend_read_callback
+traceBackendReadCallback data_p len_p type_p be oid = do
   oidStr <- oidToStr oid
   putStrLn $ "Read " ++ oidStr
-  read_callback <- peek (p'git_odb_backend'read be)
-  (mK'git_odb_backend_read_callback read_callback)
-    data_p len_p type_p be oid
+  tb <- peek (castPtr be :: Ptr TraceBackend)
+  tn <- peek (traceNext tb)
+  (mK'git_odb_backend_read_callback (c'git_odb_backend'read tn))
+    data_p len_p type_p (traceNext tb) oid
 
-traceBackendReadPrefixCallback ::
-  Ptr C'git_odb_backend ->
-    Ptr C'git_oid -> Ptr (Ptr ()) -> Ptr CSize -> Ptr C'git_otype
-      -> Ptr C'git_odb_backend -> Ptr C'git_oid -> CUInt -> IO CInt
-traceBackendReadPrefixCallback be out_oid oid_p len_p type_p _ oid len = do
+traceBackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
+traceBackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
   oidStr <- oidToStr oid
   putStrLn $ "Read Prefix " ++ oidStr ++ " " ++ show len
-  read_prefix_callback <- peek (p'git_odb_backend'read_prefix be)
-  (mK'git_odb_backend_read_prefix_callback read_prefix_callback)
-    out_oid oid_p len_p type_p be oid len
+  tb <- peek (castPtr be :: Ptr TraceBackend)
+  tn <- peek (traceNext tb)
+  (mK'git_odb_backend_read_prefix_callback (c'git_odb_backend'read_prefix tn))
+    out_oid oid_p len_p type_p (traceNext tb) oid len
 
--- BackendReadstreamCallback ::
---   BackendReadstreamCallback ->
---     Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> Ptr <git_oid>
---       -> IO CInt
-
-traceBackendReadHeaderCallback ::
-  Ptr C'git_odb_backend ->
-    Ptr CSize -> Ptr C'git_otype -> Ptr C'git_odb_backend -> Ptr C'git_oid
-      -> IO CInt
-traceBackendReadHeaderCallback be len_p type_p _ oid = do
+traceBackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
+traceBackendReadHeaderCallback len_p type_p be oid = do
   oidStr <- oidToStr oid
   putStrLn $ "Read Header " ++ oidStr
-  read_header_callback <- peek (p'git_odb_backend'read_header be)
-  (mK'git_odb_backend_read_header_callback read_header_callback)
-    len_p type_p be oid
+  tb <- peek (castPtr be :: Ptr TraceBackend)
+  tn <- peek (traceNext tb)
+  (mK'git_odb_backend_read_header_callback (c'git_odb_backend'read_header tn))
+    len_p type_p (traceNext tb) oid
 
-traceBackendWriteCallback ::
-  Ptr C'git_odb_backend ->
-    Ptr C'git_oid -> Ptr C'git_odb_backend -> Ptr () -> CSize -> C'git_otype
-      -> IO CInt
-traceBackendWriteCallback be oid _ obj_data len obj_type = do
+traceBackendWriteCallback :: F'git_odb_backend_write_callback
+traceBackendWriteCallback oid be obj_data len obj_type = do
   oidStr <- oidToStr oid
   putStrLn $ "Write " ++ oidStr ++ " len " ++ show len
-  write_callback <- peek (p'git_odb_backend'write be)
-  (mK'git_odb_backend_write_callback write_callback)
-    oid be obj_data len obj_type
+  tb <- peek (castPtr be :: Ptr TraceBackend)
+  tn <- peek (traceNext tb)
+  (mK'git_odb_backend_write_callback (c'git_odb_backend'write tn))
+    oid (traceNext tb) obj_data len obj_type
 
--- BackendWritestreamCallback ::
---   BackendWritestreamCallback ->
---     Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> CSize
---       -> <git_otype> -> IO CInt
-
-traceBackendExistsCallback ::
-  Ptr C'git_odb_backend ->
-    Ptr C'git_odb_backend -> Ptr C'git_oid -> IO CInt
-traceBackendExistsCallback be _ oid = do
+traceBackendExistsCallback :: F'git_odb_backend_exists_callback
+traceBackendExistsCallback be oid = do
   oidStr <- oidToStr oid
   putStrLn $ "Exists " ++ oidStr
-  exists_callback <- peek (p'git_odb_backend'exists be)
-  (mK'git_odb_backend_exists_callback exists_callback) be oid
+  tb <- peek (castPtr be :: Ptr TraceBackend)
+  tn <- peek (traceNext tb)
+  (mK'git_odb_backend_exists_callback (c'git_odb_backend'exists tn))
+    (traceNext tb) oid
 
--- BackendFreeCallback ::
---   BackendFreeCallback -> Ptr <git_odb_backend> -> IO ()
+traceBackendFreeCallback :: F'git_odb_backend_free_callback
+traceBackendFreeCallback be = do
+  backend <- peek be
+  freeHaskellFunPtr (c'git_odb_backend'read backend)
+  freeHaskellFunPtr (c'git_odb_backend'read_prefix backend)
+  freeHaskellFunPtr (c'git_odb_backend'read_header backend)
+  freeHaskellFunPtr (c'git_odb_backend'write backend)
+  freeHaskellFunPtr (c'git_odb_backend'exists backend)
+
+foreign export ccall "traceBackendFreeCallback"
+  traceBackendFreeCallback :: F'git_odb_backend_free_callback
+foreign import ccall "&traceBackendFreeCallback"
+  traceBackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
 traceBackend :: Ptr C'git_odb_backend -> IO (Ptr C'git_odb_backend)
 traceBackend be = do
-  readFun <- mk'git_odb_backend_read_callback (traceBackendReadCallback be)
+  readFun <- mk'git_odb_backend_read_callback traceBackendReadCallback
   readPrefixFun <-
-    mk'git_odb_backend_read_prefix_callback (traceBackendReadPrefixCallback be)
+    mk'git_odb_backend_read_prefix_callback traceBackendReadPrefixCallback
   readHeaderFun <-
-    mk'git_odb_backend_read_header_callback (traceBackendReadHeaderCallback be)
-  writeFun <- mk'git_odb_backend_write_callback (traceBackendWriteCallback be)
-  existsFun <-
-    mk'git_odb_backend_exists_callback (traceBackendExistsCallback be)
+    mk'git_odb_backend_read_header_callback traceBackendReadHeaderCallback
+  writeFun <- mk'git_odb_backend_write_callback traceBackendWriteCallback
+  existsFun <- mk'git_odb_backend_exists_callback traceBackendExistsCallback
 
-  new C'git_odb_backend {
-      c'git_odb_backend'odb         = nullPtr
-    , c'git_odb_backend'read        = readFun
-    , c'git_odb_backend'read_prefix = readPrefixFun
-    , c'git_odb_backend'readstream  = nullFunPtr
-    , c'git_odb_backend'read_header = readHeaderFun
-    , c'git_odb_backend'write       = writeFun
-    , c'git_odb_backend'writestream = nullFunPtr
-    , c'git_odb_backend'exists      = existsFun
-    , c'git_odb_backend'free        = nullFunPtr }
+  castPtr <$> new TraceBackend {
+    traceParent = C'git_odb_backend {
+         c'git_odb_backend'odb         = nullPtr
+       , c'git_odb_backend'read        = readFun
+       , c'git_odb_backend'read_prefix = readPrefixFun
+       , c'git_odb_backend'readstream  = nullFunPtr
+       , c'git_odb_backend'read_header = readHeaderFun
+       , c'git_odb_backend'write       = writeFun
+       , c'git_odb_backend'writestream = nullFunPtr
+       , c'git_odb_backend'exists      = existsFun
+       , c'git_odb_backend'free        = traceBackendFreeCallbackPtr }
+    , traceNext = be }
 
 -- Trace.hs

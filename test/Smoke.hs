@@ -5,12 +5,13 @@
 
 module Main where
 
+import           Bindings.Libgit2.OdbBackend
 import           Control.Applicative
 import           Control.Concurrent.ParallelIO
 import           Control.Monad
 import           Data.Git
--- import           Data.Git.Backend
--- import           Data.Git.Backend.Trace
+import           Data.Git.Backend
+import           Data.Git.Backend.Trace
 import           Data.Maybe
 import           Data.Text as T hiding (map)
 import qualified Data.Text.Encoding as E
@@ -18,8 +19,12 @@ import           Data.Time.Clock.POSIX
 import           Data.Traversable
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS
-import           Prelude (putStrLn)
+import           Foreign.C.String
+import           Foreign.Marshal.Alloc
+import           Foreign.Ptr
+import           Foreign.Storable
 import qualified Prelude
+import           Prelude (putStrLn)
 import           Prelude hiding (FilePath, putStr, putStrLn)
 import           System.Exit
 import           Test.HUnit
@@ -164,8 +169,14 @@ tests = test [
 
   , "createTwoCommits" ~:
 
-  withRepository "createTwoCommits.git" $ \repo -> do
-    -- odbBackendAdd repo traceBackend 3
+  withRepository "createTwoCommits.git" $ \repo -> alloca $ \loosePtr -> do
+    withCString "createTwoCommits.git/objects" $ \objectsDir -> do
+      r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
+      when (r < 0) $ error "Failed to create loose objects backend"
+
+    loosePtr' <- peek loosePtr
+    backend <- traceBackend loosePtr'
+    odbBackendAdd repo backend 3
 
     putStrLn "step outer 1.."
     let hello = createBlob (E.encodeUtf8 "Hello, world!\n") repo
