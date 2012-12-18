@@ -17,10 +17,22 @@ import           Network.HTTP.Conduit
 
 default (Text)
 
+headFile :: Manager -> Text -> Text -> Text -> Text -> ResourceT IO Bool
+headFile manager bucket access secret filepath = do
+  let req    = headObject bucket filepath
+      creds  = Credentials { accessKeyID     = E.encodeUtf8 access
+                           , secretAccessKey = E.encodeUtf8 secret }
+  res <- aws (Configuration Timestamp creds $ defaultLog Error)
+            defServiceConfig manager req
+  return $ case readResponse res of
+    Nothing -> False
+    Just _  -> True
+
 getFile :: Manager -> Text -> Text -> Text -> Text
            -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFile manager bucket access secret filepath = do
-  let req    = getObject bucket filepath
+  let req    = (getObject bucket filepath)
+                 -- { goResponseContentRange = Just (2,3) }
       creds  = Credentials { accessKeyID     = E.encodeUtf8 access
                            , secretAccessKey = E.encodeUtf8 secret }
   res <- aws (Configuration Timestamp creds $ defaultLog Error)
@@ -48,16 +60,18 @@ main = do
 
   manager  <- newManager def
 
-  object   <- runResourceT $
-              getFile manager "fpco-john-development"
-                      access secret "test.txt"
-  contents <- runResourceT $ object $$+- await
-  print contents
-
   _ <- runResourceT $
        putFile manager "fpco-john-development"
                access secret "test2.txt"
                (sourceLbs (LE.encodeUtf8 "Hello, world!\n"))
+
+  exists1 <- runResourceT $
+             headFile manager "fpco-john-development" access secret "test99.txt"
+  Prelude.putStrLn $ "exists1: " ++ show exists1
+
+  exists2 <- runResourceT $
+             headFile manager "fpco-john-development" access secret "test2.txt"
+  Prelude.putStrLn $ "exists2: " ++ show exists2
 
   object2   <- runResourceT $
                getFile manager "fpco-john-development"
