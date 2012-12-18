@@ -1,0 +1,4 @@
+gitlib/
+gitlib-s3/
+hlibgit2/
+git://github.com/jwiegley/aws.git

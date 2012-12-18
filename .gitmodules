@@ -1,0 +1,3 @@
+[submodule "hlibgit2/libgit2"]
+	path = hlibgit2/libgit2
+	url = git://github.com/jwiegley/libgit2.git
