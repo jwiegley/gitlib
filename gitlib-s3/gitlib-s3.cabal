@@ -1,0 +1,62 @@
+Name:                gitlib-s3
+Version:             0.0.2
+Synopsis:            A repository backend for storing Git objects in Amazon S3
+Description:         A repository backend for storing Git objects in Amazon S3.
+License-file:        LICENSE
+License:             MIT
+Author:              John Wiegley
+Maintainer:          johnw@fpcomplete.com
+Build-Type:          Simple
+Cabal-Version:       >=1.10
+Category:            Git
+
+Source-repository head
+  type: git
+  location: git://github.com/jwiegley/gitlib-s3.git
+
+Library
+  hs-source-dirs: .
+  default-language: Haskell98
+  build-depends:
+      base            >= 3 && < 5
+    , gitlib
+    , hlibgit2        >= 0.17
+    , HUnit           >= 1.2.5
+    , bytestring      >= 0.9.2.1
+    , containers      >= 0.4.2
+    , transformers    >= 0.3
+    , lens            >= 2.8
+    , attempt         >= 0.4.0
+    , parallel-io     >= 0.3.2.1
+    , stringable      >= 0.1.1
+    , system-fileio   >= 0.3.9
+    , system-filepath >= 0.4.7
+    , text            >= 0.11.2
+    , time            >= 1.4
+    , aws             >= 0.7.5
+    , conduit         >= 0.5.5
+    , http-conduit    >= 1.8.5.1
+  exposed-modules:
+    Data.Git.Backend.S3
+
+Test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Smoke.hs
+  hs-source-dirs: test
+  build-depends:
+      base >=3
+    , gitlib-s3
+    , gitlib
+    , hlibgit2        >= 0.17
+    , HUnit           >= 1.2.5
+    , bytestring      >= 0.9.2.1
+    , containers      >= 0.4.2
+    , lens            >= 2.8
+    , http-conduit    >= 1.8.5.1
+    , parallel-io     >= 0.3.2.1
+    , stringable      >= 0.1.1
+    , system-fileio   >= 0.3.9
+    , system-filepath >= 0.4.7
+    , text            >= 0.11.2
+    , time            >= 1.4
