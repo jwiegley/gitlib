@@ -1,0 +1,182 @@
+Name:                hlibgit2
+Version:             0.17.0.3
+Synopsis:            Low-level bindings to libgit2
+Description:         Bindings to libgit2 v0.17.0.
+License-file:        LICENSE
+License:             MIT
+Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
+Maintainer:          johnw@newartisans.com
+Build-Type:          Simple
+Cabal-Version:       >=1.10
+Category:            FFI
+
+Extra-source-files:
+  libgit2/deps/http-parser/*.h
+  libgit2/include/git2.h
+  libgit2/include/git2/*.h
+  libgit2/src/*.h
+  libgit2/src/compat/*.h
+  libgit2/src/unix/*.h
+  libgit2/src/win32/*.h
+  libgit2/src/xdiff/*.h
+
+Source-repository head
+  type: git
+  location: git://github.com/jwiegley/hlibgit2.git
+
+Test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  build-depends:
+      base >=3
+    , hlibgit2
+    , process
+
+Library
+  hs-source-dirs: .
+  default-language: Haskell98
+  default-extensions:
+    ForeignFunctionInterface
+  build-depends:
+      base            >= 3 && < 5
+    , bindings-DSL    >= 1.0.11
+    , zlib            >= 0.5.4
+
+  exposed-modules:
+    Bindings.Libgit2
+    Bindings.Libgit2.Attr
+    Bindings.Libgit2.Blob
+    Bindings.Libgit2.Branch
+    Bindings.Libgit2.Commit
+    Bindings.Libgit2.Common
+    Bindings.Libgit2.Config
+    Bindings.Libgit2.Diff
+    Bindings.Libgit2.Errors
+    Bindings.Libgit2.Index
+    Bindings.Libgit2.Indexer
+    Bindings.Libgit2.Merge
+    Bindings.Libgit2.Net
+    Bindings.Libgit2.Notes
+    Bindings.Libgit2.Object
+    Bindings.Libgit2.Odb
+    Bindings.Libgit2.OdbBackend
+    Bindings.Libgit2.Oid
+    Bindings.Libgit2.Reflog
+    Bindings.Libgit2.Refs
+    Bindings.Libgit2.Refspec
+    Bindings.Libgit2.Remote
+    Bindings.Libgit2.Repository
+    Bindings.Libgit2.Revwalk
+    Bindings.Libgit2.Signature
+    Bindings.Libgit2.Status
+    Bindings.Libgit2.Submodule
+    Bindings.Libgit2.Tag
+    Bindings.Libgit2.Threads
+    Bindings.Libgit2.Tree
+    Bindings.Libgit2.Types
+    Bindings.Libgit2.Version
+    Bindings.Libgit2.Windows
+
+  c-sources:
+    Bindings/Libgit2/Attr.hsc.helper.c
+    Bindings/Libgit2/Blob.hsc.helper.c
+    Bindings/Libgit2/Commit.hsc.helper.c
+    Bindings/Libgit2/Common.hsc.helper.c
+    Bindings/Libgit2/Tag.hsc.helper.c
+    Bindings/Libgit2/Tree.hsc.helper.c
+    libgit2/src/attr.c
+    libgit2/src/attr_file.c
+    libgit2/src/blob.c
+    libgit2/src/branch.c
+    libgit2/src/buffer.c
+    libgit2/src/cache.c
+    libgit2/src/commit.c
+    libgit2/src/config.c
+    libgit2/src/config_cache.c
+    libgit2/src/config_file.c
+    libgit2/src/crlf.c
+    libgit2/src/delta-apply.c
+    libgit2/src/diff.c
+    libgit2/src/diff_output.c
+    libgit2/src/errors.c
+    libgit2/src/fetch.c
+    libgit2/src/filebuf.c
+    libgit2/src/fileops.c
+    libgit2/src/filter.c
+    libgit2/src/global.c
+    libgit2/src/hash.c
+    libgit2/src/ignore.c
+    libgit2/src/index.c
+    libgit2/src/indexer.c
+    libgit2/src/iterator.c
+    libgit2/src/message.c
+    libgit2/src/mwindow.c
+    libgit2/src/netops.c
+    libgit2/src/notes.c
+    libgit2/src/object.c
+    libgit2/src/odb.c
+    libgit2/src/odb_loose.c
+    libgit2/src/odb_pack.c
+    libgit2/src/oid.c
+    libgit2/src/pack.c
+    libgit2/src/path.c
+    libgit2/src/pkt.c
+    libgit2/src/pool.c
+    libgit2/src/posix.c
+    libgit2/src/pqueue.c
+    libgit2/src/protocol.c
+    libgit2/src/reflog.c
+    libgit2/src/refs.c
+    libgit2/src/refspec.c
+    libgit2/src/remote.c
+    libgit2/src/repository.c
+    libgit2/src/revwalk.c
+    libgit2/src/sha1.c
+    libgit2/src/sha1_lookup.c
+    libgit2/src/signature.c
+    libgit2/src/status.c
+    libgit2/src/submodule.c
+    libgit2/src/tag.c
+    libgit2/src/thread-utils.c
+    libgit2/src/transport.c
+    libgit2/src/tree-cache.c
+    libgit2/src/tree.c
+    libgit2/src/tsort.c
+    libgit2/src/util.c
+    libgit2/src/vector.c
+    libgit2/src/transports/git.c
+    libgit2/src/transports/http.c
+    libgit2/src/transports/local.c
+    libgit2/src/xdiff/xdiffi.c
+    libgit2/src/xdiff/xemit.c
+    libgit2/src/xdiff/xhistogram.c
+    libgit2/src/xdiff/xmerge.c
+    libgit2/src/xdiff/xpatience.c
+    libgit2/src/xdiff/xprepare.c
+    libgit2/src/xdiff/xutils.c
+    libgit2/deps/http-parser/http_parser.c
+
+  include-dirs:
+    libgit2/include
+    libgit2/src
+    libgit2/deps/http-parser
+
+  cc-options: -DGIT_THREADS -D_FILE_OFFSET_BITS=64
+  if os(windows)
+    cc-options: -DGIT_WIN32 -DWIN32 -D_DEBUG -D_WIN32_WINNT=0x0501
+    c-sources:
+      libgit2/src/win32/dir.c
+      libgit2/src/win32/pthread.c
+      libgit2/src/win32/utf-conv.c
+      libgit2/src/win32/map.c
+      libgit2/src/win32/posix_w32.c
+    include-dirs:
+      libgit2/src/win32
+  else
+    cc-options: -D_GNU_SOURCE
+    c-sources:
+      libgit2/src/unix/map.c
+    include-dirs:
+      libgit2/src/unix
