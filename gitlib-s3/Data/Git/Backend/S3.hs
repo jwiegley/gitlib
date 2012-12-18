@@ -1,4 +1,5 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Git.Backend.S3 ( odbS3Backend ) where
 
@@ -9,8 +10,10 @@ import           Bindings.Libgit2.OdbBackend
 import           Bindings.Libgit2.Oid
 import           Bindings.Libgit2.Types
 import           Control.Applicative
+import           Control.Exception
 import           Control.Monad.IO.Class
 import           Data.Attempt
+import           Data.Binary
 import           Data.ByteString as B hiding (putStrLn)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
@@ -24,6 +27,7 @@ import           Data.Git.Backend
 import           Data.Git.Error
 import           Data.Git.Oid
 import qualified Data.List as L
+import           Data.Maybe
 import           Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy.Encoding as LE
@@ -37,8 +41,7 @@ import           Foreign.Ptr
 import           Foreign.StablePtr
 import           Foreign.Storable
 import           Network.HTTP.Conduit hiding (Response)
-import           Prelude hiding (mapM_)
-import Data.Maybe
+import           Prelude hiding (mapM_, catch)
 
 default (Text)
 
@@ -82,76 +85,84 @@ odbS3dispatch f odbs3 arg = do
   f manager bucket config arg
 
 testFileS3' :: Manager -> Text -> Configuration -> Text -> ResourceT IO Bool
-testFileS3' manager bucket config filepath = do
-  let req = headObject bucket filepath
-  isJust . readResponse <$> aws config defServiceConfig manager req
+testFileS3' manager bucket config filepath =
+  isJust . readResponse <$> aws config defServiceConfig manager
+                                (headObject bucket filepath)
 
 testFileS3 :: OdbS3Backend -> Text -> ResourceT IO Bool
 testFileS3 = odbS3dispatch testFileS3'
 
-getFileS3' :: Manager -> Text -> Configuration -> Text
+getFileS3' :: Manager -> Text -> Configuration -> (Text, Maybe (Int,Int))
               -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
-getFileS3' manager bucket config filepath = do
-  let req = getObject bucket filepath
-  res <- aws config defServiceConfig manager req
+getFileS3' manager bucket config (filepath,range) = do
+  res <- aws config defServiceConfig manager
+             (getObject bucket filepath) { goResponseContentRange = range }
   gor <- readResponseIO res
   return (responseBody (gorResponse gor))
 
-getFileS3 :: OdbS3Backend -> Text
+getFileS3 :: OdbS3Backend -> Text -> Maybe (Int,Int)
              -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
-getFileS3 = odbS3dispatch getFileS3'
+getFileS3 = curry . odbS3dispatch getFileS3'
 
 putFileS3' :: Manager -> Text -> Configuration
               -> (Text, Source (ResourceT IO) ByteString)
-              -> ResourceT IO BL.ByteString
+              -> ResourceT IO ()
 putFileS3' manager bucket config (filepath,src) = do
   lbs <- BL.fromChunks <$> (src $$ consume)
-  let req = putObject bucket filepath (RequestBodyLBS lbs)
-  res <- aws config defServiceConfig manager req
-  _ <- readResponseIO res
-  return lbs
+  res <- aws config defServiceConfig manager
+             (putObject bucket filepath (RequestBodyLBS lbs))
+  _   <- readResponseIO res
+  return ()
 
 putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
-             -> ResourceT IO BL.ByteString
+             -> ResourceT IO ()
 putFileS3 = curry . odbS3dispatch putFileS3'
 
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
-odbS3BackendReadCallback data_p len_p type_p be oid = do
-  oidStr <- oidToStr oid
-  code   <- odbS3BackendReadHeaderCallback len_p type_p be oid
-  case code of
-    0 -> do
+odbS3BackendReadCallback data_p len_p type_p be oid =
+  catch go (\(_ :: IOException) -> return (-1))
+  where
+    go = do
       odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
-      result <- runResourceT $ getFileS3 odbs3 (T.pack oidStr)
+      oidStr <- oidToStr oid
+      result <- runResourceT $ getFileS3 odbs3 (T.pack oidStr) Nothing
       bytes  <- runResourceT $ result $$+- await
       case bytes of
         Nothing -> return (-1)
         Just bs -> do
-          let len = B.length bs
+          let blen      = B.length bs
+              (len,typ) = decode (BL.fromChunks [bs]) :: (Int,Int)
+              hdrLen    = sizeOf (undefined :: Int) * 2
           content <- mallocBytes (len + 1)
           unsafeUseAsCString bs $ \cstr ->
-            copyBytes content cstr (len + 1)
+            copyBytes content (cstr `plusPtr` hdrLen) (len + 1)
+          poke len_p (fromIntegral len)
+          poke type_p (fromIntegral typ)
           poke data_p (castPtr content)
           return 0
-    n -> return n
 
 odbS3BackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
 odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
-  oidStr <- oidToStr oid
-  return (-1)
+  return 0
 
 odbS3BackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
 odbS3BackendReadHeaderCallback len_p type_p be oid = do
-  oidStr <- oidToStr oid
-  odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
-  result <- runResourceT $ getFileS3 odbs3 (T.pack (oidStr ++ ".meta"))
-  bytes  <- runResourceT $ result $$+- await
-  case bytes of
-    Nothing -> return (-1)
-    Just bs -> do let (len,typ) = read (BC.unpack bs) :: (Int,Int)
-                  poke len_p (fromIntegral len)
-                  poke type_p (fromIntegral typ)
-                  return 0
+  catch go (\(_ :: IOException) -> return (-1))
+  where
+    go = do
+      let hdrLen = sizeOf (undefined :: Int) * 2
+      odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
+      oidStr <- oidToStr oid
+      result <- runResourceT $ getFileS3 odbs3 (T.pack oidStr)
+                                         (Just (0,hdrLen - 1))
+      bytes  <- runResourceT $ result $$+- await
+      case bytes of
+        Nothing -> return (-1)
+        Just bs -> do
+          let (len,typ) = decode (BL.fromChunks [bs]) :: (Int,Int)
+          poke len_p (fromIntegral len)
+          poke type_p (fromIntegral typ)
+          return 0
 
 odbS3BackendWriteCallback :: F'git_odb_backend_write_callback
 odbS3BackendWriteCallback oid be obj_data len obj_type = do
@@ -160,18 +171,16 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
     0 -> do
       oidStr <- oidToStr oid
       odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
-
-      let metadata = BLC.pack (show ((fromIntegral len,
-                                      fromIntegral obj_type) :: (Int,Int)))
-      runResourceT $ putFileS3 odbs3 (T.pack (oidStr ++ ".meta"))
-                               (sourceLbs metadata)
-
+      let hdr = encode ((fromIntegral len, fromIntegral obj_type) :: (Int,Int))
       bytes <- curry unsafePackCStringLen (castPtr obj_data)
                                          (fromIntegral len)
-      runResourceT $ putFileS3 odbs3 (T.pack oidStr)
-                               (sourceLbs (BL.fromChunks [bytes]))
-      return 0
+      let payload = BL.append hdr (BL.fromChunks [bytes])
+      catch (go odbs3 oidStr payload >> return 0)
+            (\(_ :: IOException) -> return (-1))
     n -> return n
+  where
+    go odbs3 oidStr payload =
+      runResourceT $ putFileS3 odbs3 (T.pack oidStr) (sourceLbs payload)
 
 odbS3BackendExistsCallback :: F'git_odb_backend_exists_callback
 odbS3BackendExistsCallback be oid = do

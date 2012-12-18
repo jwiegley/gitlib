@@ -36,6 +36,7 @@ Library
     , aws             >= 0.7.5
     , conduit         >= 0.5.5
     , http-conduit    >= 1.8.5.1
+    , binary          >= 0.5.1.0
   exposed-modules:
     Data.Git.Backend.S3
 
