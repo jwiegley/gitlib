@@ -1,7 +1,8 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module Data.Git.Backend.S3 ( odbS3Backend ) where
+module Data.Git.Backend.S3 ( odbS3Backend, readRefs, writeRefs ) where
 
 import           Aws
 import           Aws.S3 hiding (bucketName)
@@ -11,6 +12,7 @@ import           Bindings.Libgit2.Oid
 import           Bindings.Libgit2.Types
 import           Control.Applicative
 import           Control.Exception
+import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Attempt
 import           Data.Binary
@@ -27,10 +29,12 @@ import           Data.Git.Backend
 import           Data.Git.Error
 import           Data.Git.Oid
 import qualified Data.List as L
+import           Data.Map
 import           Data.Maybe
 import           Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy.Encoding as LE
+import qualified Data.Yaml as Y
 import           Debug.Trace (trace)
 import           Foreign.C.String
 import           Foreign.C.Types
@@ -48,14 +52,16 @@ default (Text)
 data OdbS3Backend = OdbS3Backend { odbS3Parent   :: C'git_odb_backend
                                  , httpManager   :: StablePtr Manager
                                  , bucketName    :: StablePtr Text
+                                 , objectPrefix  :: StablePtr Text
                                  , configuration :: StablePtr Configuration }
 
 instance Storable OdbS3Backend where
-  sizeOf p = sizeOf (undefined :: C'git_odb_backend) +
+  sizeOf _ = sizeOf (undefined :: C'git_odb_backend) +
              sizeOf (undefined :: StablePtr Manager) +
              sizeOf (undefined :: StablePtr Text) +
+             sizeOf (undefined :: StablePtr Text) +
              sizeOf (undefined :: StablePtr Configuration)
-  alignment p = alignment (odbS3Parent p)
+  alignment _ = alignment (undefined :: Ptr C'git_odb_backend)
   peek p = do
     v0 <- peekByteOff p 0
     let sizev1 = sizeOf (undefined :: C'git_odb_backend)
@@ -64,8 +70,10 @@ instance Storable OdbS3Backend where
     v2 <- peekByteOff p sizev2
     let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Text)
     v3 <- peekByteOff p sizev3
-    return (OdbS3Backend v0 v1 v2 v3)
-  poke p (OdbS3Backend v0 v1 v2 v3) = do
+    let sizev4 = sizev3 + sizeOf (undefined :: StablePtr Text)
+    v4 <- peekByteOff p sizev4
+    return (OdbS3Backend v0 v1 v2 v3 v4)
+  poke p (OdbS3Backend v0 v1 v2 v3 v4) = do
     pokeByteOff p 0 v0
     let sizev1 = sizeOf (undefined :: C'git_odb_backend)
     pokeByteOff p sizev1 v1
@@ -73,30 +81,37 @@ instance Storable OdbS3Backend where
     pokeByteOff p sizev2 v2
     let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Text)
     pokeByteOff p sizev3 v3
+    let sizev4 = sizev3 + sizeOf (undefined :: StablePtr Text)
+    pokeByteOff p sizev4 v4
     return ()
 
 odbS3dispatch ::
-  MonadIO m =>
-    (Manager -> Text -> Configuration -> a -> m b) -> OdbS3Backend -> a -> m b
+  MonadIO m => (Manager -> Text -> Text -> Configuration -> a -> m b)
+    -> OdbS3Backend -> a -> m b
 odbS3dispatch f odbs3 arg = do
   manager <- liftIO $ deRefStablePtr (httpManager odbs3)
   bucket  <- liftIO $ deRefStablePtr (bucketName odbs3)
+  prefix  <- liftIO $ deRefStablePtr (objectPrefix odbs3)
   config  <- liftIO $ deRefStablePtr (configuration odbs3)
-  f manager bucket config arg
+  f manager bucket prefix config arg
 
-testFileS3' :: Manager -> Text -> Configuration -> Text -> ResourceT IO Bool
-testFileS3' manager bucket config filepath =
-  isJust . readResponse <$> aws config defServiceConfig manager
-                                (headObject bucket filepath)
+testFileS3' :: Manager -> Text -> Text -> Configuration -> Text
+               -> ResourceT IO Bool
+testFileS3' manager bucket prefix config filepath =
+  isJust . readResponse <$>
+    aws config defServiceConfig manager
+        (headObject bucket (T.append prefix filepath))
 
 testFileS3 :: OdbS3Backend -> Text -> ResourceT IO Bool
 testFileS3 = odbS3dispatch testFileS3'
 
-getFileS3' :: Manager -> Text -> Configuration -> (Text, Maybe (Int,Int))
+getFileS3' :: Manager -> Text -> Text -> Configuration
+              -> (Text, Maybe (Int,Int))
               -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
-getFileS3' manager bucket config (filepath,range) = do
+getFileS3' manager bucket prefix config (filepath,range) = do
   res <- aws config defServiceConfig manager
-             (getObject bucket filepath) { goResponseContentRange = range }
+             (getObject bucket (T.append prefix filepath))
+               { goResponseContentRange = range }
   gor <- readResponseIO res
   return (responseBody (gorResponse gor))
 
@@ -104,19 +119,36 @@ getFileS3 :: OdbS3Backend -> Text -> Maybe (Int,Int)
              -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFileS3 = curry . odbS3dispatch getFileS3'
 
-putFileS3' :: Manager -> Text -> Configuration
+putFileS3' :: Manager -> Text -> Text -> Configuration
               -> (Text, Source (ResourceT IO) ByteString)
-              -> ResourceT IO ()
-putFileS3' manager bucket config (filepath,src) = do
+              -> ResourceT IO BL.ByteString
+putFileS3' manager bucket prefix config (filepath,src) = do
   lbs <- BL.fromChunks <$> (src $$ consume)
   res <- aws config defServiceConfig manager
-             (putObject bucket filepath (RequestBodyLBS lbs))
+             (putObject bucket (T.append prefix filepath)
+              (RequestBodyLBS lbs))
   _   <- readResponseIO res
-  return ()
+  return lbs
 
 putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
-             -> ResourceT IO ()
+             -> ResourceT IO BL.ByteString
 putFileS3 = curry . odbS3dispatch putFileS3'
+
+readRefs :: Ptr C'git_odb_backend -> IO (Maybe (Map Text Text))
+readRefs be = do
+  odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
+  result <- runResourceT $ getFileS3 odbs3 "refs.yml" Nothing
+  bytes  <- runResourceT $ result $$+- await
+  case bytes of
+    Nothing     -> return Nothing
+    Just bytes' -> return (Y.decode bytes')
+
+writeRefs :: Ptr C'git_odb_backend -> Map Text Text -> IO ()
+writeRefs be refs = do
+  let payload = Y.encode refs
+  odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
+  void $ runResourceT $ putFileS3 odbs3 "refs.yml"
+                                  (sourceLbs (BL.fromChunks [payload]))
 
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid =
@@ -172,8 +204,7 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
       oidStr <- oidToStr oid
       odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
       let hdr = encode ((fromIntegral len, fromIntegral obj_type) :: (Int,Int))
-      bytes <- curry unsafePackCStringLen (castPtr obj_data)
-                                         (fromIntegral len)
+      bytes <- curry unsafePackCStringLen (castPtr obj_data) (fromIntegral len)
       let payload = BL.append hdr (BL.fromChunks [bytes])
       catch (go odbs3 oidStr payload >> return 0)
             (\(_ :: IOException) -> return (-1))
@@ -201,6 +232,7 @@ odbS3BackendFreeCallback be = do
   odbs3 <- peek (castPtr be :: Ptr OdbS3Backend)
   freeStablePtr (httpManager odbs3)
   freeStablePtr (bucketName odbs3)
+  freeStablePtr (objectPrefix odbs3)
   freeStablePtr (configuration odbs3)
 
 foreign export ccall "odbS3BackendFreeCallback"
@@ -208,8 +240,9 @@ foreign export ccall "odbS3BackendFreeCallback"
 foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-odbS3Backend :: Manager -> Text -> Text -> Text -> IO (Ptr C'git_odb_backend)
-odbS3Backend manager bucket access secret = do
+odbS3Backend :: Manager -> Text -> Text -> Text -> Text
+                -> IO (Ptr C'git_odb_backend)
+odbS3Backend manager bucket prefix access secret = do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
   readPrefixFun <-
     mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
@@ -218,12 +251,13 @@ odbS3Backend manager bucket access secret = do
   writeFun      <- mk'git_odb_backend_write_callback odbS3BackendWriteCallback
   existsFun     <- mk'git_odb_backend_exists_callback odbS3BackendExistsCallback
 
-  manager'       <- newStablePtr manager
-  bucket'        <- newStablePtr bucket
-  configuration' <- newStablePtr (Configuration Timestamp Credentials {
-                                       accessKeyID     = E.encodeUtf8 access
-                                     , secretAccessKey = E.encodeUtf8 secret } $
-                                  defaultLog Error)
+  manager' <- newStablePtr manager
+  bucket'  <- newStablePtr bucket
+  prefix'  <- newStablePtr prefix
+  config'  <- newStablePtr (Configuration Timestamp Credentials {
+                                 accessKeyID     = E.encodeUtf8 access
+                               , secretAccessKey = E.encodeUtf8 secret }
+                            (defaultLog Error))
 
   castPtr <$> new OdbS3Backend {
     odbS3Parent = C'git_odb_backend {
@@ -238,6 +272,7 @@ odbS3Backend manager bucket access secret = do
        , c'git_odb_backend'free        = odbS3BackendFreeCallbackPtr }
     , httpManager   = manager'
     , bucketName    = bucket'
-    , configuration = configuration' }
+    , objectPrefix  = prefix'
+    , configuration = config' }
 
 -- S3.hs

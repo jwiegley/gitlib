@@ -12,6 +12,7 @@ import           Data.Git
 import           Data.Git.Backend
 import           Data.Git.Backend.S3
 import           Data.Git.Backend.Trace
+import           Data.Map
 import           Data.Maybe
 import           Data.Text as T hiding (map)
 import qualified Data.Text.Encoding as E
@@ -25,11 +26,6 @@ import           Prelude (putStrLn)
 import           Prelude hiding (FilePath, putStr, putStrLn)
 import           System.Exit
 import           Test.HUnit
-
-import Bindings.Libgit2.OdbBackend
-import Foreign.Marshal.Alloc
-import Foreign.C.String
-import Foreign.Storable
 
 default (Text)
 
@@ -95,7 +91,7 @@ tests = test [
 
     -- Store Git objects in S3
     manager <- newManager def
-    odbs3   <- odbS3Backend manager bucket access secret
+    odbs3   <- odbS3Backend manager bucket "" access secret
     -- Use the tracing backend to show how much activity is taking place
     backend <- traceBackend odbs3
     -- Set the priority to 100 so it overrides the two default backends
@@ -118,6 +114,8 @@ tests = test [
         c   = sampleCommit repo tr sig
     x <- oid c
     x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
+
+    writeRefs odbs3 (fromList [("refs/heads/master", x)])
 
     let goodbye2 = createBlob (E.encodeUtf8 "Goodbye, world again!\n") repo
     tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye2) tr

@@ -37,6 +37,7 @@ Library
     , conduit         >= 0.5.5
     , http-conduit    >= 1.8.5.1
     , binary          >= 0.5.1.0
+    , yaml            >= 0.8.1.1
   exposed-modules:
     Data.Git.Backend.S3
 
