@@ -1,0 +1,7 @@
+dist/
+*.hi
+*.o
+*~
+*.swp
+/*.git/
+/.hpc/
