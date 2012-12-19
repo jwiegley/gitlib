@@ -115,8 +115,6 @@ tests = test [
     x <- oid c
     x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
-    writeRefs odbs3 (fromList [("refs/heads/master", x)])
-
     let goodbye2 = createBlob (E.encodeUtf8 "Goodbye, world again!\n") repo
     tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye2) tr
     x  <- oid tr
@@ -132,14 +130,16 @@ tests = test [
     x <- oid c2
     x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
-    -- cid <- objectId c2
-    -- writeRef $ createRef "refs/heads/master" (RefTargetId cid) repo
-    -- writeRef $ createRef "HEAD" (RefTargetSymbolic "refs/heads/master") repo
+    cid <- objectId c2
+    writeRef $ createRef "refs/heads/master" (RefTargetId cid) repo
+    writeRef $ createRef "HEAD" (RefTargetSymbolic "refs/heads/master") repo
 
-    -- x <- oidToText <$> lookupId "refs/heads/master" repo
-    -- x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+    x <- oidToText <$> lookupId "refs/heads/master" repo
+    x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
-    -- mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
+    mirrorRefsToS3 odbs3 repo
+
+    mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
 
     return()
 
