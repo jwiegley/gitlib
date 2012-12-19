@@ -1,5 +1,5 @@
 Name:                gitlib-s3
-Version:             0.0.2
+Version:             0.0.3
 Synopsis:            A repository backend for storing Git objects in Amazon S3
 Description:         A repository backend for storing Git objects in Amazon S3.
 License-file:        LICENSE
