@@ -3,6 +3,7 @@
 module Main where
 
 import           Aws
+import           Aws.Core
 import           Aws.S3
 import           Control.Applicative
 import           Data.ByteString
@@ -10,6 +11,7 @@ import qualified Data.ByteString.Lazy as BL
 import           Data.Conduit
 import           Data.Conduit.Binary
 import           Data.Conduit.List hiding (mapM_)
+import           Data.Maybe (isJust)
 import           Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy.Encoding as LE
@@ -17,81 +19,56 @@ import           Network.HTTP.Conduit
 
 default (Text)
 
-headFile :: Manager -> Text -> Text -> Text -> Text -> ResourceT IO Bool
-headFile manager bucket access secret filepath = do
-  let req    = headObject bucket filepath
-      creds  = Credentials { accessKeyID     = E.encodeUtf8 access
-                           , secretAccessKey = E.encodeUtf8 secret }
-  res <- aws (Configuration Timestamp creds $ defaultLog Error)
-            defServiceConfig manager req
-  return $ case readResponse res of
-    Nothing -> False
-    Just _  -> True
+bucket = "fpco-john-development"
+access = "AKIAJT6ZIAY5FKAGVTOA"
+secret = "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"
+creds  = Credentials { accessKeyID     = E.encodeUtf8 access
+                     , secretAccessKey = E.encodeUtf8 secret }
+config = Configuration Timestamp creds $ defaultLog Debug
 
-getFile :: Manager -> Text -> Text -> Text -> Text
+-- svcConfig = defServiceConfig
+svcConfig = ((s3 HTTP "127.0.0.1" False) {
+                  s3Port = 10001
+                , s3RequestStyle = PathStyle })
+
+headFile :: Manager -> Text -> ResourceT IO Bool
+headFile manager filepath =
+  isJust . readResponse <$> aws config svcConfig manager
+                                (headObject bucket filepath)
+
+getFile :: Manager -> Text
            -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
-getFile manager bucket access secret filepath = do
-  let req    = (getObject bucket filepath)
-                 -- { goResponseContentRange = Just (2,3) }
-      creds  = Credentials { accessKeyID     = E.encodeUtf8 access
-                           , secretAccessKey = E.encodeUtf8 secret }
-  res <- aws (Configuration Timestamp creds $ defaultLog Error)
-            defServiceConfig manager req
+getFile manager filepath = do
+  let req = getObject bucket filepath
+  res <- aws config svcConfig manager req
   gor <- readResponseIO res
   return (responseBody (gorResponse gor))
 
-putFile :: Manager -> Text -> Text -> Text -> Text
-           -> Source (ResourceT IO) ByteString
+putFile :: Manager -> Text -> Source (ResourceT IO) ByteString
            -> ResourceT IO BL.ByteString
-putFile manager bucket access secret filepath src = do
+putFile manager filepath src = do
   lbs <- BL.fromChunks <$> (src $$ consume)
-  let req   = putObject bucket filepath (RequestBodyLBS lbs)
-      creds = Credentials { accessKeyID     = E.encodeUtf8 access
-                          , secretAccessKey = E.encodeUtf8 secret }
-  res <- aws (Configuration Timestamp creds $ defaultLog Error)
-            defServiceConfig manager req
+  let req = putObject bucket filepath (RequestBodyLBS lbs)
+  res <- aws config svcConfig manager req
   _ <- readResponseIO res
   return lbs
 
 main :: IO ()
 main = do
-  let access = "AKIAJT6ZIAY5FKAGVTOA"
-      secret = "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"
-
-  manager  <- newManager def
-
+  manager <- newManager def
   _ <- runResourceT $
-       putFile manager "fpco-john-development"
-               access secret "test2.txt"
+       putFile manager "test2.txt"
                (sourceLbs (LE.encodeUtf8 "Hello, world!\n"))
 
-  exists1 <- runResourceT $
-             headFile manager "fpco-john-development" access secret "test99.txt"
+  exists1 <- runResourceT $ headFile manager "test99.txt"
   Prelude.putStrLn $ "exists1: " ++ show exists1
 
-  exists2 <- runResourceT $
-             headFile manager "fpco-john-development" access secret "test2.txt"
+  exists2 <- runResourceT $ headFile manager "test2.txt"
   Prelude.putStrLn $ "exists2: " ++ show exists2
 
-  object2   <- runResourceT $
-               getFile manager "fpco-john-development"
-                       access secret "test2.txt"
-  contents2 <- runResourceT $ object2 $$+- await
-  print contents2
-
-  -- This is the hS3 version:
-
-  -- let conn = amazonS3Connection "AKIAJT6ZIAY5FKAGVTOA"
-  --                               "kOWkdTeHg4Evl+wv55i7Py8g9e1Dw7fKpl2CFjI+"
-  -- buckets <- listBuckets conn
-  -- case buckets of
-  --   Left err -> putStrLn (prettyReqError err)
-  --   Right bs -> mapM_ print bs
-
-  -- objects <- listObjects conn "fpco-john-development"
-  --                        (ListRequest "" "" "" 100)
-  -- case objects of
-  --   Left err      -> putStrLn (prettyReqError err)
-  --   Right (_, os) -> mapM_ (print . key) os
+  contents2 <- runResourceT $ do
+    object2 <- getFile manager "test2.txt"
+    object2 $$+- await
+  Prelude.putStrLn $ "read results: " ++ show contents2
 
 -- Main.hs ends here

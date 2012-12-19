@@ -24,7 +24,7 @@ Library
     , HUnit           >= 1.2.5
     , bytestring      >= 0.9.2.1
     , containers      >= 0.4.2
-    , transformers    >= 0.3
+    , transformers    >= 0.2.2
     , lens            >= 2.8
     , attempt         >= 0.4.0
     , parallel-io     >= 0.3.2.1
@@ -51,6 +51,7 @@ Test-suite smoke
     , gitlib-s3
     , gitlib
     , hlibgit2        >= 0.17
+    , aws             >= 0.7.5
     , HUnit           >= 1.2.5
     , bytestring      >= 0.9.2.1
     , containers      >= 0.4.2
