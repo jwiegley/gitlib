@@ -9,7 +9,7 @@ module Data.Git.Repository
 
        , Updatable(..)
 
-       , Repository
+       , Repository(..)
        , openRepository
        , createRepository
        , openOrCreateRepository

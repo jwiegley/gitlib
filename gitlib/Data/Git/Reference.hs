@@ -30,6 +30,7 @@ import qualified Data.Text.Encoding as E
 import           Foreign.Marshal.Array
 import qualified Prelude
 import           Prelude ((+),(-))
+import Data.IORef
 
 default (Text)
 
@@ -227,30 +228,35 @@ listRefNames repo flags =
 -- int git_reference_foreach(git_repository *repo, unsigned int list_flags,
 --   int (*callback)(const char *, void *), void *payload)
 
-type ForeachRefCallback = Text -> IO ()
+type ForeachRefCallback a = Text -> IO a
 
-foreachRefCallbackThunk :: ForeachRefCallback -> CString -> Ptr () -> IO CInt
+foreachRefCallbackThunk :: ForeachRefCallback a -> CString -> Ptr () -> IO CInt
 foreachRefCallbackThunk callback name _ = do
   nameText <- E.decodeUtf8 <$> unsafePackCString name
-  callback nameText
+  _ <- callback nameText
   return 0
 
-mapRefs :: Repository -> ListFlags -> ForeachRefCallback -> IO ()
+mapRefs :: Repository -> ListFlags -> ForeachRefCallback a -> IO [a]
 mapRefs repo flags cb =
-    withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
-      fun <- mk'git_reference_foreach_callback (foreachRefCallbackThunk cb)
-      r <- c'git_reference_foreach repoPtr (flagsToInt flags) fun nullPtr
-      -- jww (2012-12-14): Does the return type mean anything here?
-      when (r < 0) $ return ()
-      return ()
+  bracket
+    (liftM2 (,) (newIORef [] >>= newStablePtr)
+                (mk'git_reference_foreach_callback
+                  (foreachRefCallbackThunk cb)))
+    (\(iorSPtr, fun) -> do freeStablePtr iorSPtr
+                           freeHaskellFunPtr fun)
+    (\(iorSPtr, fun) ->
+        withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+          _ <- c'git_reference_foreach repoPtr (flagsToInt flags) fun
+                                       (castStablePtrToPtr iorSPtr)
+          deRefStablePtr iorSPtr >>= readIORef)
 
-mapAllRefs :: Repository -> ForeachRefCallback -> IO ()
+mapAllRefs :: Repository -> ForeachRefCallback a -> IO [a]
 mapAllRefs repo = mapRefs repo allRefsFlag
-mapOidRefs :: Repository -> ForeachRefCallback -> IO ()
+mapOidRefs :: Repository -> ForeachRefCallback a -> IO [a]
 mapOidRefs repo = mapRefs repo oidRefsFlag
-mapLooseOidRefs :: Repository -> ForeachRefCallback -> IO ()
+mapLooseOidRefs :: Repository -> ForeachRefCallback a -> IO [a]
 mapLooseOidRefs repo = mapRefs repo looseOidRefsFlag
-mapSymbolicRefs :: Repository -> ForeachRefCallback -> IO ()
+mapSymbolicRefs :: Repository -> ForeachRefCallback a -> IO [a]
 mapSymbolicRefs repo = mapRefs repo symbolicRefsFlag
 
 {-
