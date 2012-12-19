@@ -4,6 +4,8 @@
 
 module Data.Git.Backend.S3
        ( odbS3Backend
+       , createS3backend
+       , createMockS3backend
        , readRefs, writeRefs
        , mirrorRefsFromS3, mirrorRefsToS3 )
        where
@@ -42,7 +44,6 @@ import           Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy.Encoding as LE
 import qualified Data.Yaml as Y
-import           Debug.Trace (trace)
 import           Foreign.C.String
 import           Foreign.C.Types
 import           Foreign.ForeignPtr
@@ -318,9 +319,10 @@ foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
 odbS3Backend :: S3Configuration NormalQuery
-                -> Manager -> Text -> Text -> Text -> Text
+                -> Configuration
+                -> Manager -> Text -> Text
                 -> IO (Ptr C'git_odb_backend)
-odbS3Backend s3config manager bucket prefix access secret = do
+odbS3Backend s3config config manager bucket prefix = do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
   readPrefixFun <-
     mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
@@ -333,10 +335,7 @@ odbS3Backend s3config manager bucket prefix access secret = do
   bucket'   <- newStablePtr bucket
   prefix'   <- newStablePtr prefix
   s3config' <- newStablePtr s3config
-  config'   <- newStablePtr (Configuration Timestamp Credentials {
-                                  accessKeyID     = E.encodeUtf8 access
-                                , secretAccessKey = E.encodeUtf8 secret }
-                             (defaultLog Debug))
+  config'   <- newStablePtr config
 
   castPtr <$> new OdbS3Backend {
     odbS3Parent = C'git_odb_backend {
@@ -354,5 +353,27 @@ odbS3Backend s3config manager bucket prefix access secret = do
     , objectPrefix    = prefix'
     , configuration   = config'
     , s3configuration = s3config' }
+
+createS3backend :: Text -> Text -> Text -> IO (Ptr C'git_odb_backend)
+createS3backend bucket access secret = do
+    manager <- newManager def
+    odbS3Backend defServiceConfig
+                 (Configuration Timestamp Credentials {
+                       accessKeyID     = E.encodeUtf8 access
+                     , secretAccessKey = E.encodeUtf8 secret }
+                  (defaultLog Error))
+                 manager bucket ""
+
+createMockS3backend :: Text -> Text -> Text -> IO (Ptr C'git_odb_backend)
+createMockS3backend bucket access secret = do
+    manager <- newManager def
+    odbS3Backend ((s3 HTTP "127.0.0.1" False) {
+                       s3Port         = 10001
+                     , s3RequestStyle = PathStyle })
+                 (Configuration Timestamp Credentials {
+                       accessKeyID     = E.encodeUtf8 access
+                     , secretAccessKey = E.encodeUtf8 secret }
+                  (defaultLog Debug))
+                 manager bucket ""
 
 -- S3.hs

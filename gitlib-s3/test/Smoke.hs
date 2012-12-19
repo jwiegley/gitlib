@@ -88,19 +88,13 @@ tests = test [
   "createTwoCommits" ~:
 
   withRepository "createTwoCommits.git" $ \repo -> do
-    let bucket = "fpco-john-development"
-        access = "AKIAJT6ZIAY5FKAGVTOA"
-        secret = "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"
-
     -- Store Git objects in S3
     manager <- newManager def
-    odbs3   <- odbS3Backend ((s3 HTTP "127.0.0.1" False) {
-                                  s3Port         = 10001
-                                , s3RequestStyle = PathStyle
-                                })
-                           manager bucket "" access secret
+    odbs3   <- createMockS3backend "gitlib-s3" "ACCESS" "SECRET"
+
     -- Use the tracing backend to show how much activity is taking place
     backend <- traceBackend odbs3
+
     -- Set the priority to 100 so it overrides the two default backends
     odbBackendAdd repo backend 100
 
