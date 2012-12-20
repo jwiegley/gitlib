@@ -219,8 +219,8 @@ mirrorRefsToS3 be repo = do
   writeRefs be (fromList refs)
   where go name ref =
           case refTarget ref of
-            (RefTargetSymbolic target) -> (name, Left target)
-            (RefTargetId oid)          -> (name, Right oid)
+            RefTargetSymbolic target -> (name, Left target)
+            RefTargetId oid          -> (name, Right oid)
 
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid =
