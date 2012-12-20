@@ -1,5 +1,5 @@
 TAGS:
-	find . -name '*.hs' | xargs hasktags -o - > TAGS
+	find . -name '*.hs' | xargs hasktags -e -o - > TAGS
 
 rebuild:
 	cabal-delete gitlib-s3
