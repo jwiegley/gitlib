@@ -1,3 +1,4 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -236,35 +237,37 @@ listRefNames repo flags =
 -- int git_reference_foreach(git_repository *repo, unsigned int list_flags,
 --   int (*callback)(const char *, void *), void *payload)
 
-type ForeachRefCallback a = Text -> IO a
-
-foreachRefCallbackThunk :: ForeachRefCallback a -> CString -> Ptr () -> IO CInt
-foreachRefCallbackThunk callback name _ = do
-  nameText <- E.decodeUtf8 <$> unsafePackCString name
-  _ <- callback nameText
+foreachRefCallback :: CString -> Ptr () -> IO CInt
+foreachRefCallback name payload = do
+  (callback,results) <- peek (castPtr payload) >>= deRefStablePtr
+  result <- unsafePackCString name >>= callback . E.decodeUtf8
+  modifyIORef results (\xs -> result:xs)
   return 0
 
-mapRefs :: Repository -> ListFlags -> ForeachRefCallback a -> IO [a]
-mapRefs repo flags cb =
-  bracket
-    (liftM2 (,) (newIORef [] >>= newStablePtr)
-                (mk'git_reference_foreach_callback
-                  (foreachRefCallbackThunk cb)))
-    (\(iorSPtr, fun) -> do freeStablePtr iorSPtr
-                           freeHaskellFunPtr fun)
-    (\(iorSPtr, fun) ->
-        withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
-          _ <- c'git_reference_foreach repoPtr (flagsToInt flags) fun
-                                       (castStablePtrToPtr iorSPtr)
-          deRefStablePtr iorSPtr >>= readIORef)
+foreign export ccall "foreachRefCallback"
+  foreachRefCallback :: CString -> Ptr () -> IO CInt
+foreign import ccall "&foreachRefCallback"
+  foreachRefCallbackPtr :: FunPtr (CString -> Ptr () -> IO CInt)
 
-mapAllRefs :: Repository -> ForeachRefCallback a -> IO [a]
+mapRefs :: Repository -> ListFlags -> (Text -> IO a) -> IO [a]
+mapRefs repo flags callback = do
+  ioRef <- newIORef []
+  bracket
+    (newStablePtr (callback,ioRef))
+    deRefStablePtr
+    (\ptr -> with ptr $ \pptr ->
+      withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+        _ <- c'git_reference_foreach repoPtr (flagsToInt flags)
+                                    foreachRefCallbackPtr (castPtr pptr)
+        readIORef ioRef)
+
+mapAllRefs :: Repository -> (Text -> IO a) -> IO [a]
 mapAllRefs repo = mapRefs repo allRefsFlag
-mapOidRefs :: Repository -> ForeachRefCallback a -> IO [a]
+mapOidRefs :: Repository -> (Text -> IO a) -> IO [a]
 mapOidRefs repo = mapRefs repo oidRefsFlag
-mapLooseOidRefs :: Repository -> ForeachRefCallback a -> IO [a]
+mapLooseOidRefs :: Repository -> (Text -> IO a) -> IO [a]
 mapLooseOidRefs repo = mapRefs repo looseOidRefsFlag
-mapSymbolicRefs :: Repository -> ForeachRefCallback a -> IO [a]
+mapSymbolicRefs :: Repository -> (Text -> IO a) -> IO [a]
 mapSymbolicRefs repo = mapRefs repo symbolicRefsFlag
 
 {-
