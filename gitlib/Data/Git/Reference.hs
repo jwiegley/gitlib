@@ -64,10 +64,18 @@ lookupRef name repo = alloca $ \ptr -> do
     else do
     ref  <- peek ptr
     fptr <- newForeignPtr p'git_reference_free ref
-    return $ Just $ Reference { refRepo   = repo
-                              , refName   = name
-                              , refTarget = undefined
-                              , refObj    = Just fptr }
+    typ  <- c'git_reference_type ref
+    targ <- if typ == c'GIT_REF_OID
+            then do oidPtr <- c'git_reference_oid ref
+                    newForeignPtr_ oidPtr
+                      >>= return . RefTargetId . Oid . COid
+            else do targName <- c'git_reference_target ref
+                    unsafePackCString targName
+                      >>= return . RefTargetSymbolic . E.decodeUtf8
+    return $ Just Reference { refRepo   = repo
+                            , refName   = name
+                            , refTarget = targ
+                            , refObj    = Just fptr }
 
 writeRef :: Reference -> IO Reference
 writeRef ref = alloca $ \ptr -> do
