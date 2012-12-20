@@ -13,6 +13,7 @@ module Data.Git.Repository
        , openRepository
        , createRepository
        , openOrCreateRepository
+       , repositoryPtr
 
        , lookupObject'
        , withObject

@@ -22,6 +22,9 @@ module Data.Git.Internal
        , withObject
        , withObjectPtr
 
+       , RefTarget(..)
+       , Reference(..)
+
        , module X )
        where
 
@@ -108,11 +111,22 @@ class Updatable a where
   getObject (IdRef _)  = Nothing
   getObject (ObjRef x) = Just x
 
-data Repository = Repository { repoPath :: FilePath
-                             , repoObj  :: ObjPtr C'git_repository }
+data Repository = Repository { repoPath       :: FilePath
+                             , repoOnWriteRef :: [Reference -> IO ()]
+                             , repoObj        :: ObjPtr C'git_repository }
 
 instance Show Repository where
   show x = "Repository " <> toString (repoPath x)
+
+data RefTarget = RefTargetId Oid
+               | RefTargetSymbolic Text
+               deriving (Show, Eq)
+
+data Reference = Reference { refRepo   :: Repository
+                           , refName   :: Text
+                           , refTarget :: RefTarget
+                           , refObj    :: ObjPtr C'git_reference }
+               deriving Show
 
 data Base a = Base { gitId   :: Ident a
                    , gitRepo :: Repository
@@ -158,8 +172,9 @@ openRepositoryWith path fn = alloca $ \ptr ->
         when (r < 0) $ doesNotExist p
         ptr' <- peek ptr
         fptr <- newForeignPtr p'git_repository_free ptr'
-        return Repository { repoPath = path
-                          , repoObj  = Just fptr }
+        return Repository { repoPath       = path
+                          , repoOnWriteRef = []
+                          , repoObj        = Just fptr }
 
   where doesNotExist = throwIO . RepositoryNotExist . toString
 

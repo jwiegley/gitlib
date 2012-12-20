@@ -4,7 +4,6 @@
 module Data.Git.Backend.S3
        ( odbS3Backend
        , createS3backend
-       , createMockS3backend
        , readRefs, writeRefs
        , mirrorRefsFromS3, mirrorRefsToS3 )
        where
@@ -33,6 +32,7 @@ import           Data.Conduit.Binary
 import           Data.Conduit.List hiding (mapM_, peek, catMaybes, sequence)
 import           Data.Git hiding (getObject)
 import           Data.Git.Backend
+import           Data.Git.Backend.Trace
 import           Data.Git.Error
 import           Data.Git.Oid
 import qualified Data.List as L
@@ -159,26 +159,39 @@ putFileS3 = curry . odbS3dispatch putFileS3'
 type RefMap = Map Text (Either Text Oid)
 
 instance Y.FromJSON Oid where
-  parseJSON = Y.parseJSON
+  parseJSON (Y.String v) =
+    return . Oid . COid $ unsafePerformIO $ do
+      ptr <- mallocForeignPtr
+      withCStringable v $ \cstr ->
+        withForeignPtr ptr $ \ptr' -> do
+          r <- c'git_oid_fromstr ptr' cstr
+          when (r < 0) $ throwIO OidCopyFailed
+          return ptr
 
 coidToJSON :: ForeignPtr C'git_oid -> Y.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $ \oid ->
                     Y.toJSON <$> oidToStr oid
 
 instance Y.ToJSON Oid where
-  toJSON x = case x of
-               PartialOid (COid coid) len -> coidToJSON coid
-               Oid (COid coid)            -> coidToJSON coid
+  toJSON (PartialOid (COid coid) _) = throw RefCannotCreateFromPartialOid
+  toJSON (Oid (COid coid))          = coidToJSON coid
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe RefMap)
 readRefs be = do
   odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
-  bytes <- runResourceT $ do
-    result <- getFileS3 odbs3 "refs.yml" Nothing
-    result $$+- await
-  case bytes of
-    Nothing     -> return Nothing
-    Just bytes' -> return (Y.decode bytes')
+  exists <- catch (runResourceT $ testFileS3 odbs3 "refs.yml")
+                  (\e -> print (e :: IOException) >> throwIO e)
+  if exists
+    then do
+    bytes  <- catch (runResourceT $ do
+                        result <- getFileS3 odbs3 "refs.yml" Nothing
+                        result $$+- await)
+                    (\e -> print (e :: IOException) >> throwIO e)
+    case bytes of
+      Nothing     -> return Nothing
+      Just bytes' -> return (Y.decode bytes' :: Maybe RefMap)
+
+    else return Nothing
 
 writeRefs :: Ptr C'git_odb_backend -> RefMap -> IO ()
 writeRefs be refs = do
@@ -188,14 +201,14 @@ writeRefs be refs = do
     putFileS3 odbs3 "refs.yml" (sourceLbs (BL.fromChunks [payload]))
 
 mirrorRefsFromS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
-mirrorRefsFromS3 be repo' = do
+mirrorRefsFromS3 be repo = do
   refs <- readRefs be
   case refs of
-    Nothing    -> throwIO RepositoryInvalid
+    Nothing -> return ()
     Just refs' ->
-      forM_ (toList refs') $ \(name, ref) -> alloca $ \ptr ->
-        withForeignPtr repo $ \repoPtr ->
-          withCStringable name $ \namePtr -> do
+      forM_ (toList refs') $ \(name, ref) ->
+        withForeignPtr (repositoryPtr repo) $ \repoPtr ->
+          withCStringable name $ \namePtr -> alloca $ \ptr -> do
             r <- case ref of
                   Left target ->
                     withCStringable target $ \targetPtr ->
@@ -207,8 +220,6 @@ mirrorRefsFromS3 be repo' = do
                     withForeignPtr coid $ \coidPtr ->
                       c'git_reference_create_oid ptr repoPtr namePtr coidPtr 1
             when (r < 0) $ throwIO RepositoryInvalid
-  where
-    repo = fromMaybe (throw RepositoryInvalid) (repoObj repo')
 
 mirrorRefsToS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
 mirrorRefsToS3 be repo = do
@@ -351,26 +362,33 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-createS3backend :: Text -> Text -> Text -> IO (Ptr C'git_odb_backend)
-createS3backend bucket access secret = do
+createS3backend :: Text -> Text -> Text -> Maybe Text -> LogLevel -> Bool
+                   -> Repository -> IO Repository
+createS3backend bucket access secret mockAddr level tracing repo = do
     manager <- newManager def
-    odbS3Backend defServiceConfig
-                 (Configuration Timestamp Credentials {
-                       accessKeyID     = E.encodeUtf8 access
-                     , secretAccessKey = E.encodeUtf8 secret }
-                  (defaultLog Error))
-                 manager bucket ""
+    odbs3 <-
+      odbS3Backend
+        (case mockAddr of
+            Nothing   -> defServiceConfig
+            Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
+                               s3Port         = 10001
+                             , s3RequestStyle = PathStyle })
+        (Configuration Timestamp Credentials {
+              accessKeyID     = E.encodeUtf8 access
+            , secretAccessKey = E.encodeUtf8 secret }
+         (defaultLog level))
+        manager bucket ""
 
-createMockS3backend :: Text -> Text -> Text -> IO (Ptr C'git_odb_backend)
-createMockS3backend bucket access secret = do
-    manager <- newManager def
-    odbS3Backend ((s3 HTTP "127.0.0.1" False) {
-                       s3Port         = 10001
-                     , s3RequestStyle = PathStyle })
-                 (Configuration Timestamp Credentials {
-                       accessKeyID     = E.encodeUtf8 access
-                     , secretAccessKey = E.encodeUtf8 secret }
-                  (defaultLog Debug))
-                 manager bucket ""
+    if tracing
+      then do backend <- traceBackend odbs3
+              odbBackendAdd repo backend 100
+      else odbBackendAdd repo odbs3 100
+
+    -- Start by reading in the known refs from S3
+    mirrorRefsFromS3 odbs3 repo
+
+    -- Whenever a ref is written, update the refs in S3
+    let onWrite = const $ mirrorRefsToS3 odbs3 repo
+    return repo { repoOnWriteRef = onWrite : repoOnWriteRef repo }
 
 -- S3.hs

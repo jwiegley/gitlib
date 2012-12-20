@@ -87,16 +87,10 @@ tests = test [
 
   "createTwoCommits" ~:
 
-  withRepository "createTwoCommits.git" $ \repo -> do
+  withRepository "createTwoCommits.git" $ \repo' -> do
     -- Store Git objects in S3
-    manager <- newManager def
-    odbs3   <- createMockS3backend "gitlib-s3" "ACCESS" "SECRET"
-
-    -- Use the tracing backend to show how much activity is taking place
-    backend <- traceBackend odbs3
-
-    -- Set the priority to 100 so it overrides the two default backends
-    odbBackendAdd repo backend 100
+    repo <- createS3backend "gitlib-s3" "ACCESS" "SECRET"
+                           (Just "127.0.0.1") Error True repo'
 
     let hello = createBlob (E.encodeUtf8 "Hello, world!\n") repo
     tr <- updateTree "hello/world.txt" (blobRef hello) (createTree repo)
@@ -131,6 +125,10 @@ tests = test [
     x <- oid c2
     x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
+    putStrLn "Refs before creation..."
+    mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
+    putStrLn "Refs before creation...done"
+
     cid <- objectId c2
     writeRef $ createRef "refs/heads/master" (RefTargetId cid) repo
     writeRef $ createRef "HEAD" (RefTargetSymbolic "refs/heads/master") repo
@@ -138,9 +136,9 @@ tests = test [
     x <- oidToText <$> lookupId "refs/heads/master" repo
     x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
-    mirrorRefsToS3 odbs3 repo
-
+    putStrLn "Refs after creation..."
     mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
+    putStrLn "Refs after creation...done"
 
     return()
 

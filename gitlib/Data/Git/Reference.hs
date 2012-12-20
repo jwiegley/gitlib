@@ -35,16 +35,6 @@ import Data.IORef
 
 default (Text)
 
-data RefTarget = RefTargetId Oid
-               | RefTargetSymbolic Text
-               deriving (Show, Eq)
-
-data Reference = Reference { refRepo   :: Repository
-                           , refName   :: Text
-                           , refTarget :: RefTarget
-                           , refObj    :: ObjPtr C'git_reference }
-               deriving Show
-
 -- int git_reference_lookup(git_reference **reference_out,
 --   git_repository *repo, const char *name)
 
@@ -98,7 +88,9 @@ writeRef ref = alloca $ \ptr -> do
       when (r < 0) $ throwIO ReferenceCreateFailed
 
   fptr <- newForeignPtr_ =<< peek ptr
-  return ref { refObj = Just fptr }
+  let ref' = ref { refObj = Just fptr }
+  mapM_ ($ ref') (repoOnWriteRef (refRepo ref'))
+  return ref'
 
   where
     repo = fromMaybe (error "Repository invalid") (repoObj (refRepo ref))
