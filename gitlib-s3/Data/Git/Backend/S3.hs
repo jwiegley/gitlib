@@ -1,5 +1,4 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Data.Git.Backend.S3
@@ -225,7 +224,7 @@ mirrorRefsToS3 be repo = do
 
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid =
-  catch go (\(e :: IOException) -> print e >> return (-1))
+  catch go (\e -> print (e :: IOException) >> return (-1))
   where
     go = do
       odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
@@ -253,7 +252,7 @@ odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len =
 
 odbS3BackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
 odbS3BackendReadHeaderCallback len_p type_p be oid =
-  catch go (\(e :: IOException) -> print e >> return (-1))
+  catch go (\e -> print (e :: IOException) >> return (-1))
   where
     go = do
       let hdrLen = sizeOf (undefined :: Int) * 2
@@ -281,7 +280,7 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
       bytes <- curry unsafePackCStringLen (castPtr obj_data) (fromIntegral len)
       let payload = BL.append hdr (BL.fromChunks [bytes])
       catch (go odbs3 oidStr payload >> return 0)
-            (\(e :: IOException) -> print (e :: IOException) >> return (-1))
+            (\e -> print (e :: IOException) >> return (-1))
     n -> return n
   where
     go odbs3 oidStr payload =
@@ -292,9 +291,7 @@ odbS3BackendExistsCallback be oid = do
   oidStr <- oidToStr oid
   odbs3  <- peek (castPtr be :: Ptr OdbS3Backend)
   exists <- catch (runResourceT $ testFileS3 odbs3 (T.pack oidStr))
-                 (\(e :: IOException) -> do print (e :: IOException)
-                                            return False)
-  putStrLn $ "exists = " ++ show exists
+                 (\e -> print (e :: IOException) >> return False)
   return $ if exists then 1 else 0
 
 odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
