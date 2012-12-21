@@ -6,4 +6,4 @@
 	url = git://github.com/jwiegley/mock-s3.git
 [submodule "vendor/aws"]
 	path = vendor/aws
-	url = https://github.com/aristidb/aws
+	url = git://github.com/jwiegley/aws
