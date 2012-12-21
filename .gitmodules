@@ -1,6 +1,9 @@
 [submodule "hlibgit2/libgit2"]
 	path = hlibgit2/libgit2
 	url = git://github.com/jwiegley/libgit2.git
-[submodule "mock-s3"]
-	path = mock-s3
+[submodule "vendor/mock-s3"]
+	path = vendor/mock-s3
 	url = git://github.com/jwiegley/mock-s3.git
+[submodule "vendor/aws"]
+	path = vendor/aws
+	url = https://github.com/aristidb/aws
