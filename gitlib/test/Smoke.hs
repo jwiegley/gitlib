@@ -229,6 +229,11 @@ tests = test [
     ehist <- commitEntryHistory "goodbye/files/world.txt" c2
     Prelude.print ehist
 
+    oid <- stringToOid ("2506e7fc" :: Text)
+    c3 <- lookupCommit (fromJust oid) repo
+    ehist <- commitEntryHistory "goodbye/files/world.txt" (fromJust c3)
+    Prelude.print ehist
+
     return()
 
   ]
