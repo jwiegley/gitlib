@@ -10,6 +10,7 @@ module Data.Git.Blob
        , createBlob
        , getBlobContents
        , blobSourceToString
+       , lookupBlob
        , writeBlob )
        where
 
