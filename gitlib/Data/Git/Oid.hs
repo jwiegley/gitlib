@@ -62,7 +62,7 @@ data Ident a = Pending (a -> IO COid)
              | Stored COid
 
 instance Show (Ident a) where
-  show (Pending _) = "Pending"
+  show (Pending _) = "Ident..."
   show (Stored coid) = show coid
 
 -- | 'Oid' represents either a full or partial SHA1 hash code used to identify

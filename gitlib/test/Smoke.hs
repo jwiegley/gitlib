@@ -90,10 +90,10 @@ tests = test [
     update_ $ createBlob (E.encodeUtf8 "Hello, world!\n") repo
 
     x <- catBlob repo "af5626b4a114abcb82d63db7c8082c3c4756e51b"
-    x @?= (Just "Hello, world!\n")
+    x @?= Just "Hello, world!\n"
 
     x <- catBlob repo "af5626b"
-    x @?= (Just "Hello, world!\n")
+    x @?= Just "Hello, world!\n"
 
     return ()
 
@@ -182,6 +182,7 @@ tests = test [
 
     let goodbye = createBlob (E.encodeUtf8 "Goodbye, world!\n") repo
     tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
+    tr <- update tr
     x  <- oid tr
     x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
@@ -192,11 +193,13 @@ tests = test [
           , signatureEmail = "johnw@newartisans.com"
           , signatureWhen  = posixSecondsToUTCTime 1348980883 }
         c   = sampleCommit repo tr sig
+    c <- update c
     x <- oid c
     x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
     let goodbye2 = createBlob (E.encodeUtf8 "Goodbye, world again!\n") repo
     tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye2) tr
+    tr <- update tr
     x  <- oid tr
     x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
@@ -210,6 +213,7 @@ tests = test [
     x <- oid c2
     x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
+    c2 <- update c2
     cid <- objectId c2
     writeRef $ createRef "refs/heads/master" (RefTargetId cid) repo
     writeRef $ createRef "HEAD" (RefTargetSymbolic "refs/heads/master") repo

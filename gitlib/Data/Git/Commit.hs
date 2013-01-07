@@ -1,7 +1,17 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Data.Git.Commit where
+module Data.Git.Commit
+       ( Commit(..)
+       , newCommitBase
+       , createCommit
+       , lookupCommit
+       , writeCommit
+       , getCommitParents
+       , modifyCommitTree
+       , removeFromCommitTree
+       , updateCommit )
+       where
 
 import           Bindings.Libgit2
 import qualified Data.ByteString as BS
@@ -30,8 +40,8 @@ data Commit = Commit { commitInfo      :: Base Commit
 
 instance Show Commit where
   show x = case gitId (commitInfo x) of
-    Pending _ -> "Commit"
-    Stored y  -> "Commit#" ++ show y
+    Pending _ -> "Commit..."
+    Stored y  -> "Commit#" ++ show y ++ " <" ++ show (commitTree x) ++ ">"
 
 instance Updatable Commit where
   getId x        = gitId (commitInfo x)
@@ -133,9 +143,9 @@ doWriteCommit ref c = do
     repo = fromMaybe (error "Repository invalid")
                      (repoObj (gitRepo (commitInfo c)))
 
-    withRef refName =
-      if isJust refName
-      then unsafeUseAsCString (E.encodeUtf8 (fromJust refName))
+    withRef name =
+      if isJust name
+      then unsafeUseAsCString (E.encodeUtf8 (fromJust name))
       else flip ($) nullPtr
 
     withEncStr enc =

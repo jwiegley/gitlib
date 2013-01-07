@@ -54,12 +54,12 @@ data Tree = Tree { treeInfo     :: Base Tree
 
 instance Show Tree where
   show x = case gitId (treeInfo x) of
-    Pending _ -> "Tree"
-    Stored y  -> "Tree#" ++ show y
+             Pending _ -> "Tree..."
+             Stored y  -> "Tree#" ++ show y
 
 instance Show TreeEntry where
-  show be@(BlobEntry {}) = show be
-  show te@(TreeEntry {}) = show te
+  show (BlobEntry blob _) = "BlobEntry (" ++ show blob ++ ")"
+  show (TreeEntry tree)   = "TreeEntry (" ++ show tree ++ ")"
 
 instance Updatable Tree where
   getId x        = gitId (treeInfo x)
@@ -79,7 +79,7 @@ newTreeBase t =
 --   tree is a no-op.
 createTree :: Repository -> Tree
 createTree repo =
-  Tree { treeInfo     =
+  Tree { treeInfo =
             newBase repo (Pending (doWriteTree >=> return . snd)) Nothing
        , treeContents = M.empty }
 
@@ -93,6 +93,7 @@ lookupTree oid repo =
           (\m idx -> do
               entry   <- c'git_tree_entry_byindex (castPtr treePtr)
                                                  (fromIntegral idx)
+              when (entry == nullPtr) $ throwIO ObjectLookupFailed
               entryId <- c'git_tree_entry_id entry
               coid    <- mallocForeignPtr
               withForeignPtr coid $ \coid' ->
@@ -120,9 +121,10 @@ doLookupTreeEntry (name:names) t = do
   -- more names in the path and 'createIfNotExist' is True, create a new Tree
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
-  Prelude.putStrLn $ "Tree: " ++ show t
-  Prelude.putStrLn $ "Tree Entries: " ++ show (treeContents t)
-  Prelude.putStrLn $ "Lookup: " ++ toString name
+
+  -- Prelude.putStrLn $ "Tree: " ++ show t
+  -- Prelude.putStrLn $ "Tree Entries: " ++ show (treeContents t)
+  -- Prelude.putStrLn $ "Lookup: " ++ toString name
   y <- case M.lookup name (treeContents t) of
     Nothing -> return Nothing
     Just j  -> case j of
@@ -133,8 +135,8 @@ doLookupTreeEntry (name:names) t = do
         tr <- loadObject t' t
         for tr $ \x -> return $ TreeEntry (ObjRef x)
 
-  Prelude.putStrLn $ "Result: " ++ show y
-  Prelude.putStrLn $ "Names: " ++ show names
+  -- Prelude.putStrLn $ "Result: " ++ show y
+  -- Prelude.putStrLn $ "Names: " ++ show names
   if null names
     then return y
     else

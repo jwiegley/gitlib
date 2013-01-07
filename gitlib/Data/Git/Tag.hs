@@ -14,7 +14,7 @@ data Tag = Tag { tagInfo :: Base Tag
 
 instance Show Tag where
   show x = case gitId (tagInfo x) of
-    Pending _ -> "Tag"
+    Pending _ -> "Tag..."
     Stored y  -> "Tag#" ++ show y
 
 -- Tag.hs

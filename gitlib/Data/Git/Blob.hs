@@ -41,7 +41,7 @@ data Blob = Blob { blobInfo     :: Base Blob
 
 instance Show Blob where
   show x = case gitId (blobInfo x) of
-    Pending _ -> "Blob"
+    Pending _ -> "Blob..."
     Stored y  -> "Blob#" ++ show y
 
 instance Updatable Blob where
@@ -52,8 +52,7 @@ instance Updatable Blob where
   lookupFunction = lookupBlob
 
 newBlobBase :: Blob -> Base Blob
-newBlobBase b =
-  newBase (gitRepo (blobInfo b)) (Pending doWriteBlob) Nothing
+newBlobBase b = newBase (gitRepo (blobInfo b)) (Pending doWriteBlob) Nothing
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --

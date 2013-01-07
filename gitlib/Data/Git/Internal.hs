@@ -33,7 +33,7 @@ import           Control.Applicative as X
 import           Control.Category as X
 import           Control.Exception as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
-                                  forM, forM_, msum)
+                                            forM, forM_, msum, unless, guard)
 import           Data.Bool as X
 import           Data.ByteString as B hiding (map)
 import           Data.Conduit
@@ -66,7 +66,8 @@ import           Foreign.StablePtr as X
 import           Foreign.Storable as X
 import           Prelude as X (undefined, error, otherwise, IO, Show, show,
                                Enum, Eq, Ord, (<), (==), (/=), round, Int,
-                               Integer, fromIntegral, fromInteger, toInteger)
+                               Integer, fromIntegral, fromInteger, toInteger,
+                               putStrLn, (-), (+))
 import           Unsafe.Coerce as X
 
 default (Text)
@@ -134,8 +135,8 @@ data Base a = Base { gitId   :: Ident a
 
 instance Show (Base a) where
   show x = case gitId x of
-    Pending _ -> "Base"
-    Stored y  -> "Base#" ++ show y
+             Pending _ -> "Base..."
+             Stored y  -> "Base#" ++ show y
 
 newBase :: Repository -> Ident a -> ObjPtr C'git_object -> Base a
 newBase repo oid obj = Base { gitId   = oid
@@ -155,8 +156,8 @@ createRepository path bare =
 
 openOrCreateRepository :: FilePath -> Bool -> IO Repository
 openOrCreateRepository path bare = do
-  b <- isDirectory path
-  if b
+  p <- isDirectory path
+  if p
     then openRepository path
     else createRepository path bare
 
