@@ -223,18 +223,23 @@ tests = test [
 
     mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
 
-    c2hist <- commitHistoryFirstParent c2
-    Prelude.print c2hist
+    ehist <- commitHistoryFirstParent c2
+    Prelude.putStrLn $ "ehist: " ++ show ehist
 
-    ehist <- commitEntryHistory "goodbye/files/world.txt" c2
-    Prelude.print ehist
+    ehist2 <- commitEntryHistory "goodbye/files/world.txt" c2
+    Prelude.putStrLn $ "ehist2: " ++ show ehist2
+
+    -- oid <- stringToOid ("2506e7fc" :: Text)
+    -- c3 <- lookupCommit (fromJust oid) repo
+    -- ehist3 <- commitEntryHistory "goodbye/files/world.txt" (fromJust c3)
+    -- Prelude.putStrLn $ "ehist3: " ++ show ehist3
 
     oid <- stringToOid ("2506e7fc" :: Text)
-    c3 <- lookupCommit (fromJust oid) repo
-    ehist <- commitEntryHistory "goodbye/files/world.txt" (fromJust c3)
-    Prelude.print ehist
+    c4 <- lookupCommit (fromJust oid) repo
+    ehist4 <- commitEntryHistory "goodbye/files/world.txt" (fromJust c4)
+    Prelude.putStrLn $ "ehist4: " ++ show (Prelude.head ehist4)
 
-    return()
+    return ()
 
   ]
 
