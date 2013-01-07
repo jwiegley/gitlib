@@ -87,7 +87,7 @@ lookupTree :: Oid -> Repository -> IO (Maybe Tree)
 lookupTree oid repo =
   lookupObject' oid repo c'git_tree_lookup c'git_tree_lookup_prefix $
     \coid obj _ -> do
-      entriesMap <- withForeignPtr obj $ \treePtr -> do
+      entriesAList <- withForeignPtr obj $ \treePtr -> do
         entryCount <- c'git_tree_entrycount (castPtr treePtr)
         foldM
           (\m idx -> do
@@ -108,11 +108,10 @@ lookupTree oid repo =
                              then BlobEntry (IdRef (COid coid)) False
                              else TreeEntry (IdRef (COid coid))
 
-              return $ M.insert entryName entryObj m)
-          M.empty [1..entryCount]
-      return Tree { treeInfo =
-                       newBase repo (Stored coid) (Just obj)
-                  , treeContents = entriesMap }
+              return ((entryName,entryObj):m))
+          [] [0..(entryCount-1)]
+      return Tree { treeInfo     = newBase repo (Stored coid) (Just obj)
+                  , treeContents = M.fromList entriesAList }
 
 doLookupTreeEntry :: [Text] -> Tree -> IO (Maybe TreeEntry)
 doLookupTreeEntry [] t = return (Just (TreeEntry (ObjRef t)))
@@ -194,13 +193,15 @@ doWriteTree t = alloca $ \ptr ->
              case v of
                BlobEntry bl exe ->
                  withObject bl t $ \bl' -> do
-                   (Oid coid) <- objectId bl'
-                   return (k, BlobEntry (IdRef coid) exe, coid,
+                   bl'' <- update bl'
+                   (Oid coid) <- objectId bl''
+                   return (k, BlobEntry (ObjRef bl'') exe, coid,
                            if exe then 0o100755 else 0o100644)
                TreeEntry tr ->
                  withObject tr t $ \tr' -> do
-                   (Oid coid) <- objectId tr'
-                   return (k, TreeEntry (IdRef coid), coid, 0o040000)
+                   tr'' <- update tr'
+                   (Oid coid) <- objectId tr''
+                   return (k, TreeEntry (ObjRef tr''), coid, 0o040000)
 
     newList <- for oids $ \(k, entry, coid, flags) -> do
                 insertObject builder k coid flags

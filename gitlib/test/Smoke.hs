@@ -223,6 +223,12 @@ tests = test [
 
     mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
 
+    c2hist <- commitHistoryFirstParent c2
+    Prelude.print c2hist
+
+    ehist <- commitEntryHistory "goodbye/files/world.txt" c2
+    Prelude.print ehist
+
     return()
 
   ]

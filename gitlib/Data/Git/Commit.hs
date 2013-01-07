@@ -10,7 +10,10 @@ module Data.Git.Commit
        , getCommitParents
        , modifyCommitTree
        , removeFromCommitTree
-       , updateCommit )
+       , updateCommit
+       , commitHistoryFirstParent
+       , commitEntry
+       , commitEntryHistory )
        where
 
 import           Bindings.Libgit2
@@ -209,5 +212,43 @@ doUpdateCommit xs item c = do
 
 updateCommit :: FilePath -> TreeEntry -> Commit -> IO Commit
 updateCommit = doUpdateCommit . splitPath
+
+commitHistoryFirstParent :: Commit -> IO [Commit]
+commitHistoryFirstParent c =
+  case commitParents c of
+    []    -> return [c]
+    (p:_) -> do p' <- loadObject' p c
+                ps <- commitHistoryFirstParent p'
+                return (c:ps)
+
+commitEntry :: FilePath -> Commit -> IO (Maybe TreeEntry)
+commitEntry path c = lookupTreeEntry path =<< loadObject' (commitTree c) c
+
+commitEntryD :: FilePath -> Commit -> IO (Maybe TreeEntry)
+commitEntryD path c = do
+  let tr = commitTree c
+  Prelude.putStrLn $ "commitEntryD.1: " ++ show tr
+  tr' <- loadObject' tr c
+  Prelude.putStrLn $ "commitEntryD.2: " ++ show tr'
+  te <- lookupTreeEntry path tr'
+  Prelude.putStrLn $ "commitEntryD.3: " ++ show te
+  return te
+
+mapMaybeM :: (Monad m, Functor m) => (a -> m (Maybe b)) -> [a] -> m [b]
+mapMaybeM p xs = catMaybes <$> mapM p xs
+
+identifyEntries :: [TreeEntry] -> IO [(Oid,TreeEntry)]
+identifyEntries = mapM go
+  where go x = do
+          oid <- case x of
+                  BlobEntry blob _ -> objectRefId blob
+                  TreeEntry tree   -> objectRefId tree
+          return (oid,x)
+
+commitEntryHistory :: FilePath -> Commit -> IO [(Oid,TreeEntry)]
+commitEntryHistory path c = do
+  cs <- commitHistoryFirstParent c
+  map head . filter (not . null) . groupBy ((==) `on` fst) <$>
+    (identifyEntries =<< mapMaybeM (commitEntry path) cs)
 
 -- Commit.hs

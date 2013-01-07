@@ -75,5 +75,6 @@ Library
     Data.Git.Tag
     Data.Git.Tree
     Data.Git.Reference
-  other-modules:
     Data.Git.Internal
+  -- other-modules:
+  --   Data.Git.Internal

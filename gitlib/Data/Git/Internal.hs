@@ -97,6 +97,10 @@ class Updatable a where
       Oid coid -> return (IdRef coid)
       PartialOid _ _ -> error "Did not expect to see a PartialOid"
 
+  objectRefId :: ObjRef a -> IO Oid
+  objectRefId (IdRef coid) = return (Oid coid)
+  objectRefId (ObjRef x)   = objectId x
+
   maybeObjectId :: a -> Maybe Oid
   maybeObjectId x = case getId x of
     Pending _ -> Nothing
@@ -107,6 +111,12 @@ class Updatable a where
   loadObject :: Updatable b => ObjRef a -> b -> IO (Maybe a)
   loadObject (IdRef coid) y = lookupFunction (Oid coid) (objectRepo y)
   loadObject (ObjRef x) _   = return (Just x)
+
+  loadObject' :: Updatable b => ObjRef a -> b -> IO a
+  loadObject' x y = do r <- loadObject x y
+                       case r of
+                         Nothing -> throwIO ObjectLookupFailed
+                         Just r' -> return r'
 
   getObject :: ObjRef a -> Maybe a
   getObject (IdRef _)  = Nothing
