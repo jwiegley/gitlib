@@ -69,12 +69,13 @@ Library
     Data.Git.Commit
     Data.Git.Common
     Data.Git.Error
+    Data.Git.Internal
     Data.Git.Object
     Data.Git.Oid
+    Data.Git.Reference
     Data.Git.Repository
     Data.Git.Tag
     Data.Git.Tree
-    Data.Git.Reference
-    Data.Git.Internal
+    Data.Git.Tutorial
   -- other-modules:
   --   Data.Git.Internal

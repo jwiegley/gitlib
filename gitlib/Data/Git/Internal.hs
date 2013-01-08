@@ -1,4 +1,4 @@
-{-# OPTIONS_HADDOCK hide #-}
+{-# OPTIONS_HADDOCK hide, prune, ignore-exports #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances #-}
