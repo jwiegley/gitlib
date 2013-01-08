@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -43,11 +44,15 @@ instance Show Blob where
     Stored y  -> "Blob#" ++ show y
 
 instance Updatable Blob where
-  getId x        = gitId (blobInfo x)
-  objectRepo x   = gitRepo (blobInfo x)
-  objectPtr x    = gitObj (blobInfo x)
+  getId          = gitId . blobInfo
+  objectRepo     = gitRepo . blobInfo
+  objectPtr      = gitObj . blobInfo
   update         = writeBlob
   lookupFunction = lookupBlob
+#if defined(PROFILING)
+  loadObject' x y =
+    maybe (throwIO ObjectLookupFailed) return =<< loadObject x y
+#endif
 
 newBlobBase :: Blob -> Base Blob
 newBlobBase b = newBase (gitRepo (blobInfo b)) (Pending doWriteBlob) Nothing

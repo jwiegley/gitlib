@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -50,6 +51,10 @@ instance Updatable Commit where
   objectPtr x    = gitObj (commitInfo x)
   update         = writeCommit Nothing
   lookupFunction = lookupCommit
+#if defined(PROFILING)
+  loadObject' x y =
+    maybe (throwIO ObjectLookupFailed) return =<< loadObject x y
+#endif
 
 newCommitBase :: Commit -> Base Commit
 newCommitBase t =

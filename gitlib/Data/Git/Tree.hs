@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -65,6 +66,10 @@ instance Updatable Tree where
   objectPtr x    = gitObj (treeInfo x)
   update         = writeTree
   lookupFunction = lookupTree
+#if defined(PROFILING)
+  loadObject' x y =
+    maybe (throwIO ObjectLookupFailed) return =<< loadObject x y
+#endif
 
 newTreeBase :: Tree -> Base Tree
 newTreeBase t =
