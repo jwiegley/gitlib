@@ -18,8 +18,6 @@ import           Data.Git.Error
 import           Data.Git.Internal
 import qualified Prelude
 
-default (Text)
-
 type F'git_odb_backend_read_callback =
   Ptr (Ptr ()) -> Ptr CSize -> Ptr C'git_otype -> Ptr C'git_odb_backend
     -> Ptr C'git_oid -> IO CInt

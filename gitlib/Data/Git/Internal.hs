@@ -69,8 +69,6 @@ import           Prelude as X (undefined, error, otherwise, IO, Show, show,
                                Integer, fromIntegral, fromInteger, toInteger,
                                putStrLn, (-), (+))
 import           Unsafe.Coerce as X
-
-default (Text)
 
 type ObjPtr a = Maybe (ForeignPtr a)
 

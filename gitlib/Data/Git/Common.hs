@@ -18,8 +18,6 @@ import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
 import qualified Prelude
-
-default (Text)
 
 data Signature = Signature { signatureName  :: Text
                            , signatureEmail :: Text

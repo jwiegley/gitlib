@@ -32,8 +32,6 @@ import           Foreign.Marshal.Array
 import qualified Prelude
 import           Prelude ((+),(-))
 import Data.IORef
-
-default (Text)
 
 -- int git_reference_lookup(git_reference **reference_out,
 --   git_repository *repo, const char *name)

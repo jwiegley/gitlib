@@ -21,8 +21,6 @@ import           Data.Git.Common
 import           Data.Git.Error
 import           Data.Git.Internal
 import qualified Prelude
-
-default (Text)
 
 data BlobContents = BlobEmpty
                   | BlobString B.ByteString

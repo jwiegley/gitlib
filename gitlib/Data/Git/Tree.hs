@@ -15,8 +15,6 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Prelude
-
-default (Text)
 
 data TreeEntry = BlobEntry { blobEntry      :: ObjRef Blob
                            , blobEntryIsExe :: Bool }

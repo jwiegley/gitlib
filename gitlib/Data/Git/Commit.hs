@@ -29,8 +29,6 @@ import qualified Foreign.Concurrent as FC
 import qualified Foreign.ForeignPtr.Unsafe as FU
 import           Foreign.Marshal.Array
 import qualified Prelude
-
-default (Text)
 
 data Commit = Commit { commitInfo      :: Base Commit
                      , commitAuthor    :: Signature

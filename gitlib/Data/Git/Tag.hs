@@ -6,8 +6,6 @@ import           Data.Git.Common
 import           Data.Git.Internal
 import qualified Data.Text as T
 import qualified Prelude
-
-default (Text)
 
 data Tag = Tag { tagInfo :: Base Tag
                , tagRef  :: Oid }
