@@ -9,6 +9,7 @@ module Data.Git.Reference
        , createRef
        , lookupRef
        , listRefNames
+       , ListFlags
        , allRefsFlag
        , oidRefsFlag
        , looseOidRefsFlag

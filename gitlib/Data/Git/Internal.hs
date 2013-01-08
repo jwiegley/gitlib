@@ -111,10 +111,8 @@ class Updatable a where
   loadObject (ObjRef x) _   = return (Just x)
 
   loadObject' :: Updatable b => ObjRef a -> b -> IO a
-  loadObject' x y = do r <- loadObject x y
-                       case r of
-                         Nothing -> throwIO ObjectLookupFailed
-                         Just r' -> return r'
+  loadObject' x y =
+    maybe (throwIO ObjectLookupFailed) return =<< loadObject x y
 
   getObject :: ObjRef a -> Maybe a
   getObject (IdRef _)  = Nothing

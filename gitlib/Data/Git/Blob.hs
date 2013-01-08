@@ -7,6 +7,7 @@
 module Data.Git.Blob
        ( Blob(..)
        , BlobContents(..)
+       , ByteSource
        , newBlobBase
        , createBlob
        , getBlobContents
