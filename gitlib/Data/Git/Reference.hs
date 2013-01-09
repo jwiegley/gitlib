@@ -7,6 +7,7 @@ module Data.Git.Reference
        ( RefTarget(..)
        , Reference(..)
        , createRef
+       , resolveRef
        , lookupRef
        , listRefNames
        , ListFlags
@@ -43,6 +44,14 @@ createRef name target repo =
             , refName   = name
             , refTarget = target
             , refObj    = Nothing }
+
+resolveRef :: Text -> Repository -> IO (Maybe Oid)
+resolveRef name repo = do
+  ref <- lookupRef name repo
+  case refTarget <$> ref of
+    Nothing                           -> return Nothing
+    Just (RefTargetSymbolic nextName) -> resolveRef nextName repo
+    Just (RefTargetId oid)            -> return (Just oid)
 
 lookupRef :: Text -> Repository -> IO (Maybe Reference)
 lookupRef name repo = alloca $ \ptr -> do
