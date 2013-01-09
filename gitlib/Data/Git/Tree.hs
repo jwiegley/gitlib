@@ -116,9 +116,9 @@ lookupTree repo oid =
       return Tree { treeInfo     = newBase repo (Stored coid) (Just obj)
                   , treeContents = M.fromList entriesAList }
 
-doLookupTreeEntry :: [Text] -> Tree -> IO (Maybe TreeEntry)
-doLookupTreeEntry [] t = return (Just (TreeEntry (ObjRef t)))
-doLookupTreeEntry (name:names) t = do
+doLookupTreeEntry :: Tree -> [Text] -> IO (Maybe TreeEntry)
+doLookupTreeEntry t [] = return (Just (TreeEntry (ObjRef t)))
+doLookupTreeEntry t (name:names) = do
   -- Lookup the current name in this tree.  If it doesn't exist, and there are
   -- more names in the path and 'createIfNotExist' is True, create a new Tree
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
@@ -144,11 +144,11 @@ doLookupTreeEntry (name:names) t = do
     else
       case y of
         Just (BlobEntry {}) -> throw TreeCannotTraverseBlob
-        Just (TreeEntry (ObjRef t')) -> doLookupTreeEntry names t'
+        Just (TreeEntry (ObjRef t')) -> doLookupTreeEntry t' names
         _ -> return Nothing
 
-lookupTreeEntry :: FilePath -> Tree -> IO (Maybe TreeEntry)
-lookupTreeEntry = doLookupTreeEntry . splitPath
+lookupTreeEntry :: Tree -> FilePath -> IO (Maybe TreeEntry)
+lookupTreeEntry tr = doLookupTreeEntry tr . splitPath
 
 withGitTree :: Updatable b
             => ObjRef Tree -> b -> (Ptr C'git_tree -> IO a) -> IO a
@@ -304,15 +304,15 @@ modifyTree
   -> Tree -> IO (Either a Tree)
 modifyTree = doModifyTree . splitPath
 
-doUpdateTree :: [Text] -> TreeEntry -> Tree -> IO Tree
-doUpdateTree xs item t = do
+doUpdateTree :: Tree -> [Text] -> TreeEntry -> IO Tree
+doUpdateTree t xs item = do
   t' <- doModifyTree xs (const (Right (Just item))) True t
   case t' of
     Right tr -> return tr
     _ -> undefined
 
-updateTree :: FilePath -> TreeEntry -> Tree -> IO Tree
-updateTree = doUpdateTree . splitPath
+updateTree :: Tree -> FilePath -> TreeEntry -> IO Tree
+updateTree tr = doUpdateTree tr . splitPath
 
 removeFromTree :: FilePath -> Tree -> IO Tree
 removeFromTree p tr = do

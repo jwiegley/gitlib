@@ -228,7 +228,7 @@ commitHistoryFirstParent c =
                 return (c:ps)
 
 commitEntry :: Commit -> FilePath -> IO (Maybe TreeEntry)
-commitEntry c path = lookupTreeEntry path =<< loadObject' (commitTree c) c
+commitEntry c path = flip lookupTreeEntry path =<< loadObject' (commitTree c) c
 
 identifyEntry :: TreeEntry -> IO (Oid,TreeEntry)
 identifyEntry x = do
