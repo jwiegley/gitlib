@@ -149,15 +149,11 @@ doWriteCommit ref c = do
     repo = fromMaybe (error "Repository invalid")
                      (repoObj (gitRepo (commitInfo c)))
 
-    withRef name =
-      if isJust name
-      then unsafeUseAsCString (E.encodeUtf8 (fromJust name))
-      else flip ($) nullPtr
+    withRef Nothing     = flip ($) nullPtr
+    withRef (Just name) = BS.useAsCString (E.encodeUtf8 name)
 
-    withEncStr enc =
-      if null enc
-      then flip ($) nullPtr
-      else withCString enc
+    withEncStr ""  = flip ($) nullPtr
+    withEncStr enc = withCString enc
 
 getCommitParents :: Commit -> IO [Commit]
 getCommitParents c =
