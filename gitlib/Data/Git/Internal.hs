@@ -104,10 +104,10 @@ class Updatable a where
     Pending _ -> Nothing
     Stored y  -> Just (Oid y)
 
-  lookupFunction :: Oid -> Repository -> IO (Maybe a)
+  lookupFunction :: Repository -> Oid -> IO (Maybe a)
 
   loadObject :: Updatable b => ObjRef a -> b -> IO (Maybe a)
-  loadObject (IdRef coid) y = lookupFunction (Oid coid) (objectRepo y)
+  loadObject (IdRef coid) y = lookupFunction (objectRepo y) (Oid coid)
   loadObject (ObjRef x) _   = return (Just x)
 
   loadObject' :: Updatable b => ObjRef a -> b -> IO a
@@ -122,6 +122,9 @@ data Repository = Repository { repoPath       :: FilePath
                              , repoOnWriteRef :: [Reference -> IO ()]
                              , repoObj        :: ObjPtr C'git_repository }
 
+instance Eq Repository where
+  x == y = repoPath x == repoPath y && repoObj x == repoObj y
+
 instance Show Repository where
   show x = "Repository " <> toString (repoPath x)
 
@@ -133,11 +136,12 @@ data Reference = Reference { refRepo   :: Repository
                            , refName   :: Text
                            , refTarget :: RefTarget
                            , refObj    :: ObjPtr C'git_reference }
-               deriving Show
+               deriving (Show, Eq)
 
 data Base a = Base { gitId   :: Ident a
                    , gitRepo :: Repository
                    , gitObj  :: ObjPtr C'git_object }
+            deriving Eq
 
 instance Show (Base a) where
   show x = case gitId x of
@@ -201,12 +205,12 @@ withObjectPtr objRef parent f =
       Just objPtr -> withForeignPtr objPtr (f . castPtr)
 
 lookupObject'
-  :: Oid -> Repository
+  :: Repository -> Oid
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
   -> (COid -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
   -> IO (Maybe b)
-lookupObject' oid repo lookupFn lookupPrefixFn createFn =
+lookupObject' repo oid lookupFn lookupPrefixFn createFn =
   alloca $ \ptr -> do
     r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
            case oid of

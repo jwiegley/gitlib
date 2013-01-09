@@ -49,7 +49,7 @@ instance Updatable Commit where
   getId x        = gitId (commitInfo x)
   objectRepo x   = gitRepo (commitInfo x)
   objectPtr x    = gitObj (commitInfo x)
-  update         = writeCommit Nothing
+  update         = flip writeCommit Nothing
   lookupFunction = lookupCommit
 #if defined(PROFILING)
   loadObject' x y =
@@ -59,7 +59,7 @@ instance Updatable Commit where
 newCommitBase :: Commit -> Base Commit
 newCommitBase t =
   newBase (gitRepo (commitInfo t))
-          (Pending (doWriteCommit Nothing >=> return . snd)) Nothing
+          (Pending (flip doWriteCommit Nothing >=> return . snd)) Nothing
 
 -- | Create a new, empty commit.
 --
@@ -68,7 +68,7 @@ newCommitBase t =
 createCommit :: Repository -> Commit
 createCommit repo =
   Commit { commitInfo     =
-           newBase repo (Pending (doWriteCommit Nothing >=> return . snd))
+           newBase repo (Pending (flip doWriteCommit Nothing >=> return . snd))
                    Nothing
          , commitAuthor    = createSignature
          , commitCommitter = createSignature
@@ -78,9 +78,9 @@ createCommit repo =
          , commitEncoding  = ""
          , commitObj       = Nothing }
 
-lookupCommit :: Oid -> Repository -> IO (Maybe Commit)
-lookupCommit oid repo =
-  lookupObject' oid repo c'git_commit_lookup c'git_commit_lookup_prefix $
+lookupCommit :: Repository -> Oid -> IO (Maybe Commit)
+lookupCommit repo oid =
+  lookupObject' repo oid c'git_commit_lookup c'git_commit_lookup_prefix $
     \coid obj _ ->
       withForeignPtr obj $ \cobj -> do
         let c = castPtr cobj
@@ -114,13 +114,13 @@ lookupCommit oid repo =
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-writeCommit :: Maybe Text -> Commit -> IO Commit
-writeCommit _ c@(Commit { commitInfo = Base { gitId = Stored _ } }) =
+writeCommit :: Commit -> Maybe Text -> IO Commit
+writeCommit c@(Commit { commitInfo = Base { gitId = Stored _ } }) _ =
   return c
-writeCommit ref c = fst <$> doWriteCommit ref c
+writeCommit c ref = fst <$> doWriteCommit c ref
 
-doWriteCommit :: Maybe Text -> Commit -> IO (Commit, COid)
-doWriteCommit ref c = do
+doWriteCommit :: Commit -> Maybe Text -> IO (Commit, COid)
+doWriteCommit c ref = do
   coid <- withForeignPtr repo $ \repoPtr -> do
     coid <- mallocForeignPtr
     withForeignPtr coid $ \coid' -> do
@@ -183,23 +183,23 @@ getCommitParentPtrs c =
               FC.newForeignPtr ptr' (c'git_commit_free ptr')
 
 modifyCommitTree
-  :: FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
-  -> Commit -> IO (Either a Commit)
-modifyCommitTree path f createIfNotExist c =
+  :: Commit -> FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
+  -> IO (Either a Commit)
+modifyCommitTree c path f createIfNotExist =
   withObject (commitTree c) c $ \tr -> do
     result <- modifyTree path f createIfNotExist tr
     case result of
       Left x    -> return (Left x)
       Right tr' -> return $ Right $ c { commitTree = ObjRef tr' }
 
-removeFromCommitTree :: FilePath -> Commit -> IO Commit
-removeFromCommitTree path c =
+removeFromCommitTree :: Commit -> FilePath -> IO Commit
+removeFromCommitTree c path =
   withObject (commitTree c) c $ \tr -> do
     tr' <- removeFromTree path tr
     return c { commitTree = ObjRef tr' }
 
-doUpdateCommit :: [Text] -> TreeEntry -> Commit -> IO Commit
-doUpdateCommit xs item c = do
+doUpdateCommit :: Commit -> [Text] -> TreeEntry -> IO Commit
+doUpdateCommit c xs item = do
   t <- loadObject (commitTree c) c
   case t of
     Nothing -> error "Failed to load tree for commit"
@@ -209,8 +209,8 @@ doUpdateCommit xs item c = do
         Right tr' -> return c { commitTree = ObjRef tr' }
         _ -> undefined
 
-updateCommit :: FilePath -> TreeEntry -> Commit -> IO Commit
-updateCommit = doUpdateCommit . splitPath
+updateCommit :: Commit -> FilePath -> TreeEntry -> IO Commit
+updateCommit c = doUpdateCommit c . splitPath
 
 commitHistoryFirstParent :: Commit -> IO [Commit]
 commitHistoryFirstParent c =
@@ -220,8 +220,8 @@ commitHistoryFirstParent c =
                 ps <- commitHistoryFirstParent p'
                 return (c:ps)
 
-commitEntry :: FilePath -> Commit -> IO (Maybe TreeEntry)
-commitEntry path c = lookupTreeEntry path =<< loadObject' (commitTree c) c
+commitEntry :: Commit -> FilePath -> IO (Maybe TreeEntry)
+commitEntry c path = lookupTreeEntry path =<< loadObject' (commitTree c) c
 
 identifyEntry :: TreeEntry -> IO (Oid,TreeEntry)
 identifyEntry x = do
@@ -230,8 +230,8 @@ identifyEntry x = do
           TreeEntry tree   -> objectRefId tree
   return (oid,x)
 
-commitEntryHistory :: FilePath -> Commit -> IO [(Oid,TreeEntry)]
-commitEntryHistory path c = map head
+commitEntryHistory :: Commit -> FilePath -> IO [(Oid,TreeEntry)]
+commitEntryHistory c path = map head
                             . filter (not . null)
                             . groupBy ((==) `on` fst) <$> go c
   where go co = do
@@ -242,7 +242,7 @@ commitEntryHistory path c = map head
           return $ maybe rest (:rest) entry
 
         getEntry co = do
-          ce <- commitEntry path co
+          ce <- commitEntry co path
           case ce of
             Nothing  -> return Nothing
             Just ce' -> Just <$> identifyEntry ce'

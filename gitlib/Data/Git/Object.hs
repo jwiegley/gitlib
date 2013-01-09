@@ -12,6 +12,7 @@ import           Data.ByteString as B hiding (map)
 import           Data.Git.Blob
 import           Data.Git.Commit
 import           Data.Git.Internal
+import           Data.Git.Reference
 import           Data.Git.Tag
 import           Data.Git.Tree
 import qualified Data.Map as M
@@ -32,24 +33,29 @@ data NamedRef a = FullHash a
                 | Specifier a
 
 revParse :: CStringable a => NamedRef a -> IO (Maybe Oid)
-revParse (FullHash r)    = stringToOid r
-revParse (PartialHash r) = stringToOid r
+revParse (FullHash r)    = parseOid r
+revParse (PartialHash r) = parseOid r
 revParse (BranchName r)  = undefined
 revParse (TagName r)     = undefined
 revParse (RefName r)     = undefined
 revParse (FullRefName r) = undefined
 revParse (Specifier r)   = undefined
 
-lookupObject :: Oid -> Repository -> IO (Maybe Object)
-lookupObject oid repo =
-  lookupObject' oid repo
+lookupObject :: Repository -> Oid -> IO (Maybe Object)
+lookupObject repo oid =
+  lookupObject' repo oid
     (\x y z    -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
     (\x y z l  -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
-    (\coid x y -> c'git_object_type y >>= createObject coid x repo)
+    (\coid x y -> c'git_object_type y >>= createObject repo coid x)
 
-createObject :: COid -> ForeignPtr C'git_object -> Repository -> C'git_otype
+lookupRefObject :: Repository -> Text -> IO (Maybe Object)
+lookupRefObject repo ref = do
+  oid <- resolveRef repo ref
+  maybe (return Nothing) (lookupObject repo) oid
+
+createObject :: Repository -> COid -> ForeignPtr C'git_object -> C'git_otype
              -> IO Object
-createObject coid obj repo typ
+createObject repo coid obj typ
   | typ == c'GIT_OBJ_BLOB =
     return $ BlobObj Blob { blobInfo =
                               newBase repo (Stored coid) (Just obj)

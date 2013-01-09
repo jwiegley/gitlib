@@ -28,6 +28,12 @@ data BlobContents = BlobEmpty
                   | BlobString B.ByteString
                   | BlobStream ByteSource
 
+instance Eq BlobContents where
+  BlobEmpty == BlobEmpty = True
+  BlobString str1 == BlobString str2 = str1 == str2
+  BlobStream src1 == BlobStream src2 = False
+  _ == _ = False
+
 blobSourceToString :: BlobContents -> IO (Maybe B.ByteString)
 blobSourceToString BlobEmpty = return Nothing
 blobSourceToString (BlobString bs) = return (Just bs)
@@ -38,6 +44,7 @@ blobSourceToString (BlobStream bs) = do str <- bs $$ await
 
 data Blob = Blob { blobInfo     :: Base Blob
                  , blobContents :: BlobContents }
+          deriving Eq
 
 instance Show Blob where
   show x = case gitId (blobInfo x) of
@@ -62,16 +69,16 @@ newBlobBase b = newBase (gitRepo (blobInfo b)) (Pending doWriteBlob) Nothing
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the give string is 'empty', it is an error.
-createBlob :: B.ByteString -> Repository -> Blob
-createBlob text repo
+createBlob :: Repository -> B.ByteString -> Blob
+createBlob repo text
   | text == B.empty = error "Cannot create an empty blob"
   | otherwise =
     Blob { blobInfo     = newBase repo (Pending doWriteBlob) Nothing
          , blobContents = BlobString text }
 
-lookupBlob :: Oid -> Repository -> IO (Maybe Blob)
-lookupBlob oid repo =
-  lookupObject' oid repo c'git_blob_lookup c'git_blob_lookup_prefix $
+lookupBlob :: Repository -> Oid -> IO (Maybe Blob)
+lookupBlob repo oid =
+  lookupObject' repo oid c'git_blob_lookup c'git_blob_lookup_prefix $
     \coid obj _ ->
       return Blob { blobInfo     = newBase repo (Stored coid) (Just obj)
                   , blobContents = BlobEmpty }
@@ -91,7 +98,7 @@ getBlobContents b@(gitId . blobInfo -> Stored hash)
           return (b { blobContents = contents' }, contents' )
 
       Nothing -> do
-        b' <- lookupBlob (Oid hash) repo
+        b' <- lookupBlob repo (Oid hash)
         case b' of
           Just blobPtr' -> getBlobContents blobPtr'
           Nothing       -> return (b, BlobEmpty)

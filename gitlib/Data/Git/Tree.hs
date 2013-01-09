@@ -86,9 +86,9 @@ createTree repo =
             newBase repo (Pending (doWriteTree >=> return . snd)) Nothing
        , treeContents = M.empty }
 
-lookupTree :: Oid -> Repository -> IO (Maybe Tree)
-lookupTree oid repo =
-  lookupObject' oid repo c'git_tree_lookup c'git_tree_lookup_prefix $
+lookupTree :: Repository -> Oid -> IO (Maybe Tree)
+lookupTree repo oid =
+  lookupObject' repo oid c'git_tree_lookup c'git_tree_lookup_prefix $
     \coid obj _ -> do
       entriesAList <- withForeignPtr obj $ \treePtr -> do
         entryCount <- c'git_tree_entrycount (castPtr treePtr)

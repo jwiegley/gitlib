@@ -20,7 +20,6 @@ module Data.Git.Reference
        , mapOidRefs
        , mapLooseOidRefs
        , mapSymbolicRefs
-       , lookupId
        , writeRef
        , writeRef_ )
        where
@@ -35,26 +34,15 @@ import           Foreign.Marshal.Array
 import qualified Prelude
 import           Prelude ((+),(-))
 
--- int git_reference_lookup(git_reference **reference_out,
---   git_repository *repo, const char *name)
-
-createRef :: Text -> RefTarget -> Repository -> Reference
-createRef name target repo =
+createRef :: Repository -> Text -> RefTarget -> Reference
+createRef repo name target =
   Reference { refRepo   = repo
             , refName   = name
             , refTarget = target
             , refObj    = Nothing }
 
-resolveRef :: Text -> Repository -> IO (Maybe Oid)
-resolveRef name repo = do
-  ref <- lookupRef name repo
-  case refTarget <$> ref of
-    Nothing                           -> return Nothing
-    Just (RefTargetSymbolic nextName) -> resolveRef nextName repo
-    Just (RefTargetId oid)            -> return (Just oid)
-
-lookupRef :: Text -> Repository -> IO (Maybe Reference)
-lookupRef name repo = alloca $ \ptr -> do
+lookupRef :: Repository -> Text -> IO (Maybe Reference)
+lookupRef repo name = alloca $ \ptr -> do
   r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
         withCStringable name $ \namePtr ->
           c'git_reference_lookup ptr repoPtr namePtr
@@ -109,54 +97,16 @@ writeRef_ = void . writeRef
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
 
-lookupId :: Text -> Repository -> IO Oid
-lookupId name repos = alloca $ \ptr ->
+resolveRef :: Repository -> Text -> IO (Maybe Oid)
+resolveRef repos name = alloca $ \ptr ->
   withCStringable name $ \namePtr ->
     withForeignPtr repo $ \repoPtr -> do
       r <- c'git_reference_name_to_oid ptr repoPtr namePtr
-      when (r < 0) $ throwIO ReferenceLookupFailed
-      Oid <$> COid <$> newForeignPtr_ ptr
-
+      if r < 0
+        then return Nothing
+        else Just . Oid <$> COid <$> newForeignPtr_ ptr
   where
     repo = fromMaybe (error "Repository invalid") (repoObj repos)
-
--- int git_reference_create_symbolic(git_reference **ref_out,
---   git_repository *repo, const char *name, const char *target, int force)
-
---createSymbolicRef = c'git_reference_create_symbolic
-
--- int git_reference_create_oid(git_reference **ref_out, git_repository *repo,
---   const char *name, const git_oid *id, int force)
-
---createNamedRef = c'git_reference_create_oid
-
--- const git_oid * git_reference_oid(git_reference *ref)
-
---refId = c'git_reference_oid
-
--- const char * git_reference_target(git_reference *ref)
-
---refTarget = c'git_reference_target
-
--- git_ref_t git_reference_type(git_reference *ref)
-
---refType = c'git_reference_type
-
--- const char * git_reference_name(git_reference *ref)
-
---refName = c'git_reference_name
-
--- int git_reference_resolve(git_reference **resolved_ref, git_reference *ref)
-
---resolveRef = c'git_reference_resolve
-
--- int git_reference_set_target(git_reference *ref, const char *target)
-
---setRefTarget = c'git_reference_set_target
-
--- int git_reference_set_oid(git_reference *ref, const git_oid *id)
-
---setRefId = c'git_reference_set_oid
 
 -- int git_reference_rename(git_reference *ref, const char *new_name,
 --   int force)
@@ -232,11 +182,6 @@ listRefNames repo flags =
       c'git_strarray_free c'refs
       return refs
 
---listRefs = c'git_reference_list
-
--- int git_reference_foreach(git_repository *repo, unsigned int list_flags,
---   int (*callback)(const char *, void *), void *payload)
-
 foreachRefCallback :: CString -> Ptr () -> IO CInt
 foreachRefCallback name payload = do
   (callback,results) <- peek (castPtr payload) >>= deRefStablePtr
@@ -270,27 +215,6 @@ mapLooseOidRefs repo = mapRefs repo looseOidRefsFlag
 mapSymbolicRefs :: Repository -> (Text -> IO a) -> IO [a]
 mapSymbolicRefs repo = mapRefs repo symbolicRefsFlag
 
-{-
-foreachRefCallbackThunk :: Storable a =>
-                           ForeachRefCallback a -> CString -> Ptr () -> IO CInt
-foreachRefCallbackThunk callback name payload = do
-  nameText <- E.decodeUtf8 <$> unsafePackCString name
-  payloadValue <- peek (castPtr payload)
-  maybe (-1) (const 0) <$> callback nameText payloadValue
-
-mapRefsWith ::
-  Storable a => Repository -> ListFlags -> a -> ForeachRefCallback a -> IO ()
-mapRefsWith repo flags payload cb =
-    withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
-      fun <- mk'git_reference_foreach_callback (foreachRefCallbackThunk cb)
-      with payload $ \payloadPtr -> do
-        r <- c'git_reference_foreach repoPtr (flagsToInt flags) fun
-                                    (castPtr payloadPtr)
-        -- jww (2012-12-14): Does the return type mean anything here?
-        when (r < 0) $ return ()
-        return ()
--}
-
 -- int git_reference_is_packed(git_reference *ref)
 
 --refIsPacked = c'git_reference_is_packed
@@ -298,10 +222,6 @@ mapRefsWith repo flags payload cb =
 -- int git_reference_reload(git_reference *ref)
 
 --reloadRef = c'git_reference_reload
-
--- void git_reference_free(git_reference *ref)
-
---freeRef = c'git_reference_free
 
 -- int git_reference_cmp(git_reference *ref1, git_reference *ref2)
 

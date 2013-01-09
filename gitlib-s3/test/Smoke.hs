@@ -44,7 +44,7 @@ main = do
 
 catBlob :: Repository -> Text -> IO (Maybe Text)
 catBlob repo sha = do
-  hash <- stringToOid sha
+  hash <- parseOid sha
   for hash $ \hash' -> do
     obj <- lookupObject hash' repo
     case obj of

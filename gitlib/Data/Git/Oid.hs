@@ -13,7 +13,7 @@ module Data.Git.Oid
        , compareCOid
        , compareCOidLen
        , equalCOid
-       , stringToOid )
+       , parseOid )
        where
 
 import           Bindings.Libgit2.Oid
@@ -60,6 +60,11 @@ wrapOidPtr = newForeignPtr_ >=> return . IdRef . COid
 --   repository.
 data Ident a = Pending (a -> IO COid)
              | Stored COid
+
+instance Eq (Ident a) where
+  Pending f1 == Pending f2 = False
+  Stored oid1 == Stored oid2 = oid1 == oid2
+  _ == _ = False
 
 instance Show (Ident a) where
   show (Pending _) = "Ident..."
@@ -111,18 +116,18 @@ instance Eq Oid where
 -- | Convert a hash string to a 'Maybe' 'Oid' value.  If the string is less
 --   than 40 hexadecimal digits, the result will be of type 'PartialOid'.
 --
--- >>> stringToOid "a143ecf"
+-- >>> parseOid "a143ecf"
 -- Just a143ecf
--- >>> stringToOid "a143ecf" >>= (\(Just (PartialOid _ l)) -> return $ l == 7)
+-- >>> parseOid "a143ecf" >>= (\(Just (PartialOid _ l)) -> return $ l == 7)
 -- True
 --
 -- >>> let hash = "6cfc2ca31732fb6fa6b54bae6e586a57a0611aab"
--- >>> stringToOid hash
+-- >>> parseOid hash
 -- Just 6cfc2ca31732fb6fa6b54bae6e586a57a0611aab
--- >>> stringToOid hash >>= (\(Just (Oid _)) -> return True)
+-- >>> parseOid hash >>= (\(Just (Oid _)) -> return True)
 -- True
-stringToOid :: CStringable a => a -> IO (Maybe Oid)
-stringToOid str
+parseOid :: CStringable a => a -> IO (Maybe Oid)
+parseOid str
   | len > 40 = throwIO ObjectIdTooLong
   | otherwise = do
     oid <- mallocForeignPtr
