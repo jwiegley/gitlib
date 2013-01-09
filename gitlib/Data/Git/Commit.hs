@@ -7,6 +7,7 @@ module Data.Git.Commit
        , newCommitBase
        , createCommit
        , lookupCommit
+       , lookupRefCommit
        , writeCommit
        , getCommitParents
        , modifyCommitTree
