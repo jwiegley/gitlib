@@ -28,12 +28,12 @@ module Data.Git.Reference
 import           Bindings.Libgit2
 import           Data.ByteString.Unsafe
 import           Data.Git.Internal
+import           Data.IORef
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import           Foreign.Marshal.Array
 import qualified Prelude
 import           Prelude ((+),(-))
-import Data.IORef
 
 -- int git_reference_lookup(git_reference **reference_out,
 --   git_repository *repo, const char *name)
