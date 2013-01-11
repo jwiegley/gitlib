@@ -309,7 +309,7 @@ doUpdateTree t xs item = do
   t' <- doModifyTree xs (const (Right (Just item))) True t
   case t' of
     Right tr -> return tr
-    _ -> undefined
+    _ -> throwIO TreeUpdateFailed
 
 updateTree :: Tree -> FilePath -> TreeEntry -> IO Tree
 updateTree tr = doUpdateTree tr . splitPath
@@ -319,7 +319,7 @@ removeFromTree p tr = do
   t' <- modifyTree p (const (Right Nothing)) False tr
   case t' of
     Right tr' -> return tr'
-    _ -> undefined
+    _ -> throwIO TreeUpdateFailed
 
 splitPath :: FilePath -> [Text]
 splitPath path = T.splitOn "/" text

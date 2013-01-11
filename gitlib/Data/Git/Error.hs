@@ -24,6 +24,7 @@ data GitException = RepositoryNotExist String
                   | TreeLookupFailed
                   | TreeCannotTraverseBlob
                   | TreeEntryLookupFailed
+                  | TreeUpdateFailed
                   | CommitCreateFailed
                   | CommitLookupFailed
                   | ReferenceCreateFailed

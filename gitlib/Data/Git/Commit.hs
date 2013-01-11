@@ -212,14 +212,17 @@ removeFromCommitTree c path =
 
 doUpdateCommit :: Commit -> [Text] -> TreeEntry -> IO Commit
 doUpdateCommit c xs item = do
-  t <- loadObject (commitTree c) c
-  case t of
-    Nothing -> error "Failed to load tree for commit"
-    Just t' -> do
-      tr <- doModifyTree xs (const (Right (Just item))) True t'
-      case tr of
-        Right tr' -> return c { commitTree = ObjRef tr' }
-        _ -> undefined
+    t <- loadObject (commitTree c) c
+    case t of
+        Nothing -> throwIO CommitLookupFailed
+        Just t' -> do
+            newt <- doUpdateTree t' xs item
+            return c { commitTree = ObjRef newt
+                     , commitInfo =
+                            newBase (objectRepo c)
+                                    (Pending (flip doWriteCommit Nothing
+                                              >=> return . snd)) Nothing
+                     , commitObj  = Nothing }
 
 updateCommit :: Commit -> FilePath -> TreeEntry -> IO Commit
 updateCommit c = doUpdateCommit c . splitPath
