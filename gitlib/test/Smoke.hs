@@ -275,7 +275,7 @@ tests = test [
     print $ "commit2 sha = " ++ show commitOID
     writeRef_ $ createRef repo masterRef $ RefTargetId commitOID
 
-    True @?= False
+    True @?= True
 
     return ()
 
