@@ -52,7 +52,8 @@ module Data.Git.Tutorial
 > ref    <- resolveRef repo "HEAD"
 > commit <- maybe (return Nothing) (lookupCommit repo) ref
 
-   This pattern is rather common, so there is a shortcut called
+   'resolveRef' works for both symbolic and specific refs.  Further, this
+   pattern is rather common, so there is a shortcut called
    'Data.Git.Commit.lookupRefCommit'.  Or, if you have a SHA string, you can
    use 'Data.Git.Commit.lookupCommit' with 'Data.Git.Oid.parseOid'.
 
@@ -60,10 +61,25 @@ module Data.Git.Tutorial
 > commitFromRef <- lookupRefCommit repo "HEAD"             :: Maybe Commit
 > commitFromSHA <- lookupCommit repo (parseOid "f7acdbed") :: Maybe Commit
 
-   1. Read a reference to obtain a commit id, such as @HEAD@ or
-      @refs\/heads\/master@.
+-}
 
-   2. Load a 'Data.Git.Commit.Commit', and thereafter its history through its
+{- $commits
+
+   If you don't have a commit object, the recommend way to create one is by
+   creating a 'Data.Git.Common.Signature' and using it to modify the return
+   value from 'Data.Git.Commit.create'.  This requires a 'Repository' object:
+
+> now <- getCurrentTime
+> let sig = Signature {
+>               signatureName  = "John Smith"
+>             , signatureEmail = "johnsmith@nowhere.org"
+>             , signatureWhen  = now }
+>     c   = (createCommit repo) {
+>             , commitAuthor    = sig
+>             , commitCommitter = sig }
+>             
+
+   Load a 'Data.Git.Commit.Commit', and thereafter its history through its
       parents, or load a 'Data.Git.Tree.Tree' or 'Data.Git.Blob.Blob' from
       its contents.
 

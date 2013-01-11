@@ -4,10 +4,12 @@
 
 module Data.Git.Commit
        ( Commit(..)
+       , PinnedEntry(..)
        , newCommitBase
        , createCommit
        , lookupCommit
        , lookupRefCommit
+       , addCommitParent
        , writeCommit
        , getCommitParents
        , modifyCommitTree
@@ -67,13 +69,13 @@ newCommitBase t =
 --
 --   Since empty commits cannot exist in Git, attempting to write out an empty
 --   commit is a no-op.
-createCommit :: Repository -> Commit
-createCommit repo =
+createCommit :: Repository -> Signature -> Commit
+createCommit repo sig =
   Commit { commitInfo     =
            newBase repo (Pending (flip doWriteCommit Nothing >=> return . snd))
                    Nothing
-         , commitAuthor    = createSignature
-         , commitCommitter = createSignature
+         , commitAuthor    = sig
+         , commitCommitter = sig
          , commitTree      = ObjRef (createTree repo)
          , commitParents   = []
          , commitLog       = T.empty
@@ -118,6 +120,9 @@ lookupRefCommit :: Repository -> Text -> IO (Maybe Commit)
 lookupRefCommit repo ref = do
   oid <- resolveRef repo ref
   maybe (return Nothing) (lookupCommit repo) oid
+
+addCommitParent :: Commit -> Commit -> Commit
+addCommitParent co p = co { commitParents = commitParents co ++ [ObjRef p] }
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
@@ -164,11 +169,11 @@ doWriteCommit c ref = do
 
 getCommitParents :: Commit -> IO [Commit]
 getCommitParents c =
-  traverse (\p -> do parent <- loadObject p c
-                     case parent of
-                       Nothing -> error "Cannot find Git commit"
-                       Just p' -> return p')
-           (commitParents c)
+    traverse (\p -> do parent <- loadObject p c
+                       case parent of
+                           Nothing -> error "Cannot find Git commit"
+                           Just p' -> return p')
+             (commitParents c)
 
 getCommitParentPtrs :: Commit -> IO [ForeignPtr C'git_commit]
 getCommitParentPtrs c =

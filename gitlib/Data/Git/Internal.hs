@@ -32,6 +32,7 @@ import           Bindings.Libgit2 as X
 import           Control.Applicative as X
 import           Control.Category as X
 import           Control.Exception as X
+import           Control.Lens as X
 import           Control.Monad as X hiding (mapM, mapM_, sequence, sequence_,
                                             forM, forM_, msum, unless, guard)
 import           Data.Bool as X
