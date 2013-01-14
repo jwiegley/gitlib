@@ -76,10 +76,8 @@ oidToText = T.pack . show . fromJust
 
 sampleCommit :: Repository -> Tree -> Signature -> Commit
 sampleCommit repo tr sig =
-    (createCommit repo) { commitTree      = ObjRef tr
-                        , commitAuthor    = sig
-                        , commitCommitter = sig
-                        , commitLog       = "Sample log message." }
+    (createCommit repo sig) { commitTree = ObjRef tr
+                            , commitLog  = "Sample log message." }
 
 tests :: Test
 tests = test [
@@ -251,10 +249,8 @@ tests = test [
                         , signatureEmail = "user1@email.org"
                         , signatureWhen  = posixSecondsToUTCTime 1348981883 }
     tree <- updateTree (createTree repo) "README.md" (blobRef blob)
-    commit <- writeCommit (createCommit repo)
+    commit <- writeCommit (createCommit repo sig)
             { commitLog       = "Initial commit"
-            , commitAuthor    = sig
-            , commitCommitter = sig
             , commitTree      = ObjRef tree
             } (Just masterRef)
     c1id <- objectId commit
