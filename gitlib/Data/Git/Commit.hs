@@ -25,8 +25,8 @@ import qualified Data.ByteString as BS
 import           Data.ByteString.Unsafe
 import           Data.Git.Common
 import           Data.Git.Internal
-import           Data.Git.Tree
 import           Data.Git.Reference
+import           Data.Git.Tree
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.ICU.Convert as U
