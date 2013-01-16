@@ -225,7 +225,7 @@ mirrorRefsToS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
 mirrorRefsToS3 be repo = do
   odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
   refs  <- catMaybes <$>
-           mapAllRefs repo (\name -> do ref <- lookupRef name repo
+           mapAllRefs repo (\name -> do ref <- lookupRef repo name
                                         return (go name <$> ref))
   writeRefs be (fromList refs)
   where go name ref =
