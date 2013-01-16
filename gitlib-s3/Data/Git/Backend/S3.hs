@@ -225,7 +225,7 @@ mirrorRefsToS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
 mirrorRefsToS3 be repo = do
   odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
   refs  <- catMaybes <$>
-           mapAllRefs repo (\name -> do ref <- lookupRef name repo
+           mapAllRefs repo (\name -> do ref <- lookupRef repo name
                                         return (go name <$> ref))
   writeRefs be (fromList refs)
   where go name ref =
@@ -362,10 +362,18 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-createS3backend :: Text -> Text -> Text -> Maybe Text -> LogLevel -> Bool
-                   -> Repository -> IO Repository
-createS3backend bucket access secret mockAddr level tracing repo = do
-    manager <- newManager def
+createS3backend :: Text -- ^ bucket
+                -> Text -- ^ prefix
+                -> Text -- ^ access key
+                -> Text -- ^ secret key
+                -> Maybe Manager
+                -> Maybe Text -- ^ mock address
+                -> LogLevel
+                -> Bool -- ^ tracing?
+                -> Repository
+                -> IO Repository
+createS3backend bucket prefix access secret mmanager mockAddr level tracing repo = do
+    manager <- maybe (newManager def) return mmanager
     odbS3 <-
       odbS3Backend
         (case mockAddr of
@@ -377,7 +385,7 @@ createS3backend bucket access secret mockAddr level tracing repo = do
               accessKeyID     = E.encodeUtf8 access
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
-        manager bucket ""
+        manager bucket prefix
 
     if tracing
       then do backend <- traceBackend odbS3
