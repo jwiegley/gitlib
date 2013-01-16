@@ -363,6 +363,7 @@ odbS3Backend s3config config manager bucket prefix = do
     , s3configuration = s3config' }
 
 createS3backend :: Text -- ^ bucket
+                -> Text -- ^ prefix
                 -> Text -- ^ access key
                 -> Text -- ^ secret key
                 -> Maybe Manager
@@ -371,7 +372,7 @@ createS3backend :: Text -- ^ bucket
                 -> Bool -- ^ tracing?
                 -> Repository
                 -> IO Repository
-createS3backend bucket access secret mmanager mockAddr level tracing repo = do
+createS3backend bucket prefix access secret mmanager mockAddr level tracing repo = do
     manager <- maybe (newManager def) return mmanager
     odbS3 <-
       odbS3Backend
@@ -384,7 +385,7 @@ createS3backend bucket access secret mmanager mockAddr level tracing repo = do
               accessKeyID     = E.encodeUtf8 access
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
-        manager bucket ""
+        manager bucket prefix
 
     if tracing
       then do backend <- traceBackend odbS3
