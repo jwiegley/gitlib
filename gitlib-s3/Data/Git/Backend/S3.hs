@@ -362,10 +362,17 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-createS3backend :: Text -> Text -> Text -> Maybe Text -> LogLevel -> Bool
-                   -> Repository -> IO Repository
-createS3backend bucket access secret mockAddr level tracing repo = do
-    manager <- newManager def
+createS3backend :: Text -- ^ bucket
+                -> Text -- ^ access key
+                -> Text -- ^ secret key
+                -> Maybe Manager
+                -> Maybe Text -- ^ mock address
+                -> LogLevel
+                -> Bool -- ^ tracing?
+                -> Repository
+                -> IO Repository
+createS3backend bucket access secret mmanager mockAddr level tracing repo = do
+    manager <- maybe (newManager def) return mmanager
     odbS3 <-
       odbS3Backend
         (case mockAddr of
