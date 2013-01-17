@@ -35,6 +35,7 @@ import           Data.Git.Backend
 import           Data.Git.Backend.Trace
 import           Data.Git.Error
 import           Data.Git.Oid
+import           Data.Int (Int64)
 import qualified Data.List as L
 import           Data.Map
 import           Data.Maybe
@@ -233,6 +234,9 @@ mirrorRefsToS3 be repo = do
             RefTargetSymbolic target -> (name, Left target)
             RefTargetId oid          -> (name, Right oid)
 
+mapPair :: (a -> b) -> (a,a) -> (b,b)
+mapPair f (x,y) = (f x, f y)
+
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid =
   catch go (\e -> print (e :: IOException) >> return (-1))
@@ -247,8 +251,9 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
         Nothing -> return (-1)
         Just bs -> do
           let blen      = B.length bs
-              (len,typ) = decode (BL.fromChunks [bs]) :: (Int,Int)
-              hdrLen    = sizeOf (undefined :: Int) * 2
+              (len,typ) = mapPair fromIntegral $
+                          (decode (BL.fromChunks [bs]) :: (Int64,Int64))
+              hdrLen    = sizeOf (undefined :: Int64) * 2
           content <- mallocBytes (len + 1)
           unsafeUseAsCString bs $ \cstr ->
             copyBytes content (cstr `plusPtr` hdrLen) (len + 1)
@@ -266,7 +271,7 @@ odbS3BackendReadHeaderCallback len_p type_p be oid =
   catch go (\e -> print (e :: IOException) >> return (-1))
   where
     go = do
-      let hdrLen = sizeOf (undefined :: Int) * 2
+      let hdrLen = sizeOf (undefined :: Int64) * 2
       odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
       oidStr <- oidToStr oid
       bytes  <- runResourceT $ do
@@ -275,7 +280,7 @@ odbS3BackendReadHeaderCallback len_p type_p be oid =
       case bytes of
         Nothing -> return (-1)
         Just bs -> do
-          let (len,typ) = decode (BL.fromChunks [bs]) :: (Int,Int)
+          let (len,typ) = decode (BL.fromChunks [bs]) :: (Int64,Int64)
           poke len_p (fromIntegral len)
           poke type_p (fromIntegral typ)
           return 0
@@ -287,8 +292,10 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
     0 -> do
       oidStr <- oidToStr oid
       odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
-      let hdr = encode ((fromIntegral len, fromIntegral obj_type) :: (Int,Int))
-      bytes <- curry unsafePackCStringLen (castPtr obj_data) (fromIntegral len)
+      let hdr = encode ((fromIntegral len,
+                         fromIntegral obj_type) :: (Int64,Int64))
+      bytes <- curry unsafePackCStringLen
+                    (castPtr obj_data) (fromIntegral len)
       let payload = BL.append hdr (BL.fromChunks [bytes])
       catch (go odbS3 oidStr payload >> return 0)
             (\e -> print (e :: IOException) >> return (-1))

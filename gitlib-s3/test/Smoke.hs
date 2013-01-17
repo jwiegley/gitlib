@@ -46,7 +46,7 @@ catBlob :: Repository -> Text -> IO (Maybe Text)
 catBlob repo sha = do
   hash <- parseOid sha
   for hash $ \hash' -> do
-    obj <- lookupObject hash' repo
+    obj <- lookupObject repo hash'
     case obj of
       Just (BlobObj b) -> do
         (_, contents) <- getBlobContents b
@@ -77,10 +77,8 @@ oidToText = T.pack . show
 
 sampleCommit :: Repository -> Tree -> Signature -> Commit
 sampleCommit repo tr sig =
-    (createCommit repo) { commitTree      = ObjRef tr
-                        , commitAuthor    = sig
-                        , commitCommitter = sig
-                        , commitLog       = "Sample log message." }
+    (createCommit repo sig) { commitTree = ObjRef tr
+                            , commitLog  = "Sample log message." }
 
 tests :: Test
 tests = test [
@@ -89,14 +87,14 @@ tests = test [
 
   withRepository "createTwoCommits.git" $ \repo' -> do
     -- Store Git objects in S3
-    repo <- createS3backend "gitlib-s3" "ACCESS" "SECRET"
-                           (Just "127.0.0.1") Error True repo'
+    repo <- createS3backend "gitlib-s3" "" "ACCESS" "SECRET"
+                            Nothing (Just "127.0.0.1") Error True repo'
 
-    let hello = createBlob (E.encodeUtf8 "Hello, world!\n") repo
-    tr <- updateTree "hello/world.txt" (blobRef hello) (createTree repo)
+    let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
+    tr <- updateTree (createTree repo) "hello/world.txt" (blobRef hello)
 
-    let goodbye = createBlob (E.encodeUtf8 "Goodbye, world!\n") repo
-    tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye) tr
+    let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
+    tr <- updateTree tr "goodbye/files/world.txt" (blobRef goodbye)
     x  <- oid tr
     x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
@@ -110,8 +108,8 @@ tests = test [
     x <- oid c
     x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
-    let goodbye2 = createBlob (E.encodeUtf8 "Goodbye, world again!\n") repo
-    tr <- updateTree "goodbye/files/world.txt" (blobRef goodbye2) tr
+    let goodbye2 = createBlob repo (E.encodeUtf8 "Goodbye, world again!\n")
+    tr <- updateTree tr "goodbye/files/world.txt" (blobRef goodbye2)
     x  <- oid tr
     x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
@@ -130,11 +128,11 @@ tests = test [
     putStrLn "Refs before creation...done"
 
     cid <- objectId c2
-    writeRef $ createRef "refs/heads/master" (RefTargetId cid) repo
-    writeRef $ createRef "HEAD" (RefTargetSymbolic "refs/heads/master") repo
+    writeRef $ createRef repo "refs/heads/master" (RefTargetId cid)
+    writeRef $ createRef repo "HEAD" (RefTargetSymbolic "refs/heads/master")
 
-    x <- oidToText <$> lookupId "refs/heads/master" repo
-    x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+    x <- fmap oidToText <$> resolveRef repo "refs/heads/master"
+    x @?= Just "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
     putStrLn "Refs after creation..."
     mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
