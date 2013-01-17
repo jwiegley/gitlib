@@ -123,14 +123,12 @@ writeBlob b = do hash <- doWriteBlob b
 doWriteBlob :: Blob -> IO COid
 doWriteBlob b = do
   ptr <- mallocForeignPtr
-  r   <- withForeignPtr repo (createFromBuffer ptr)
+  r   <- withForeignPtr (repoObj (gitRepo (blobInfo b)))
+                       (createFromBuffer ptr)
   when (r < 0) $ throwIO BlobCreateFailed
   return (COid ptr)
 
   where
-    repo = fromMaybe (error "Repository invalid")
-                     (repoObj (gitRepo (blobInfo b)))
-
     createFromBuffer ptr repoPtr = do
       str <- blobSourceToString (blobContents b)
       case str of

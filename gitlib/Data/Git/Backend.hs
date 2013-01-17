@@ -42,8 +42,8 @@ type F'git_odb_backend_free_callback = Ptr C'git_odb_backend -> IO ()
 
 odbBackendAdd :: Repository -> Ptr C'git_odb_backend -> Int
                  -> IO (Result Repository)
-odbBackendAdd repo' backend priority =
-  withForeignPtr repo $ \repoPtr ->
+odbBackendAdd repo backend priority =
+  withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \odbPtr -> do
       r <- c'git_repository_odb odbPtr repoPtr
       if r < 0
@@ -53,9 +53,6 @@ odbBackendAdd repo' backend priority =
         r2 <- c'git_odb_add_backend odb backend (fromIntegral priority)
         if r2 < 0
           then return (Left "Cannot add backend to repository ODB")
-          else return (Right repo')
-
-  where
-    repo = fromMaybe (throw RepositoryInvalid) (repoObj repo')
+          else return (Right repo)
 
 -- Backend.hs

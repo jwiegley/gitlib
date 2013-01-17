@@ -121,7 +121,7 @@ class Updatable a where
 
 data Repository = Repository { repoPath       :: FilePath
                              , repoOnWriteRef :: [Reference -> IO ()]
-                             , repoObj        :: ObjPtr C'git_repository }
+                             , repoObj        :: ForeignPtr C'git_repository }
 
 instance Eq Repository where
   x == y = repoPath x == repoPath y && repoObj x == repoObj y
@@ -155,7 +155,7 @@ newBase repo oid obj = Base { gitId   = oid
                             , gitObj  = obj }
 
 repositoryPtr :: Repository -> ForeignPtr C'git_repository
-repositoryPtr repo = fromMaybe (error "Repository invalid") (repoObj repo)
+repositoryPtr repo = repoObj repo
 
 openRepository :: FilePath -> IO Repository
 openRepository path =
@@ -186,7 +186,7 @@ openRepositoryWith path fn = alloca $ \ptr ->
         fptr <- newForeignPtr p'git_repository_free ptr'
         return Repository { repoPath       = path
                           , repoOnWriteRef = []
-                          , repoObj        = Just fptr }
+                          , repoObj        = fptr }
 
   where doesNotExist = throwIO . RepositoryNotExist . toString
 

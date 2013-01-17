@@ -66,7 +66,7 @@ lookupRef repo name = alloca $ \ptr -> do
 
 writeRef :: Reference -> IO Reference
 writeRef ref = alloca $ \ptr -> do
-  withForeignPtr repo $ \repoPtr ->
+  withForeignPtr (repoObj (refRepo ref)) $ \repoPtr ->
     withCStringable (refName ref) $ \namePtr -> do
       r <- case refTarget ref of
         RefTargetId (PartialOid {}) ->
@@ -88,9 +88,6 @@ writeRef ref = alloca $ \ptr -> do
   mapM_ ($ ref') (repoOnWriteRef (refRepo ref'))
   return ref'
 
-  where
-    repo = fromMaybe (error "Repository invalid") (repoObj (refRepo ref))
-
 writeRef_ :: Reference -> IO ()
 writeRef_ = void . writeRef
 
@@ -100,13 +97,11 @@ writeRef_ = void . writeRef
 resolveRef :: Repository -> Text -> IO (Maybe Oid)
 resolveRef repos name = alloca $ \ptr ->
   withCStringable name $ \namePtr ->
-    withForeignPtr repo $ \repoPtr -> do
+    withForeignPtr (repoObj repos) $ \repoPtr -> do
       r <- c'git_reference_name_to_oid ptr repoPtr namePtr
       if r < 0
         then return Nothing
         else Just . Oid <$> COid <$> newForeignPtr_ ptr
-  where
-    repo = fromMaybe (error "Repository invalid") (repoObj repos)
 
 -- int git_reference_rename(git_reference *ref, const char *new_name,
 --   int force)

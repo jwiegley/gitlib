@@ -139,7 +139,7 @@ withForeignPtrs fos io
 
 doWriteCommit :: Commit -> Maybe Text -> IO (Commit, COid)
 doWriteCommit c ref = do
-  coid <- withForeignPtr repo $ \repoPtr -> do
+  coid <- withForeignPtr (repoObj (gitRepo (commitInfo c))) $ \repoPtr -> do
     coid <- mallocForeignPtr
     withForeignPtr coid $ \coid' -> do
       conv <- U.open (commitEncoding c) (Just True)
@@ -164,9 +164,6 @@ doWriteCommit c ref = do
          , COid coid)
 
   where
-    repo = fromMaybe (error "Repository invalid")
-                     (repoObj (gitRepo (commitInfo c)))
-
     withRef Nothing     = flip ($) nullPtr
     withRef (Just name) = BS.useAsCString (E.encodeUtf8 name)
 

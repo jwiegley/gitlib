@@ -181,7 +181,7 @@ writeTree t = fst <$> doWriteTree t
 
 doWriteTree :: Tree -> IO (Tree, COid)
 doWriteTree t = alloca $ \ptr ->
-  withForeignPtr repo $ \repoPtr -> do
+  withForeignPtr (repoObj (gitRepo (treeInfo t))) $ \repoPtr -> do
     r <- c'git_treebuilder_create ptr nullPtr
     when (r < 0) $ throwIO TreeBuilderCreateFailed
     builder <- peek ptr
@@ -219,9 +219,6 @@ doWriteTree t = alloca $ \ptr ->
               , treeContents = M.fromList newList }, COid coid)
 
   where
-    repo = fromMaybe (error "Repository invalid")
-                     (repoObj (gitRepo (treeInfo t)))
-
     insertObject :: (CStringable a)
                  => Ptr C'git_treebuilder -> a -> COid -> CUInt -> IO ()
     insertObject builder key (COid coid) attrs =
