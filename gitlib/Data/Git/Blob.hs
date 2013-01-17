@@ -92,6 +92,9 @@ getBlobContents b@(gitId . blobInfo -> Stored hash)
         withForeignPtr blobPtr $ \ptr -> do
           size <- c'git_blob_rawsize (castPtr ptr)
           buf  <- c'git_blob_rawcontent (castPtr ptr)
+          -- The lifetime of buf is tied to the lifetime of the blob object in
+          -- libgit2, which this Blob object controls, so we can use
+          -- unsafePackCStringLen to refer to its bytes.
           bstr <- curry unsafePackCStringLen (castPtr buf)
                         (fromIntegral size)
           let contents' = BlobString bstr

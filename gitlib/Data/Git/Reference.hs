@@ -25,7 +25,7 @@ module Data.Git.Reference
        where
 
 import           Bindings.Libgit2
-import           Data.ByteString.Unsafe
+import           Data.ByteString
 import           Data.Git.Internal
 import           Data.IORef
 import qualified Data.Text as T
@@ -57,7 +57,7 @@ lookupRef repo name = alloca $ \ptr -> do
                     newForeignPtr_ oidPtr
                       >>= return . RefTargetId . Oid . COid
             else do targName <- c'git_reference_target ref
-                    unsafePackCString targName
+                    packCString targName
                       >>= return . RefTargetSymbolic . E.decodeUtf8
     return $ Just Reference { refRepo   = repo
                             , refName   = name
@@ -185,7 +185,7 @@ listRefNames repo flags =
 foreachRefCallback :: CString -> Ptr () -> IO CInt
 foreachRefCallback name payload = do
   (callback,results) <- peek (castPtr payload) >>= deRefStablePtr
-  result <- unsafePackCString name >>= callback . E.decodeUtf8
+  result <- packCString name >>= callback . E.decodeUtf8
   modifyIORef results (\xs -> result:xs)
   return 0
 
