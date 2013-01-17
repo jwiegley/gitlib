@@ -217,14 +217,14 @@ lookupObject' repo oid lookupFn lookupPrefixFn createFn =
            case oid of
              Oid (COid oid') ->
                withForeignPtr oid' $ \oidPtr ->
-                 lookupFn (castPtr ptr) repoPtr oidPtr
+                 lookupFn ptr repoPtr oidPtr
              PartialOid (COid oid') len ->
                withForeignPtr oid' $ \oidPtr ->
-                 lookupPrefixFn (castPtr ptr) repoPtr oidPtr (fromIntegral len)
+                 lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
     if r < 0
       then return Nothing
       else do
-        ptr'     <- peek ptr
+        ptr'     <- castPtr <$> peek ptr
         coid     <- c'git_object_id ptr'
         coidCopy <- mallocForeignPtr
         withForeignPtr coidCopy $ flip c'git_oid_cpy coid
