@@ -122,18 +122,17 @@ writeBlob b = do hash <- doWriteBlob b
 -- jww (2012-12-14): Have the write functions return Either instead
 doWriteBlob :: Blob -> IO COid
 doWriteBlob b = do
-  ptr <- mallocForeignPtr
-  r   <- withForeignPtr (repoObj (gitRepo (blobInfo b)))
-                       (createFromBuffer ptr)
-  when (r < 0) $ throwIO BlobCreateFailed
-  return (COid ptr)
+    ptr <- mallocForeignPtr
+    r   <- withForeignPtr (repoObj (gitRepo (blobInfo b)))
+                         (createFromBuffer ptr)
+    when (r < 0) $ throwIO BlobCreateFailed
+    return (COid ptr)
 
   where
-    createFromBuffer ptr repoPtr = do
-      str <- blobSourceToString (blobContents b)
-      case str of
-        Nothing   -> throw BlobCreateFailed
-        Just str' -> createBlobFromByteString ptr repoPtr str'
+    createFromBuffer ptr repoPtr =
+        maybe (throw BlobCreateFailed)
+              (createBlobFromByteString ptr repoPtr)
+              =<< blobSourceToString (blobContents b)
 
     createBlobFromByteString ptr repoPtr bs =
           unsafeUseAsCStringLen bs $
