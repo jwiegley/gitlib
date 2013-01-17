@@ -255,7 +255,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
               (len,typ) =
                   mapPair fromIntegral $
                   (decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
-          content <- mallocBytes (len + 1)
+          content <- mallocBytes len
           lastByteOffset <-
               foldM (\offset x -> do
                       let xOffset = if offset == 0 then hdrLen else 0
@@ -264,7 +264,6 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
                           copyBytes (content `plusPtr` offset)
                                     (cstr `plusPtr` xOffset) innerLen
                       return (offset + innerLen)) 0 bs
-          poke (content `plusPtr` (lastByteOffset - hdrLen)) '\0'
           poke len_p (fromIntegral len)
           poke type_p (fromIntegral typ)
           poke data_p (castPtr content)
