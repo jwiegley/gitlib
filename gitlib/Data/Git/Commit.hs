@@ -131,6 +131,12 @@ writeCommit c@(Commit { commitInfo = Base { gitId = Stored _ } }) _ =
   return c
 writeCommit c ref = fst <$> doWriteCommit c ref
 
+withForeignPtrs :: [ForeignPtr a] -> ([Ptr a] -> IO b) -> IO b
+withForeignPtrs fos io
+  = do r <- io (map FU.unsafeForeignPtrToPtr fos)
+       mapM touchForeignPtr fos
+       return r
+
 doWriteCommit :: Commit -> Maybe Text -> IO (Commit, COid)
 doWriteCommit c ref = do
   coid <- withForeignPtr repo $ \repoPtr -> do
@@ -139,20 +145,20 @@ doWriteCommit c ref = do
       conv <- U.open (commitEncoding c) (Just True)
       BS.useAsCString (U.fromUnicode conv (commitLog c)) $ \message ->
         withRef ref $ \update_ref ->
-          withSignature conv (commitAuthor c) $ \author ->
-            withSignature conv (commitCommitter c) $ \committer ->
-              withEncStr (commitEncoding c) $ \message_encoding ->
-                withGitTree (commitTree c) c $ \commit_tree -> do
-                  parentPtrs <- getCommitParentPtrs c
-                  parents    <- newArray $
-                               map FU.unsafeForeignPtrToPtr parentPtrs
-                  r <- c'git_commit_create coid' repoPtr
-                        update_ref author committer
-                        message_encoding message commit_tree
-                        (fromIntegral (length (commitParents c)))
-                        parents
-                  when (r < 0) $ throwIO CommitCreateFailed
-                  return coid
+        withSignature conv (commitAuthor c) $ \author ->
+        withSignature conv (commitCommitter c) $ \committer ->
+        withEncStr (commitEncoding c) $ \message_encoding ->
+        withGitTree (commitTree c) c $ \commit_tree -> do
+          parentPtrs <- getCommitParentPtrs c
+          withForeignPtrs parentPtrs $ \pptrs -> do
+            parents <- newArray pptrs
+            r <- c'git_commit_create coid' repoPtr
+                  update_ref author committer
+                  message_encoding message commit_tree
+                  (fromIntegral (length (commitParents c)))
+                  parents
+            when (r < 0) $ throwIO CommitCreateFailed
+            return coid
 
   return (c { commitInfo = (commitInfo c) { gitId = Stored (COid coid) } }
          , COid coid)
