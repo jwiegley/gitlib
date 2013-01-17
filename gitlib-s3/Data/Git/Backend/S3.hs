@@ -29,7 +29,8 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.ByteString.Unsafe
 import           Data.Conduit
 import           Data.Conduit.Binary
-import           Data.Conduit.List hiding (mapM_, peek, catMaybes, sequence)
+import           Data.Conduit.List hiding (mapM_, foldM, peek,
+                                           catMaybes, sequence)
 import           Data.Git hiding (getObject)
 import           Data.Git.Backend
 import           Data.Git.Backend.Trace
@@ -244,19 +245,26 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
     go = do
       odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
       oidStr <- oidToStr oid
-      bytes  <- runResourceT $ do
+      blocks <- runResourceT $ do
         result <- getFileS3 odbS3 (T.pack oidStr) Nothing
-        result $$+- await
-      case bytes of
-        Nothing -> return (-1)
-        Just bs -> do
-          let blen      = B.length bs
-              (len,typ) = mapPair fromIntegral $
-                          (decode (BL.fromChunks [bs]) :: (Int64,Int64))
-              hdrLen    = sizeOf (undefined :: Int64) * 2
+        result $$+- consume
+      case blocks of
+        [] -> return (-1)
+        bs -> do
+          let hdrLen = sizeOf (undefined :: Int64) * 2
+              (len,typ) =
+                  mapPair fromIntegral $
+                  (decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
           content <- mallocBytes (len + 1)
-          unsafeUseAsCString bs $ \cstr ->
-            copyBytes content (cstr `plusPtr` hdrLen) (len + 1)
+          lastByteOffset <-
+              foldM (\offset x -> do
+                      let xOffset = if offset == 0 then hdrLen else 0
+                          innerLen = B.length x - xOffset
+                      unsafeUseAsCString x $ \cstr ->
+                          copyBytes (content `plusPtr` offset)
+                                    (cstr `plusPtr` xOffset) innerLen
+                      return (offset + innerLen)) 0 bs
+          poke (content `plusPtr` (lastByteOffset - hdrLen)) '\0'
           poke len_p (fromIntegral len)
           poke type_p (fromIntegral typ)
           poke data_p (castPtr content)
