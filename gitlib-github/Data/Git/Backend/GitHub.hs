@@ -3,6 +3,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# OPTIONS_GHC -Wall #-}
 
 module Data.Git.Backend.GitHub
        ( odbGitHubBackend
@@ -448,17 +449,17 @@ foreign import ccall "&odbGitHubBackendFreeCallback"
 odbGitHubBackend :: Manager -> Text -> Text
                  -> IO (Ptr C'git_odb_backend)
 odbGitHubBackend manager bucket prefix = do
-  readFun       <- mk'git_odb_backend_read_callback odbGitHubBackendReadCallback
+  readFun <- mk'git_odb_backend_read_callback odbGitHubBackendReadCallback
   readPrefixFun <-
     mk'git_odb_backend_read_prefix_callback odbGitHubBackendReadPrefixCallback
   readHeaderFun <-
     mk'git_odb_backend_read_header_callback odbGitHubBackendReadHeaderCallback
-  writeFun      <- mk'git_odb_backend_write_callback odbGitHubBackendWriteCallback
-  existsFun     <- mk'git_odb_backend_exists_callback odbGitHubBackendExistsCallback
+  writeFun  <- mk'git_odb_backend_write_callback odbGitHubBackendWriteCallback
+  existsFun <- mk'git_odb_backend_exists_callback odbGitHubBackendExistsCallback
 
-  manager'  <- newStablePtr manager
-  bucket'   <- newStablePtr bucket
-  prefix'   <- newStablePtr prefix
+  manager' <- newStablePtr manager
+  bucket'  <- newStablePtr bucket
+  prefix'  <- newStablePtr prefix
 
   castPtr <$> new OdbGitHubBackend {
     odbGitHubParent = C'git_odb_backend {
@@ -475,13 +476,13 @@ odbGitHubBackend manager bucket prefix = do
     , bucketName      = bucket'
     , objectPrefix    = prefix' }
 
-createGitHubBackend :: Text -- ^ bucket
-                    -> Text -- ^ prefix
-                    -> Text -- ^ access key
-                    -> Text -- ^ secret key
+createGitHubBackend :: Text       -- ^ bucket
+                    -> Text       -- ^ prefix
+                    -> Text       -- ^ access key
+                    -> Text       -- ^ secret key
                     -> Maybe Manager
                     -> Maybe Text -- ^ mock address
-                    -> Bool -- ^ tracing?
+                    -> Bool       -- ^ tracing?
                     -> Repository
                     -> IO Repository
 createGitHubBackend
