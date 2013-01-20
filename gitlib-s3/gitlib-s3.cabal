@@ -41,25 +41,25 @@ Library
   exposed-modules:
     Data.Git.Backend.S3
 
-Test-suite smoke
-  default-language: Haskell98
-  type: exitcode-stdio-1.0
-  main-is: Smoke.hs
-  hs-source-dirs: test
-  build-depends:
-      base >=3
-    , gitlib-s3
-    , gitlib
-    , hlibgit2        >= 0.17
-    , aws             >= 0.7.5
-    , HUnit           >= 1.2.5
-    , bytestring      >= 0.9.2.1
-    , containers      >= 0.4.2
-    , lens            >= 2.8
-    , http-conduit    >= 1.8.5.1
-    , parallel-io     >= 0.3.2.1
-    , stringable      >= 0.1.1
-    , system-fileio   >= 0.3.9
-    , system-filepath >= 0.4.7
-    , text            >= 0.11.2
-    , time            >= 1.4
+-- Test-suite smoke
+--   default-language: Haskell98
+--   type: exitcode-stdio-1.0
+--   main-is: Smoke.hs
+--   hs-source-dirs: test
+--   build-depends:
+--       base >=3
+--     , gitlib-s3
+--     , gitlib
+--     , hlibgit2        >= 0.17
+--     , aws             >= 0.7.5
+--     , HUnit           >= 1.2.5
+--     , bytestring      >= 0.9.2.1
+--     , containers      >= 0.4.2
+--     , lens            >= 2.8
+--     , http-conduit    >= 1.8.5.1
+--     , parallel-io     >= 0.3.2.1
+--     , stringable      >= 0.1.1
+--     , system-fileio   >= 0.3.9
+--     , system-filepath >= 0.4.7
+--     , text            >= 0.11.2
+--     , time            >= 1.4
