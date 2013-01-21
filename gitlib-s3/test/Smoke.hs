@@ -27,6 +27,7 @@ import           Network.HTTP.Conduit
 import qualified Prelude
 import           Prelude (putStrLn)
 import           Prelude hiding (FilePath, putStr, putStrLn)
+import           System.Environment
 import           System.Exit
 import           Test.HUnit
 
@@ -87,8 +88,11 @@ tests = test [
 
   withRepository "createTwoCommits.git" $ \repo' -> do
     -- Store Git objects in S3
-    repo <- createS3backend "gitlib-s3" "" "ACCESS" "SECRET"
-                            Nothing (Just "127.0.0.1") Error True repo'
+    s3Bucket     <- T.pack <$> getEnv "S3_BUCKET"
+    awsAccessKey <- T.pack <$> getEnv "AWS_ACCESS_KEY"
+    awsSecretKey <- T.pack <$> getEnv "AWS_SECRET_KEY"
+    repo <- createS3backend s3Bucket "" awsAccessKey awsSecretKey
+                            Nothing Nothing Error True repo'
 
     let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
     tr <- updateTree (createTree repo) "hello/world.txt" (blobRef hello)
