@@ -405,11 +405,11 @@ createS3backend bucket prefix access secret mmanager mockAddr level tracing repo
               odbBackendAdd repo backend 100
       else odbBackendAdd repo odbS3 100
 
-    -- Start by reading in the known refs from S3
-    mirrorRefsFromS3 odbS3 repo
-
     -- Whenever a ref is written, update the refs in S3
-    let onWrite = const $ mirrorRefsToS3 odbS3 repo
-    return repo { repoOnWriteRef = onWrite : repoOnWriteRef repo }
+    let beforeRead = \_ _ -> mirrorRefsFromS3 odbS3 repo
+        onWrite    = \_ _ -> mirrorRefsToS3 odbS3 repo
+    return repo { repoBeforeReadRef = beforeRead : repoBeforeReadRef repo
+                , repoOnWriteRef    = onWrite : repoOnWriteRef repo
+                }
 
 -- S3.hs

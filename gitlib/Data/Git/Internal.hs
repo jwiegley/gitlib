@@ -119,9 +119,15 @@ class Updatable a where
   getObject (IdRef _)  = Nothing
   getObject (ObjRef x) = Just x
 
-data Repository = Repository { repoPath       :: FilePath
-                             , repoOnWriteRef :: [Reference -> IO ()]
-                             , repoObj        :: ForeignPtr C'git_repository }
+data Repository = Repository
+    { repoPath :: FilePath
+    -- jww (2013-01-21): These two callbacks are a temporary workaround until
+    -- libgit2 supports full virtualization of repositories.  See:
+    -- https://github.com/libgit2/libgit2/issues/1213
+    , repoBeforeReadRef :: [Repository -> Text -> IO ()]
+    , repoOnWriteRef    :: [Repository -> Reference -> IO ()]
+    , repoObj           :: ForeignPtr C'git_repository
+    }
 
 instance Eq Repository where
   x == y = repoPath x == repoPath y && repoObj x == repoObj y
@@ -184,10 +190,11 @@ openRepositoryWith path fn = alloca $ \ptr ->
         when (r < 0) $ doesNotExist p
         ptr' <- peek ptr
         fptr <- newForeignPtr p'git_repository_free ptr'
-        return Repository { repoPath       = path
-                          , repoOnWriteRef = []
-                          , repoObj        = fptr }
-
+        return Repository { repoPath          = path
+                          , repoBeforeReadRef = []
+                          , repoOnWriteRef    = []
+                          , repoObj           = fptr
+                          }
   where doesNotExist = throwIO . RepositoryNotExist . toString
 
 withObject :: (Updatable a, Updatable b) => ObjRef a -> b -> (a -> IO c) -> IO c

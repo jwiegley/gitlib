@@ -43,6 +43,7 @@ createRef repo name target =
 
 lookupRef :: Repository -> Text -> IO (Maybe Reference)
 lookupRef repo name = alloca $ \ptr -> do
+  mapM_ (\f -> f repo name) (repoBeforeReadRef repo)
   r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
         withCStringable name $ \namePtr ->
           c'git_reference_lookup ptr repoPtr namePtr
@@ -85,7 +86,7 @@ writeRef ref = alloca $ \ptr -> do
 
   fptr <- newForeignPtr_ =<< peek ptr
   let ref' = ref { refObj = Just fptr }
-  mapM_ ($ ref') (repoOnWriteRef (refRepo ref'))
+  mapM_ (\f -> f (refRepo ref') ref') (repoOnWriteRef (refRepo ref'))
   return ref'
 
 writeRef_ :: Reference -> IO ()
@@ -95,7 +96,8 @@ writeRef_ = void . writeRef
 --   const char *name)
 
 resolveRef :: Repository -> Text -> IO (Maybe Oid)
-resolveRef repos name = alloca $ \ptr ->
+resolveRef repos name = alloca $ \ptr -> do
+  mapM_ (\f -> f repos name) (repoBeforeReadRef repos)
   withCStringable name $ \namePtr ->
     withForeignPtr (repoObj repos) $ \repoPtr -> do
       r <- c'git_reference_name_to_oid ptr repoPtr namePtr
