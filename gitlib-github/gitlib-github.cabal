@@ -1,7 +1,7 @@
 Name:                gitlib-github
 Version:             0.1.0.0
-Synopsis:            A repository backend for storing Git objects on GitHub.
-Description:         A repository backend for storing Git objects on GitHub.
+Synopsis:            Gitlib repository backend for storing Git objects on GitHub.
+Description:         Gitlib repository backend for storing Git objects on GitHub.
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley
