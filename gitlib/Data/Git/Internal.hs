@@ -123,9 +123,10 @@ data Repository = Repository
     { repoPath :: FilePath
     -- jww (2013-01-21): These two callbacks are a temporary workaround until
     -- libgit2 supports full virtualization of repositories.  See:
-    -- https://github.com/libgit2/libgit2/issues/1213
-    , repoBeforeReadRef :: [Repository -> Text -> IO ()]
-    , repoOnWriteRef    :: [Repository -> Reference -> IO ()]
+    --   https://github.com/libgit2/libgit2/issues/1213
+    , repoBeforeReadRef :: [Repository -> Text -> IO (Maybe Reference)]
+    , repoOnWriteRef    :: [Repository -> Text -> Reference
+                            -> IO (Maybe Reference)]
     , repoObj           :: ForeignPtr C'git_repository
     }
 

@@ -43,27 +43,33 @@ createRef repo name target =
 
 lookupRef :: Repository -> Text -> IO (Maybe Reference)
 lookupRef repo name = alloca $ \ptr -> do
-  mapM_ (\f -> f repo name) (repoBeforeReadRef repo)
-  r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
-        withCStringable name $ \namePtr ->
-          c'git_reference_lookup ptr repoPtr namePtr
-  if r < 0
-    then return Nothing
-    else do
-    ref  <- peek ptr
-    fptr <- newForeignPtr p'git_reference_free ref
-    typ  <- c'git_reference_type ref
-    targ <- if typ == c'GIT_REF_OID
-            then do oidPtr <- c'git_reference_oid ref
-                    newForeignPtr_ oidPtr
-                      >>= return . RefTargetId . Oid . COid
-            else do targName <- c'git_reference_target ref
-                    packCString targName
-                      >>= return . RefTargetSymbolic . E.decodeUtf8
-    return $ Just Reference { refRepo   = repo
-                            , refName   = name
-                            , refTarget = targ
-                            , refObj    = Just fptr }
+    ref <- foldM (\ref f -> do x <- f repo name
+                               return $ ref <> First x)
+                (First Nothing)
+                (repoBeforeReadRef repo)
+    maybe (go ptr) (return . Just) (getFirst ref)
+  where
+      go ptr = do
+          r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
+                withCStringable name $ \namePtr ->
+                  c'git_reference_lookup ptr repoPtr namePtr
+          if r < 0
+              then return Nothing
+              else do
+              ref  <- peek ptr
+              fptr <- newForeignPtr p'git_reference_free ref
+              typ  <- c'git_reference_type ref
+              targ <- if typ == c'GIT_REF_OID
+                      then do oidPtr <- c'git_reference_oid ref
+                              newForeignPtr_ oidPtr
+                                >>= return . RefTargetId . Oid . COid
+                      else do targName <- c'git_reference_target ref
+                              packCString targName
+                                >>= return . RefTargetSymbolic . E.decodeUtf8
+              return $ Just Reference { refRepo   = repo
+                                      , refName   = name
+                                      , refTarget = targ
+                                      , refObj    = Just fptr }
 
 writeRef :: Reference -> IO Reference
 writeRef ref = alloca $ \ptr -> do
@@ -85,9 +91,15 @@ writeRef ref = alloca $ \ptr -> do
       when (r < 0) $ throwIO ReferenceCreateFailed
 
   fptr <- newForeignPtr_ =<< peek ptr
+
   let ref' = ref { refObj = Just fptr }
-  mapM_ (\f -> f (refRepo ref') ref') (repoOnWriteRef (refRepo ref'))
-  return ref'
+      repo = refRepo ref'
+      name = refName ref'
+  ref'' <- foldM (\r f -> do x <- f repo name ref
+                             return $ r <> First x)
+                (First Nothing)
+                (repoOnWriteRef repo)
+  maybe (return ref') return (getFirst ref'')
 
 writeRef_ :: Reference -> IO ()
 writeRef_ = void . writeRef

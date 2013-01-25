@@ -31,6 +31,7 @@ import           Data.Conduit
 import           Data.Conduit.Binary
 import           Data.Conduit.List hiding (mapM_, foldM, peek,
                                            catMaybes, sequence)
+import           Data.Foldable (for_)
 import           Data.Git hiding (getObject)
 import           Data.Git.Backend
 import           Data.Git.Backend.Trace
@@ -204,32 +205,33 @@ writeRefs be refs = do
 
 mirrorRefsFromS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
 mirrorRefsFromS3 be repo = do
-  refs <- readRefs be
-  case refs of
-    Nothing -> return ()
-    Just refs' ->
-      forM_ (toList refs') $ \(name, ref) ->
-        withForeignPtr (repositoryPtr repo) $ \repoPtr ->
-          withCStringable name $ \namePtr -> alloca $ \ptr -> do
-            r <- case ref of
-                  Left target ->
-                    withCStringable target $ \targetPtr ->
-                      c'git_reference_create_symbolic ptr repoPtr namePtr
-                                                      targetPtr 1
-                  Right (PartialOid {}) ->
-                    throwIO RefCannotCreateFromPartialOid
-                  Right (Oid (COid coid)) ->
-                    withForeignPtr coid $ \coidPtr ->
-                      c'git_reference_create_oid ptr repoPtr namePtr coidPtr 1
-            when (r < 0) $ throwIO RepositoryInvalid
+    refs <- readRefs be
+    for_ refs $ \refs' ->
+        forM_ (toList refs') $ \(name, ref) ->
+            withForeignPtr (repositoryPtr repo) $ \repoPtr ->
+                withCStringable name $ \namePtr ->
+                    alloca (go repoPtr namePtr ref)
+  where
+    go repoPtr namePtr ref ptr = do
+        r <- case ref of
+            Left target ->
+              withCStringable target $ \targetPtr ->
+                c'git_reference_create_symbolic ptr repoPtr namePtr
+                                                targetPtr 1
+            Right (PartialOid {}) ->
+              throwIO RefCannotCreateFromPartialOid
+            Right (Oid (COid coid)) ->
+              withForeignPtr coid $ \coidPtr ->
+                c'git_reference_create_oid ptr repoPtr namePtr coidPtr 1
+        when (r < 0) $ throwIO RepositoryInvalid
 
 mirrorRefsToS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
 mirrorRefsToS3 be repo = do
-  odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
-  refs  <- catMaybes <$>
-           mapAllRefs repo (\name -> do ref <- lookupRef repo name
-                                        return (go name <$> ref))
-  writeRefs be (fromList refs)
+    odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+    refs  <- catMaybes <$>
+             mapAllRefs repo (\name -> do ref <- lookupRef repo name
+                                          return (go name <$> ref))
+    writeRefs be (fromList refs)
   where go name ref =
           case refTarget ref of
             RefTargetSymbolic target -> (name, Left target)
@@ -406,10 +408,9 @@ createS3backend bucket prefix access secret mmanager mockAddr level tracing repo
       else odbBackendAdd repo odbS3 100
 
     -- Whenever a ref is written, update the refs in S3
-    let beforeRead = \_ _ -> mirrorRefsFromS3 odbS3 repo
-        onWrite    = \_ _ -> mirrorRefsToS3 odbS3 repo
+    let beforeRead = \_ _   -> mirrorRefsFromS3 odbS3 repo >> return Nothing
+        onWrite    = \_ _ _ -> mirrorRefsToS3 odbS3 repo >> return Nothing
     return repo { repoBeforeReadRef = beforeRead : repoBeforeReadRef repo
-                , repoOnWriteRef    = onWrite : repoOnWriteRef repo
-                }
+                , repoOnWriteRef    = onWrite : repoOnWriteRef repo }
 
 -- S3.hs

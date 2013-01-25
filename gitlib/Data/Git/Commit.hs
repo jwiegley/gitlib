@@ -198,8 +198,8 @@ getCommitParentPtrs c =
               FC.newForeignPtr ptr' (c'git_commit_free ptr')
 
 modifyCommitTree
-  :: Commit -> FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry)) -> Bool
-  -> IO (Either a Commit)
+  :: Commit -> FilePath -> (Maybe TreeEntry -> Either a (Maybe TreeEntry))
+     -> Bool -> IO (Either a Commit)
 modifyCommitTree c path f createIfNotExist =
   withObject (commitTree c) c $ \tr -> do
     result <- modifyTree path f createIfNotExist tr
@@ -229,6 +229,13 @@ doUpdateCommit c xs item = do
 
 updateCommit :: Commit -> FilePath -> TreeEntry -> IO Commit
 updateCommit c = doUpdateCommit c . splitPath
+
+updateCommitRef :: Repository -> Text -> Commit -> IO (Reference,Commit)
+updateCommitRef repo ref c = do
+    c'   <- update c
+    oid  <- objectId c'
+    ref' <- writeRef (createRef repo ref (RefTargetId oid))
+    return (ref',c')
 
 commitHistoryFirstParent :: Commit -> IO [Commit]
 commitHistoryFirstParent c =

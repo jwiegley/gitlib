@@ -34,6 +34,7 @@ import           Data.Conduit.Binary
 import           Data.Conduit.List hiding (mapM_, foldM, peek, catMaybes,
                                            sequence)
 import           Data.Default ( Default(..) )
+import           Data.Foldable (for_)
 import           Data.Git hiding (getObject)
 import           Data.Git.Backend
 import           Data.Git.Backend.Trace
@@ -87,7 +88,7 @@ instance FromJSON GitHubBlob where
                                     <*> v .: "size"
   parseJSON _ = mzero
 
-gitHubReadBlob :: Text -> Text -> Text -> RESTfulM (Attempt ByteString)
+gitHubReadBlob :: Text -> Text -> Text -> RESTfulM (Attempt GitHubBlob)
 gitHubReadBlob owner repo sha = do
     -- jww (2013-01-12): Split out GET to its own argument, using StdMethod
     -- from http-types.  Also, use a type class for this argument, to be added
@@ -96,7 +97,7 @@ gitHubReadBlob owner repo sha = do
     blob <- restfulJson ()
         [st|GET https://api.github.com/repos/#{owner}/#{repo}/git/blobs/#{sha}|]
     return $ case dec . ghBlobContent <$> blob of
-        Success (Right bs') -> Success bs'
+        Success (Right bs') -> (\x -> x { ghBlobContent = bs' }) <$> blob
         Success (Left str)  -> Failure (TranslationException str)
         Failure e           -> Failure e
     -- jww (2012-12-26): Handle utf-8 and other encodings
@@ -294,16 +295,18 @@ gitHubDeleteRef owner repo ref =
     [st|DELETE https://api.github.com/repos/#{owner}/#{repo}/git/#{ref}|]
 
 data OdbGitHubBackend =
-  OdbGitHubBackend { odbGitHubParent     :: C'git_odb_backend
-                   , httpManager         :: StablePtr Manager
-                   , bucketName          :: StablePtr Text
-                   , objectPrefix        :: StablePtr Text }
+  OdbGitHubBackend { odbGitHubParent :: C'git_odb_backend
+                   , httpManager     :: StablePtr Manager
+                   , ownerName       :: StablePtr Text
+                   , gitHubRepo      :: StablePtr Text
+                   , gitHubToken     :: StablePtr (Maybe Text) }
 
 instance Storable OdbGitHubBackend where
   sizeOf _ = sizeOf (undefined :: C'git_odb_backend) +
              sizeOf (undefined :: StablePtr Manager) +
              sizeOf (undefined :: StablePtr Text) +
-             sizeOf (undefined :: StablePtr Text)
+             sizeOf (undefined :: StablePtr Text) +
+             sizeOf (undefined :: StablePtr (Maybe Text))
   alignment _ = alignment (undefined :: Ptr C'git_odb_backend)
   peek p = do
     v0 <- peekByteOff p 0
@@ -313,8 +316,10 @@ instance Storable OdbGitHubBackend where
     v2 <- peekByteOff p sizev2
     let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Text)
     v3 <- peekByteOff p sizev3
-    return (OdbGitHubBackend v0 v1 v2 v3)
-  poke p (OdbGitHubBackend v0 v1 v2 v3) = do
+    let sizev4 = sizev3 + sizeOf (undefined :: StablePtr Text)
+    v4 <- peekByteOff p sizev4
+    return (OdbGitHubBackend v0 v1 v2 v3 v4)
+  poke p (OdbGitHubBackend v0 v1 v2 v3 v4) = do
     pokeByteOff p 0 v0
     let sizev1 = sizeOf (undefined :: C'git_odb_backend)
     pokeByteOff p sizev1 v1
@@ -322,60 +327,39 @@ instance Storable OdbGitHubBackend where
     pokeByteOff p sizev2 v2
     let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Text)
     pokeByteOff p sizev3 v3
+    let sizev4 = sizev3 + sizeOf (undefined :: StablePtr Text)
+    pokeByteOff p sizev4 v4
     return ()
-
-type RefMap = Map Text (Either Text Oid)
-
-instance Y.FromJSON Oid where
-  parseJSON (Y.String v) =
-    return . Oid . COid $ unsafePerformIO $ do
-      ptr <- mallocForeignPtr
-      withCStringable v $ \cstr ->
-        withForeignPtr ptr $ \ptr' -> do
-          r <- c'git_oid_fromstr ptr' cstr
-          when (r < 0) $ throwIO OidCopyFailed
-          return ptr
-
-coidToJSON :: ForeignPtr C'git_oid -> Y.Value
-coidToJSON coid = unsafePerformIO $ withForeignPtr coid $ \oid ->
-                    Y.toJSON <$> oidToStr oid
-
-instance Y.ToJSON Oid where
-  toJSON (PartialOid (COid coid) _) = throw RefCannotCreateFromPartialOid
-  toJSON (Oid (COid coid))          = coidToJSON coid
 
 mapPair :: (a -> b) -> (a,a) -> (b,b)
 mapPair f (x,y) = (f x, f y)
 
 odbGitHubBackendReadCallback :: F'git_odb_backend_read_callback
-odbGitHubBackendReadCallback data_p len_p type_p be oid = undefined
-  -- catch go (\e -> print (e :: IOException) >> return (-1))
-  -- where
-  --   go = do
-  --     odbGitHub  <- peek (castPtr be :: Ptr OdbGitHubBackend)
-  --     oidStr <- oidToStr oid
-  --     blocks <- runResourceT $ do
-  --       result <- getFileGitHub odbGitHub (T.pack oidStr) Nothing
-  --       result $$+- consume
-  --     case blocks of
-  --       [] -> return (-1)
-  --       bs -> do
-  --         let hdrLen = sizeOf (undefined :: Int64) * 2
-  --             (len,typ) =
-  --                 mapPair fromIntegral $
-  --                 (decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
-  --         content <- mallocBytes len
-  --         foldM (\offset x -> do
-  --                 let xOffset = if offset == 0 then hdrLen else 0
-  --                     innerLen = B.length x - xOffset
-  --                 unsafeUseAsCString x $ \cstr ->
-  --                     copyBytes (content `plusPtr` offset)
-  --                               (cstr `plusPtr` xOffset) innerLen
-  --                 return (offset + innerLen)) 0 bs
-  --         poke len_p (fromIntegral len)
-  --         poke type_p (fromIntegral typ)
-  --         poke data_p (castPtr content)
-  --         return 0
+odbGitHubBackendReadCallback data_p len_p type_p be oid =
+    catch go (\e -> print (e :: IOException) >> return (-1))
+  where
+    go = do
+        odbGitHub <- peek (castPtr be :: Ptr OdbGitHubBackend)
+        oidStr    <- oidToStr oid
+        manager   <- liftIO $ deRefStablePtr (httpManager odbGitHub)
+        owner     <- liftIO $ deRefStablePtr (ownerName odbGitHub)
+        repoName  <- liftIO $ deRefStablePtr (gitHubRepo odbGitHub)
+        token     <- liftIO $ deRefStablePtr (gitHubToken odbGitHub)
+        ghBlob    <- runResourceT $ withRestfulEnvAndMgr manager
+                         (for_ token $ \tok ->
+                               addHeader "Authorization" ("token " <> tok))
+                         (gitHubReadBlob owner repoName (pack oidStr))
+        case ghBlob of
+          Failure _ -> return (-1)
+          Success blob -> do
+              let len = ghBlobSize blob
+              content <- mallocBytes len
+              unsafeUseAsCString (ghBlobContent blob) $ \cstr ->
+                  copyBytes content cstr len
+              poke len_p (fromIntegral len)
+              poke type_p c'GIT_OBJ_BLOB
+              poke data_p (castPtr content)
+              return 0
 
 odbGitHubBackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
 odbGitHubBackendReadPrefixCallback out_oid oid_p len_p type_p be oid len =
@@ -438,17 +422,18 @@ odbGitHubBackendFreeCallback be = do
 
   odbGitHub <- peek (castPtr be :: Ptr OdbGitHubBackend)
   freeStablePtr (httpManager odbGitHub)
-  freeStablePtr (bucketName odbGitHub)
-  freeStablePtr (objectPrefix odbGitHub)
+  freeStablePtr (ownerName odbGitHub)
+  freeStablePtr (gitHubRepo odbGitHub)
+  freeStablePtr (gitHubToken odbGitHub)
 
 foreign export ccall "odbGitHubBackendFreeCallback"
   odbGitHubBackendFreeCallback :: F'git_odb_backend_free_callback
 foreign import ccall "&odbGitHubBackendFreeCallback"
   odbGitHubBackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-odbGitHubBackend :: Manager -> Text -> Text
+odbGitHubBackend :: Manager -> Text -> Text -> Maybe Text
                  -> IO (Ptr C'git_odb_backend)
-odbGitHubBackend manager bucket prefix = do
+odbGitHubBackend manager owner repoName token = do
   readFun <- mk'git_odb_backend_read_callback odbGitHubBackendReadCallback
   readPrefixFun <-
     mk'git_odb_backend_read_prefix_callback odbGitHubBackendReadPrefixCallback
@@ -457,9 +442,10 @@ odbGitHubBackend manager bucket prefix = do
   writeFun  <- mk'git_odb_backend_write_callback odbGitHubBackendWriteCallback
   existsFun <- mk'git_odb_backend_exists_callback odbGitHubBackendExistsCallback
 
-  manager' <- newStablePtr manager
-  bucket'  <- newStablePtr bucket
-  prefix'  <- newStablePtr prefix
+  manager'  <- newStablePtr manager
+  owner'    <- newStablePtr owner
+  repoName' <- newStablePtr repoName
+  token'    <- newStablePtr token
 
   castPtr <$> new OdbGitHubBackend {
     odbGitHubParent = C'git_odb_backend {
@@ -472,45 +458,32 @@ odbGitHubBackend manager bucket prefix = do
        , c'git_odb_backend'writestream = nullFunPtr
        , c'git_odb_backend'exists      = existsFun
        , c'git_odb_backend'free        = odbGitHubBackendFreeCallbackPtr }
-    , httpManager     = manager'
-    , bucketName      = bucket'
-    , objectPrefix    = prefix' }
+    , httpManager = manager'
+    , ownerName   = owner'
+    , gitHubRepo  = repoName'
+    , gitHubToken = token' }
 
-createGitHubBackend :: Text       -- ^ bucket
-                    -> Text       -- ^ prefix
-                    -> Text       -- ^ access key
-                    -> Text       -- ^ secret key
+createGitHubBackend :: Text       -- ^ owner
+                    -> Text       -- ^ repo
+                    -> Maybe Text -- ^ token
                     -> Maybe Manager
-                    -> Maybe Text -- ^ mock address
                     -> Bool       -- ^ tracing?
                     -> Repository
                     -> IO Repository
-createGitHubBackend
-    bucket prefix access secret mmanager mockAddr tracing repo = undefined -- do
-    -- manager <- maybe (newManager def) return mmanager
-    -- odbGitHub <-
-    --   odbGitHubBackend
-    --     (case mockAddr of
-    --         Nothing   -> defServiceConfig
-    --         Just addr -> (gitHub HTTP (E.encodeUtf8 addr) False) {
-    --                            gitHubPort         = 10001
-    --                          , gitHubRequestStyle = PathStyle })
-    --     (Configuration Timestamp Credentials {
-    --           accessKeyID     = E.encodeUtf8 access
-    --         , secretAccessKey = E.encodeUtf8 secret }
-    --      (defaultLog level))
-    --     manager bucket prefix
+createGitHubBackend owner repoName token mmanager tracing repo = do
+    manager <- maybe (newManager def) return mmanager
+    odbGitHub <-
+      odbGitHubBackend manager owner repoName token
 
-    -- if tracing
-    --   then do backend <- traceBackend odbGitHub
-    --           odbBackendAdd repo backend 100
-    --   else odbBackendAdd repo odbGitHub 100
+    if tracing
+      then do backend <- traceBackend odbGitHub
+              odbBackendAdd repo backend 100
+      else odbBackendAdd repo odbGitHub 100
 
-    -- -- Start by reading in the known refs from GitHub
-    -- mirrorRefsFromGitHub odbGitHub repo
-
-    -- -- Whenever a ref is written, update the refs in GitHub
-    -- let onWrite = const $ mirrorRefsToGitHub odbGitHub repo
-    -- return repo { repoOnWriteRef = onWrite : repoOnWriteRef repo }
+    -- Whenever a ref is written, update the refs in GitHub
+    let beforeRead = undefined
+        onWrite    = undefined
+    return repo { repoBeforeReadRef = beforeRead : repoBeforeReadRef repo
+                , repoOnWriteRef    = onWrite : repoOnWriteRef repo }
 
 -- GitHub.hs
