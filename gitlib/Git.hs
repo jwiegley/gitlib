@@ -11,6 +11,7 @@ import           Control.Applicative
 import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
@@ -18,6 +19,7 @@ import           Data.Conduit
 import qualified Data.Conduit.List as CList
 import           Data.Default
 import           Data.Foldable
+import           Data.Function.Pointless
 import           Data.Hex
 import           Data.Proxy
 import           Data.Tagged
@@ -40,50 +42,47 @@ import           Text.Printf
 class Repository m where
     -- References
     lookupRef  :: Text -> m Reference
-    updateRef  :: Text -> Reference r -> m Reference
-    updateRef_ :: Text -> Reference r -> m ()
-    updateRef_ repo name ref = void (updateRef repo name ref)
+    updateRef  :: Text -> Reference -> m Reference
+    updateRef_ :: Text -> Reference -> m ()
+    updateRef_ = void .: updateRef
 
     traverseRefs :: Traversable t => (Reference -> m b) -> m (t b)
 
     resolveRef :: Text -> m Oid
-    resolveRef repo name = lookupRef repo name >>= \ref ->
+    resolveRef name = lookupRef name >>= \ref ->
         case ref of
-            Reference { refTarget = RefOid oid } ->
-                return oid
+            Reference { refTarget = RefOid oid } -> return oid
             Reference { refTarget = RefSymbolic name' } ->
                 if name /= name'
-                then resolveRef repo name'
+                then resolveRef name'
                 else failure (ReferenceLookupFailed name)
 
     -- Lookup
     -- jww (2013-01-27): Allow lookup by partial oid
     lookupObject :: Proxy a -> Oid -> m a
 
-    lookupCommit :: Commit a => Oid -> m a
-    lookupCommit = lookupObject (Proxy :: Proxy a)
+    lookupCommit :: Oid -> m Commit
+    lookupCommit = lookupObject (Proxy :: Proxy Commit)
 
-    lookupCommitFromRef :: Commit a => Text -> m a
-    lookupCommitFromRef repo name =
-        resolveRef repo name >>= lookupCommit repo
+    lookupCommitRef :: Text -> m Commit
+    lookupCommitRef = resolveRef >=> lookupCommit
 
-    lookupTree :: Tree a => Oid -> m a
-    lookupTree = lookupObject (Proxy :: Proxy a)
+    lookupTree :: Oid -> m Tree
+    lookupTree = lookupObject (Proxy :: Proxy Commit)
 
-    lookupBlob :: Blob a => Oid -> m a
-    lookupBlob = lookupObject (Proxy :: Proxy a)
+    lookupBlob :: Oid -> m (Blob m)
+    lookupBlob = lookupObject (Proxy :: Proxy Commit)
 
-    lookupTag :: Tag a => Oid -> m a
-    lookupTag = lookupObject (Proxy :: Proxy a)
+    lookupTag :: Oid -> m Tag
+    lookupTag = lookupObject (Proxy :: Proxy Commit)
 
-    lookupTagFromRef :: Tag a => Text -> m a
-    lookupTagFromRef repo name =
-        resolveRef repo name >>= lookupTag repo
+    lookupTagRef :: Text -> m Tag
+    lookupTagRef = resolveRef >=> lookupTag
 
     -- Object creation
-    newTree :: Tree a => m a
+    newTree :: m Tree
 
-    createBlob :: Blob b => ByteString -> m b
+    createBlob :: ByteSource m -> m (BlobOid m)
     createCommit :: (Commit c, Tree t) => [ObjRef c] -> ObjRef t
                     -> Signature -> Signature -> Text -> m c
 
@@ -114,111 +113,91 @@ data Exception = RepositoryNotExist FilePath
 
 instance Exc.Exception Exception
 
-newtype Oid = Oid ByteString deriving (Eq)
+newtype Oid = Oid ByteString deriving Eq
 
 instance Show Oid where
     show x = BC.unpack (hex x)
 
-data RefTarget = RefOid Oid
-               | RefSymbolic Text
-               deriving (Show, Eq)
+newtype BlobOid m = BlobOid (Tagged (Blob m) Oid) deriving Eq
+newtype TreeOid   = TreeOid (Tagged Tree Oid)     deriving Eq
+newtype CommitOid = CommitOid (Tagged Commit Oid) deriving Eq
+newtype TagOid    = TagOid (Tagged Tag Oid)       deriving Eq
 
-data Reference a = Reference { refRepo   :: a
-                             , refName   :: Text
-                             , refTarget :: RefTarget }
-                 deriving (Show, Eq)
+data RefTarget = RefOid Oid | RefSymbolic Text deriving (Show, Eq)
+
+data Reference = Reference
+    { refName   :: Text
+    , refTarget :: RefTarget } deriving (Show, Eq)
 
 class Object o where
-    repository :: Repository r => o -> r
-    update     :: o -> m o
-    oid        :: o -> m (o,Oid)
-
-    update_ :: o -> m ()
+    update :: Repository m => o -> m (Tagged o Oid)
+    update_ :: Repository m => o -> m ()
     update_ = void . update
 
-data ObjRef a where
-    PendingObj :: Repository r => r -> Oid -> ObjRef a
-    KnownObj   :: a -> ObjRef a
+data ObjRef a = ByOid (Tagged a Oid) | Known a deriving Show
 
 resolveObjRef :: ObjRef a -> m a
 resolveObjRef objRef = case objRef of
-    PendingObj repo oid -> lookupObject (Proxy :: Proxy a) repo oid
-    KnownObj obj        -> return obj
-
-blobRef :: Blob b => b -> ObjRef b
-blobRef = KnownObj
+    ByOid oid -> lookupObject (Proxy :: Proxy a) oid
+    Known obj -> return obj
 
 treeRef :: Tree t => t -> ObjRef t
-treeRef = KnownObj
+treeRef = Known
 
 commitRef :: Commit c => c -> ObjRef c
-commitRef = KnownObj
+commitRef = Known
 
-type ByteSource = GSource IO ByteString
+type ByteSource m = GSource m ByteString
 
-data BlobContents = BlobEmpty
-                  | BlobString ByteString
-                  | BlobStream ByteSource
+data BlobContents m = BlobString ByteString
+                    | BlobStream (ByteSource m)
+                    | BlobSizedStream (ByteSource m) Int
 
-instance Eq BlobContents where
-  BlobEmpty       == BlobEmpty       = True
+instance Eq (BlobContents m) where
   BlobString str1 == BlobString str2 = str1 == str2
-  BlobStream src1 == BlobStream src2 = False
   _ == _ = False
 
-blobSourceToString :: BlobContents -> IO ByteString
-blobSourceToString BlobEmpty       = return B.empty
+blobSourceToString :: MonadIO m => BlobContents m -> m ByteString
 blobSourceToString (BlobString bs) = return bs
-blobSourceToString (BlobStream bs) = do strs <- bs $$ CList.consume
-                                        return (B.concat strs)
+blobSourceToString (BlobStream bs) = do
+    strs <- bs $$ CList.consume
+    return (B.concat strs)
+blobSourceToString (BlobSizedStream bs _) = do
+    strs <- bs $$ CList.consume
+    return (B.concat strs)
 
-class Object b => Blob b where
-    blobContents :: b -> m ByteString
-    blobLength   :: Integral l => b -> m l
+newtype Blob m = BlobContents m
 
-data TreeEntry where
-    BlobEntry :: Blob b => ObjRef b -> TreeEntry
-    TreeEntry :: Tree t => ObjRef t -> TreeEntry
+data TreeEntry m = BlobEntry (ObjRef (Blob m))
+                 | TreeEntry (ObjRef Tree)
 
-class Object t => Tree t where
-    treeEntry     :: t -> FilePath -> m TreeEntry
-    putBlobInTree :: Blob b => t -> FilePath -> ObjRef b -> t
-    putTreeInTree :: Tree t2 => t -> FilePath -> ObjRef t2 -> t
-    dropFromTree  :: t -> FilePath -> t
+data Tree = Tree
+    { treeEntry     :: Repository m => FilePath -> m (TreeEntry m)
+    , putBlobInTree :: Repository m => FilePath -> ObjRef (Blob m) -> m ()
+    , putTreeInTree :: Repository m => FilePath -> ObjRef Tree -> m ()
+    , dropFromTree  :: Repository m => FilePath -> m () }
 
-data Signature = Signature { signatureName  :: Text
-                           , signatureEmail :: Text
-                           , signatureWhen  :: UTCTime }
-               deriving (Show, Eq)
-
--- | Convert a time in seconds (from Stripe's servers) to 'UTCTime'. See
---   "Data.Time.Format" for more on working with 'UTCTime'.
-fromSeconds :: Integer -> UTCTime
-fromSeconds = posixSecondsToUTCTime . fromInteger
-
--- | Convert a 'UTCTime' back to an Integer suitable for use with Stripe's API.
-toSeconds :: UTCTime -> Integer
-toSeconds = round . utcTimeToPOSIXSeconds
+data Signature = Signature
+    { signatureName  :: Text
+    , signatureEmail :: Text
+    , signatureWhen  :: UTCTime } deriving (Show, Eq)
 
 instance Default Signature where
-    def = Signature { signatureName  = T.empty
-                    , signatureEmail = T.empty
-                    , signatureWhen  =
-                        UTCTime { utctDay =
-                                       ModifiedJulianDay {
-                                           toModifiedJulianDay = 0 }
-                                , utctDayTime = secondsToDiffTime 0 } }
+    def = Signature
+        { signatureName  = T.empty
+        , signatureEmail = T.empty
+        , signatureWhen  =
+            UTCTime { utctDay = ModifiedJulianDay { toModifiedJulianDay = 0 }
+                    , utctDayTime = secondsToDiffTime 0 } }
 
-class Object c => Commit c where
-    commitParents :: c -> [ObjRef c]
-    commitParents' :: c -> m [c]
+data Commit = Commit
+    { commitParents :: Repository m => m [ObjRef Commit]
+    , commitTree    :: Repository m => m (ObjRef Tree)
+    , commitTree'   :: Repository m => m Tree }
 
-    commitTree :: Tree t => c -> ObjRef t
-    commitTree' :: Tree t => c -> m t
-    commitTree' = resolveObjRef . commitTree
-
-class Commit t => Tag t where
-    tagCommit :: Commit c => t -> m (ObjRef c)
+data Tag = Tag
+    { tagCommit  :: Repository m => m (ObjRef Commit)
+    , tagCommit' :: Repository m => m Commit }
 
 parseOid :: Text -> m Oid
 parseOid oid
