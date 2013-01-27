@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE KindSignatures #-}
 
 -- | Interface for working with Git repositories.
 module Git where
@@ -35,6 +36,7 @@ import           Filesystem.Path.CurrentOS
 import           Prelude hiding (FilePath)
 import           Text.Printf
 
+{- $repositories -}
 -- | A 'Repository' is the central point of contact between user code and Git
 -- data objects.  Every object must belong to some repository.
 --
@@ -83,9 +85,10 @@ class Repository m where
     newTree :: m Tree
 
     createBlob :: ByteSource m -> m (BlobOid m)
-    createCommit :: (Commit c, Tree t) => [ObjRef c] -> ObjRef t
-                    -> Signature -> Signature -> Text -> m c
+    createCommit :: [ObjRef Commit] -> ObjRef Tree -> Signature -> Signature
+                    -> Text -> m c
 
+{- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
 data Exception = RepositoryNotExist FilePath
@@ -113,6 +116,7 @@ data Exception = RepositoryNotExist FilePath
 
 instance Exc.Exception Exception
 
+{- $oids -}
 newtype Oid = Oid ByteString deriving Eq
 
 instance Show Oid where
@@ -123,12 +127,20 @@ newtype TreeOid   = TreeOid (Tagged Tree Oid)     deriving Eq
 newtype CommitOid = CommitOid (Tagged Commit Oid) deriving Eq
 newtype TagOid    = TagOid (Tagged Tag Oid)       deriving Eq
 
+parseOid :: Text -> m Oid
+parseOid oid
+    | len /= 40 = failure (OidParseFailed oid)
+    | otherwise = unhex (T.encodeUtf8 oid)
+  where len = T.length oid
+
+{- $references -}
 data RefTarget = RefOid Oid | RefSymbolic Text deriving (Show, Eq)
 
 data Reference = Reference
     { refName   :: Text
     , refTarget :: RefTarget } deriving (Show, Eq)
 
+{- $objects -}
 class Object o where
     update :: Repository m => o -> m (Tagged o Oid)
     update_ :: Repository m => o -> m ()
@@ -141,11 +153,8 @@ resolveObjRef objRef = case objRef of
     ByOid oid -> lookupObject (Proxy :: Proxy a) oid
     Known obj -> return obj
 
-treeRef :: Tree t => t -> ObjRef t
-treeRef = Known
-
-commitRef :: Commit c => c -> ObjRef c
-commitRef = Known
+{- $blobs -}
+newtype Blob m = Blob (BlobContents m)
 
 type ByteSource m = GSource m ByteString
 
@@ -166,8 +175,7 @@ blobSourceToString (BlobSizedStream bs _) = do
     strs <- bs $$ CList.consume
     return (B.concat strs)
 
-newtype Blob m = BlobContents m
-
+{- $trees -}
 data TreeEntry m = BlobEntry (ObjRef (Blob m))
                  | TreeEntry (ObjRef Tree)
 
@@ -176,6 +184,9 @@ data Tree = Tree
     , putBlobInTree :: Repository m => FilePath -> ObjRef (Blob m) -> m ()
     , putTreeInTree :: Repository m => FilePath -> ObjRef Tree -> m ()
     , dropFromTree  :: Repository m => FilePath -> m () }
+
+treeRef :: Tree -> ObjRef Tree
+treeRef = Known
 
 data Signature = Signature
     { signatureName  :: Text
@@ -190,19 +201,18 @@ instance Default Signature where
             UTCTime { utctDay = ModifiedJulianDay { toModifiedJulianDay = 0 }
                     , utctDayTime = secondsToDiffTime 0 } }
 
+{- $commits -}
 data Commit = Commit
     { commitParents :: Repository m => m [ObjRef Commit]
     , commitTree    :: Repository m => m (ObjRef Tree)
     , commitTree'   :: Repository m => m Tree }
 
+commitRef :: Commit -> ObjRef Commit
+commitRef = Known
+
+{- $tags -}
 data Tag = Tag
     { tagCommit  :: Repository m => m (ObjRef Commit)
     , tagCommit' :: Repository m => m Commit }
-
-parseOid :: Text -> m Oid
-parseOid oid
-    | len /= 40 = failure (OidParseFailed oid)
-    | otherwise = unhex (T.encodeUtf8 oid)
-  where len = T.length oid
 
 -- Repository.hs
