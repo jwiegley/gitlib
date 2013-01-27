@@ -37,16 +37,16 @@ import           Text.Printf
 -- data objects.  Every object must belong to some repository.
 --
 -- Minimal complete definition: 'lookupRef', 'updateRef', 'lookupObject'.
-class Repository r where
+class Repository m where
     -- References
-    lookupRef  :: r -> Text -> GitM (Reference r)
-    updateRef  :: r -> Text -> Reference r -> GitM (Reference r)
-    updateRef_ :: r -> Text -> Reference r -> GitM ()
+    lookupRef  :: Text -> m Reference
+    updateRef  :: Text -> Reference r -> m Reference
+    updateRef_ :: Text -> Reference r -> m ()
     updateRef_ repo name ref = void (updateRef repo name ref)
 
-    traverseRefs :: Traversable t => r -> (Reference r -> GitM b) -> GitM (t b)
+    traverseRefs :: Traversable t => (Reference -> m b) -> m (t b)
 
-    resolveRef :: r -> Text -> GitM Oid
+    resolveRef :: Text -> m Oid
     resolveRef repo name = lookupRef repo name >>= \ref ->
         case ref of
             Reference { refTarget = RefOid oid } ->
@@ -57,34 +57,35 @@ class Repository r where
                 else failure (ReferenceLookupFailed name)
 
     -- Lookup
-    lookupObject :: Proxy a -> r -> Oid -> GitM a
+    -- jww (2013-01-27): Allow lookup by partial oid
+    lookupObject :: Proxy a -> Oid -> m a
 
-    lookupCommit :: Commit a => r -> Oid -> GitM a
+    lookupCommit :: Commit a => Oid -> m a
     lookupCommit = lookupObject (Proxy :: Proxy a)
 
-    lookupCommitFromRef :: Commit a => r -> Text -> GitM a
+    lookupCommitFromRef :: Commit a => Text -> m a
     lookupCommitFromRef repo name =
         resolveRef repo name >>= lookupCommit repo
 
-    lookupTree :: Tree a => r -> Oid -> GitM a
+    lookupTree :: Tree a => Oid -> m a
     lookupTree = lookupObject (Proxy :: Proxy a)
 
-    lookupBlob :: Blob a => r -> Oid -> GitM a
+    lookupBlob :: Blob a => Oid -> m a
     lookupBlob = lookupObject (Proxy :: Proxy a)
 
-    lookupTag :: Tag a => r -> Oid -> GitM a
+    lookupTag :: Tag a => Oid -> m a
     lookupTag = lookupObject (Proxy :: Proxy a)
 
-    lookupTagFromRef :: Tag a => r -> Text -> GitM a
+    lookupTagFromRef :: Tag a => Text -> m a
     lookupTagFromRef repo name =
         resolveRef repo name >>= lookupTag repo
 
     -- Object creation
-    newTree :: Tree a => r -> a
+    newTree :: Tree a => m a
 
-    createBlob :: Blob b => r -> ByteString -> GitM b
-    createCommit :: (Commit c, Tree t) => r -> [ObjRef c] -> ObjRef t
-                    -> Signature -> Signature -> Text -> GitM c
+    createBlob :: Blob b => ByteString -> m b
+    createCommit :: (Commit c, Tree t) => [ObjRef c] -> ObjRef t
+                    -> Signature -> Signature -> Text -> m c
 
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
@@ -113,13 +114,10 @@ data Exception = RepositoryNotExist FilePath
 
 instance Exc.Exception Exception
 
-data Oid = FullOid ByteString
-         | PartialOid ByteString Int
-         deriving (Eq)
+newtype Oid = Oid ByteString deriving (Eq)
 
 instance Show Oid where
-    show (FullOid x)      = BC.unpack (hex x)
-    show (PartialOid x _) = BC.unpack (hex x)
+    show x = BC.unpack (hex x)
 
 data RefTarget = RefOid Oid
                | RefSymbolic Text
@@ -130,21 +128,19 @@ data Reference a = Reference { refRepo   :: a
                              , refTarget :: RefTarget }
                  deriving (Show, Eq)
 
-type GitM a = (Applicative m, Monad m, Failure Exception m) => m a
-
 class Object o where
     repository :: Repository r => o -> r
-    update     :: o -> GitM o
-    oid        :: o -> GitM (o,Oid)
+    update     :: o -> m o
+    oid        :: o -> m (o,Oid)
 
-    update_ :: o -> GitM ()
+    update_ :: o -> m ()
     update_ = void . update
 
 data ObjRef a where
     PendingObj :: Repository r => r -> Oid -> ObjRef a
     KnownObj   :: a -> ObjRef a
 
-resolveObjRef :: ObjRef a -> GitM a
+resolveObjRef :: ObjRef a -> m a
 resolveObjRef objRef = case objRef of
     PendingObj repo oid -> lookupObject (Proxy :: Proxy a) repo oid
     KnownObj obj        -> return obj
@@ -165,30 +161,30 @@ data BlobContents = BlobEmpty
                   | BlobStream ByteSource
 
 instance Eq BlobContents where
-  BlobEmpty == BlobEmpty = True
+  BlobEmpty       == BlobEmpty       = True
   BlobString str1 == BlobString str2 = str1 == str2
   BlobStream src1 == BlobStream src2 = False
   _ == _ = False
 
 blobSourceToString :: BlobContents -> IO ByteString
-blobSourceToString BlobEmpty = return B.empty
+blobSourceToString BlobEmpty       = return B.empty
 blobSourceToString (BlobString bs) = return bs
 blobSourceToString (BlobStream bs) = do strs <- bs $$ CList.consume
                                         return (B.concat strs)
 
 class Object b => Blob b where
-    blobContents :: b -> GitM ByteString
-    blobLength   :: Integral l => b -> GitM l
+    blobContents :: b -> m ByteString
+    blobLength   :: Integral l => b -> m l
 
 data TreeEntry where
     BlobEntry :: Blob b => ObjRef b -> TreeEntry
     TreeEntry :: Tree t => ObjRef t -> TreeEntry
 
 class Object t => Tree t where
-    treeEntry :: t -> FilePath -> GitM TreeEntry
+    treeEntry     :: t -> FilePath -> m TreeEntry
     putBlobInTree :: Blob b => t -> FilePath -> ObjRef b -> t
     putTreeInTree :: Tree t2 => t -> FilePath -> ObjRef t2 -> t
-    dropFromTree :: t -> FilePath -> t
+    dropFromTree  :: t -> FilePath -> t
 
 data Signature = Signature { signatureName  :: Text
                            , signatureEmail :: Text
@@ -215,20 +211,19 @@ instance Default Signature where
 
 class Object c => Commit c where
     commitParents :: c -> [ObjRef c]
-    commitParents' :: c -> GitM [c]
+    commitParents' :: c -> m [c]
 
     commitTree :: Tree t => c -> ObjRef t
-    commitTree' :: Tree t => c -> GitM t
+    commitTree' :: Tree t => c -> m t
     commitTree' = resolveObjRef . commitTree
 
 class Commit t => Tag t where
-    tagCommit :: Commit c => t -> GitM (ObjRef c)
+    tagCommit :: Commit c => t -> m (ObjRef c)
 
-parseOid :: Text -> GitM Oid
+parseOid :: Text -> m Oid
 parseOid oid
-    | len > 40 = failure (OidParseFailed oid)
-    | otherwise = (if len == 40 then FullOid else flip PartialOid len)
-                  <$> unhex (T.encodeUtf8 oid)
+    | len /= 40 = failure (OidParseFailed oid)
+    | otherwise = unhex (T.encodeUtf8 oid)
   where len = T.length oid
 
 -- Repository.hs
