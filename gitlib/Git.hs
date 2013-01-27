@@ -41,7 +41,7 @@ import           Text.Printf
 -- data objects.  Every object must belong to some repository.
 --
 -- Minimal complete definition: 'lookupRef', 'updateRef', 'lookupObject'.
-class (Functor m, Monad m, Failure Exception m) => Repository m where
+class (Applicative m, Monad m, Failure Exception m) => Repository m where
     -- References
     lookupRef  :: Text -> m Reference
     updateRef  :: Text -> Reference -> m Reference
@@ -60,30 +60,19 @@ class (Functor m, Monad m, Failure Exception m) => Repository m where
                 else failure (ReferenceLookupFailed name)
 
     -- Lookup
-    -- jww (2013-01-27): Allow lookup by partial oid
-    lookupObject :: Proxy a -> Oid -> m a
-
     lookupCommit :: Oid -> m Commit
-    lookupCommit = lookupObject (Proxy :: Proxy Commit)
+    lookupTree :: Oid -> m Tree
+    lookupBlob :: Oid -> m (Blob m)
+    lookupTag :: Oid -> m Tag
 
     lookupCommitRef :: Text -> m Commit
     lookupCommitRef = resolveRef >=> lookupCommit
-
-    lookupTree :: Oid -> m Tree
-    lookupTree = lookupObject (Proxy :: Proxy Tree)
-
-    lookupBlob :: Oid -> m (Blob m)
-    lookupBlob = lookupObject (Proxy :: Proxy (Blob m))
-
-    lookupTag :: Oid -> m Tag
-    lookupTag = lookupObject (Proxy :: Proxy Tag)
 
     lookupTagRef :: Text -> m Tag
     lookupTagRef = resolveRef >=> lookupTag
 
     -- Object creation
     newTree :: m Tree
-
     createBlob :: ByteSource m -> m (BlobOid m)
     createCommit :: [ObjRef Commit] -> ObjRef Tree -> Signature -> Signature
                     -> Text -> m c
@@ -122,14 +111,15 @@ newtype Oid = Oid ByteString deriving Eq
 instance Show Oid where
     show (Oid x) = BC.unpack (hex x)
 
-newtype BlobOid m = BlobOid (Tagged (Blob m) Oid) deriving Eq
-newtype TreeOid   = TreeOid (Tagged Tree Oid)     deriving Eq
-newtype CommitOid = CommitOid (Tagged Commit Oid) deriving Eq
-newtype TagOid    = TagOid (Tagged Tag Oid)       deriving Eq
+type BlobOid m = Tagged (Blob m) Oid
+type TreeOid   = Tagged Tree Oid
+type CommitOid = Tagged Commit Oid
+type TagOid    = Tagged Tag Oid
 
 parseOid :: Repository m => Text -> m Oid
 parseOid oid
     | len /= 40 = failure (OidParseFailed oid)
+    -- jww (2013-01-27): If unhex fails, rewrap the error using "failure"
     | otherwise = Oid <$> unhex (T.encodeUtf8 oid)
   where len = T.length oid
 
@@ -138,7 +128,8 @@ data RefTarget = RefOid Oid | RefSymbolic Text deriving (Show, Eq)
 
 data Reference = Reference
     { refName   :: Text
-    , refTarget :: RefTarget } deriving (Show, Eq)
+    , refTarget :: RefTarget
+    } deriving (Show, Eq)
 
 {- $objects -}
 class Object o where
@@ -146,12 +137,16 @@ class Object o where
     update_ :: Repository m => o -> m ()
     update_ = void . update
 
-data ObjRef a = ByOid (Tagged a Oid) | Known a deriving Show
+data ObjRef a = ByOid (Tagged a Oid) | Known a
 
-resolveObjRef :: Repository m => ObjRef a -> m a
-resolveObjRef objRef = case objRef of
-    ByOid oid -> lookupObject (Proxy :: Proxy a) (unTagged oid)
-    Known obj -> return obj
+instance Object a => Object (ObjRef a) where
+    update (ByOid oid) = return (retag oid)
+    update (Known obj) = retag <$> update obj
+
+-- resolveObjRef :: Repository m => ObjRef a -> m a
+-- resolveObjRef objRef = case objRef of
+--     ByOid oid -> lookupObject (Proxy :: Proxy a) (unTagged oid)
+--     Known obj -> return obj
 
 {- $blobs -}
 newtype Blob m = Blob (BlobContents m)
@@ -183,7 +178,8 @@ data Tree = Tree
     { treeEntry     :: Repository m => FilePath -> m (TreeEntry m)
     , putBlobInTree :: Repository m => FilePath -> ObjRef (Blob m) -> m ()
     , putTreeInTree :: Repository m => FilePath -> ObjRef Tree -> m ()
-    , dropFromTree  :: Repository m => FilePath -> m () }
+    , dropFromTree  :: Repository m => FilePath -> m ()
+    }
 
 treeRef :: Tree -> ObjRef Tree
 treeRef = Known
@@ -191,7 +187,8 @@ treeRef = Known
 data Signature = Signature
     { signatureName  :: Text
     , signatureEmail :: Text
-    , signatureWhen  :: UTCTime } deriving (Show, Eq)
+    , signatureWhen  :: UTCTime
+    } deriving (Show, Eq)
 
 instance Default Signature where
     def = Signature
@@ -199,13 +196,15 @@ instance Default Signature where
         , signatureEmail = T.empty
         , signatureWhen  =
             UTCTime { utctDay = ModifiedJulianDay { toModifiedJulianDay = 0 }
-                    , utctDayTime = secondsToDiffTime 0 } }
+                    , utctDayTime = secondsToDiffTime 0 }
+        }
 
 {- $commits -}
 data Commit = Commit
     { commitParents :: Repository m => m [ObjRef Commit]
     , commitTree    :: Repository m => m (ObjRef Tree)
-    , commitTree'   :: Repository m => m Tree }
+    , commitTree'   :: Repository m => m Tree
+    }
 
 commitRef :: Commit -> ObjRef Commit
 commitRef = Known
@@ -213,6 +212,7 @@ commitRef = Known
 {- $tags -}
 data Tag = Tag
     { tagCommit  :: Repository m => m (ObjRef Commit)
-    , tagCommit' :: Repository m => m Commit }
+    , tagCommit' :: Repository m => m Commit
+    }
 
 -- Repository.hs
