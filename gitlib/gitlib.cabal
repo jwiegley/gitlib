@@ -1,5 +1,5 @@
 Name:                gitlib
-Version:             0.7.1
+Version:             1.0.0
 Synopsis:            Higher-level types for working with hlibgit2
 License-file:        LICENSE
 License:             MIT
@@ -16,7 +16,7 @@ Description:
   laziness and the conduit library's deterministic resource cleanup.
   .
   For further information, as well as typical use cases, see
-  "Data.Git.Tutorial".
+  "Git.Tutorial".
 
 Source-repository head
   type: git
@@ -60,29 +60,33 @@ Library
     , bytestring      >= 0.9.2.1
     , conduit         >= 0.5.5
     , containers      >= 0.4.2
-    , lens            >= 2.8
+    , data-default    >= 0.5.0
+    , failure         >= 0.2.0.1
+    , hex             >= 0.1.2
+    , lens            >= 3.7
     , parallel-io     >= 0.3.2.1
+    , pointless-fun   >= 1.1.0.1
     , stringable      >= 0.1.1
     , system-fileio   >= 0.3.9
     , system-filepath >= 0.4.7
+    , tagged          >= 0.2.3.1
     , text            >= 0.11.2
     , text-icu        >= 0.6.3
     , time            >= 1.4
+    , transformers    >= 0.3.0.0
   exposed-modules:
-    Data.Git
-    Data.Git.Backend
-    Data.Git.Backend.Trace
-    Data.Git.Blob
-    Data.Git.Commit
-    Data.Git.Common
-    Data.Git.Error
-    Data.Git.Internal
-    Data.Git.Object
-    Data.Git.Oid
-    Data.Git.Reference
-    Data.Git.Repository
-    Data.Git.Tag
-    Data.Git.Tree
-    Data.Git.Tutorial
+    Git
+    Git.Backend.Libgit2
+    -- Git.Backend.Trace
+    -- Git.Blob
+    -- Git.Commit
+    -- Git.Common
+    -- Git.Internal
+    -- Git.Object
+    -- Git.Oid
+    -- Git.Reference
+    -- Git.Tag
+    -- Git.Tree
+    -- Git.Tutorial
   -- other-modules:
-  --   Data.Git.Internal
+  --   Git.Internal

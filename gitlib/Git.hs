@@ -41,7 +41,7 @@ import           Text.Printf
 -- data objects.  Every object must belong to some repository.
 --
 -- Minimal complete definition: 'lookupRef', 'updateRef', 'lookupObject'.
-class Repository m where
+class (Functor m, Monad m, Failure Exception m) => Repository m where
     -- References
     lookupRef  :: Text -> m Reference
     updateRef  :: Text -> Reference -> m Reference
@@ -70,13 +70,13 @@ class Repository m where
     lookupCommitRef = resolveRef >=> lookupCommit
 
     lookupTree :: Oid -> m Tree
-    lookupTree = lookupObject (Proxy :: Proxy Commit)
+    lookupTree = lookupObject (Proxy :: Proxy Tree)
 
     lookupBlob :: Oid -> m (Blob m)
-    lookupBlob = lookupObject (Proxy :: Proxy Commit)
+    lookupBlob = lookupObject (Proxy :: Proxy (Blob m))
 
     lookupTag :: Oid -> m Tag
-    lookupTag = lookupObject (Proxy :: Proxy Commit)
+    lookupTag = lookupObject (Proxy :: Proxy Tag)
 
     lookupTagRef :: Text -> m Tag
     lookupTagRef = resolveRef >=> lookupTag
@@ -120,17 +120,17 @@ instance Exc.Exception Exception
 newtype Oid = Oid ByteString deriving Eq
 
 instance Show Oid where
-    show x = BC.unpack (hex x)
+    show (Oid x) = BC.unpack (hex x)
 
 newtype BlobOid m = BlobOid (Tagged (Blob m) Oid) deriving Eq
 newtype TreeOid   = TreeOid (Tagged Tree Oid)     deriving Eq
 newtype CommitOid = CommitOid (Tagged Commit Oid) deriving Eq
 newtype TagOid    = TagOid (Tagged Tag Oid)       deriving Eq
 
-parseOid :: Text -> m Oid
+parseOid :: Repository m => Text -> m Oid
 parseOid oid
     | len /= 40 = failure (OidParseFailed oid)
-    | otherwise = unhex (T.encodeUtf8 oid)
+    | otherwise = Oid <$> unhex (T.encodeUtf8 oid)
   where len = T.length oid
 
 {- $references -}
@@ -148,9 +148,9 @@ class Object o where
 
 data ObjRef a = ByOid (Tagged a Oid) | Known a deriving Show
 
-resolveObjRef :: ObjRef a -> m a
+resolveObjRef :: Repository m => ObjRef a -> m a
 resolveObjRef objRef = case objRef of
-    ByOid oid -> lookupObject (Proxy :: Proxy a) oid
+    ByOid oid -> lookupObject (Proxy :: Proxy a) (unTagged oid)
     Known obj -> return obj
 
 {- $blobs -}
