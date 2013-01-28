@@ -84,6 +84,7 @@ Library
         , transformers    >= 0.3.0.0
     exposed-modules:
         Git
+        Git.Utils
         Git.Libgit2
         Git.Libgit2.Backend
         Git.Libgit2.Internal

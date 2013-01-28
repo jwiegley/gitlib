@@ -7,6 +7,7 @@ module Data.Git.Backend.Trace ( traceBackend ) where
 
 import           Data.ByteString.Unsafe
 import           Debug.Trace (trace)
+import           Foreign.Storable
 import qualified Git
 import           Git.Libgit2
 import           Prelude hiding ((.), mapM_)

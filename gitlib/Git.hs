@@ -278,17 +278,19 @@ instance Default Signature where
                     , utctDayTime = secondsToDiffTime 0 }
         }
 
-class Repository CommitRepository => Commitish c where
+class (Repository CommitRepository, Treeish c) => Commitish c where
     type CommitRepository :: * -> *
 
     commitOid     :: c -> CommitOid CommitRepository
     commitParents :: c -> [CommitOid CommitRepository]
-    commitTree    :: c -> TreeOid CommitRepository
+    commitTree    :: c -> ObjRef (Tree CommitRepository)
 
     commitTree' :: c -> CommitRepository (Tree CommitRepository)
-    commitTree' = lookupTree . commitTree
+    commitTree' c = case commitTree c of
+        Known t   -> return t
+        ByOid oid -> lookupTree oid
 
-commitRef :: Commitish c => c -> ObjRef c
+commitRef :: Commit c -> ObjRef (Commit c)
 commitRef = Known
 
 resolveCommitRef :: Repository m => ObjRef (Commit m) -> m (Commit m)

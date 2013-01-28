@@ -77,7 +77,7 @@ instance Git.Repository LgRepository where
         , lgCommitCommitter :: Git.Signature
         , lgCommitLog       :: Text
         , lgCommitEncoding  :: String
-        , lgCommitTree      :: Git.TreeOid LgRepository
+        , lgCommitTree      :: Git.ObjRef Tree
         , lgCommitParents   :: [Git.CommitOid LgRepository] }
 
     lookupRef    = undefined
@@ -388,6 +388,12 @@ instance Git.Commitish Commit where
     commitParents = lgCommitParents
     commitTree    = lgCommitTree
 
+instance Git.Treeish Commit where
+    type TreeRepository = LgRepository
+    modifyTree c path createIfNotExist f =
+        Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
+    writeTree c = Git.commitTree' c >>= Git.writeTree
+
 lgLookupCommit :: Git.Oid -> LgRepository Commit
 lgLookupCommit oid =
   lookupObject' oid 40 c'git_commit_lookup
@@ -415,7 +421,7 @@ lgLookupCommit oid =
             { lgCommitInfo      = Base (Just coid) (Just obj)
             , lgCommitAuthor    = auth
             , lgCommitCommitter = comm
-            , lgCommitTree      = Tagged (coidPtrToOid toid)
+            , lgCommitTree      = Git.ByOid (Tagged (coidPtrToOid toid))
             , lgCommitParents   = map (Tagged . coidPtrToOid) poids
             , lgCommitLog       = U.toUnicode conv msg
             , lgCommitEncoding  = encs
@@ -458,7 +464,7 @@ lgCreateCommit parents tree author committer logText ref = do
         { lgCommitInfo      = Base (Just coid) Nothing
         , lgCommitAuthor    = author
         , lgCommitCommitter = committer
-        , lgCommitTree      = toid
+        , lgCommitTree      = tree
         , lgCommitParents   = parents
         , lgCommitLog       = logText
         , lgCommitEncoding  = "utf-8"

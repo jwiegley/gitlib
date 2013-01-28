@@ -1,3 +1,7 @@
+module Git.Utils where
+
+foo = undefined
+
 -- commitHistoryFirstParent :: Commit -> LgRepository [Commit]
 -- commitHistoryFirstParent c =
 --   case commitParents c of
@@ -46,4 +50,3 @@
 --                            Nothing -> error "Cannot find Git commit"
 --                            Just p' -> return p')
 --              (lgCommitParents c)
-
