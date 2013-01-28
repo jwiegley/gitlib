@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE KindSignatures #-}
 
 -- | Interface for working with Git repositories.
 module Git where
@@ -46,14 +46,19 @@ import System.IO.Unsafe
 -- data objects.  Every object must belong to some repository.
 --
 -- Minimal complete definition: 'lookupRef', 'updateRef', 'lookupObject'.
-class (Applicative m, Monad m, Failure Exception m) => Repository m where
+class (Applicative m, Monad m, Failure Exception m,
+       Tree TreeType, Object TreeType,
+       Commit CommitType, Object CommitType) => Repository m where
+    data TreeType :: *
+    data CommitType :: *
+
     -- References
     lookupRef  :: Text -> m Reference
     updateRef  :: Text -> Reference -> m Reference
     updateRef_ :: Text -> Reference -> m ()
     updateRef_ = void .: updateRef
 
-    traverseRefs :: Traversable t => (Reference -> m b) -> m (t b)
+    traverseRefs :: Traversable tr => (Reference -> m b) -> m (tr b)
     traverseRefs _ =
         failure (BackendError "Backend does not allow traversal of references")
 
@@ -71,22 +76,21 @@ class (Applicative m, Monad m, Failure Exception m) => Repository m where
     -- lookupObject _ =
     --     failure (BackendError "Cannot lookup arbitrary objects in this backend")
 
-    lookupCommit :: Commit c => Oid -> m c
-    lookupTree :: Tree t => Oid -> m t
-    lookupBlob :: Oid -> m (Blob m)
-    lookupTag :: Oid -> m Tag
+    lookupCommit :: Tagged c Oid -> m c
+    lookupTree :: Tagged t Oid -> m t
+    lookupBlob :: BlobOid m -> m (Blob m)
+    lookupTag :: TagOid -> m Tag
 
     lookupCommitRef :: Commit c => Text -> m c
-    lookupCommitRef = resolveRef >=> lookupCommit
+    lookupCommitRef = resolveRef >=> lookupCommit . Tagged
 
     lookupTagRef :: Text -> m Tag
-    lookupTagRef = resolveRef >=> lookupTag
+    lookupTagRef = resolveRef >=> lookupTag . Tagged
 
     -- Object creation
-    newTree :: Tree t => m t
+    newTree :: m t
     createBlob :: BlobContents m -> m (BlobOid m)
     createCommit ::
-        (Commit c, Tree t) =>
         [ObjRef c] -> ObjRef t -> Signature -> Signature -> Text -> m c
 
 {- $exceptions -}
@@ -206,7 +210,7 @@ blobToByteString :: Repository m => Blob m -> m ByteString
 blobToByteString = blobContentsToByteString . blobContents
 
 catBlob :: Repository m => Text -> m ByteString
-catBlob = parseOid >=> lookupBlob >=> blobToByteString
+catBlob = parseOid >=> lookupBlob . Tagged >=> blobToByteString
 
 catBlobUtf8 :: Repository m => Text -> m Text
 catBlobUtf8 = catBlob >=> return . T.decodeUtf8
@@ -223,7 +227,8 @@ instance Object (TreeEntry m) where
     update (BlobEntry bl _) = retag <$> update bl
     update (TreeEntry tr)   = retag <$> update tr
 
-blobEntry :: (Repository m, Object (Blob m)) => Blob m -> Bool -> TreeEntry m
+blobEntry ::
+    (Repository m, Object (Blob m)) => Blob m -> Bool -> TreeEntry m
 blobEntry b exe = BlobEntry (blobRef b) exe
 
 treeEntry :: (Repository m, Object t, Tree t) => t -> TreeEntry m
@@ -268,7 +273,7 @@ treeRef = Known
 
 resolveTreeRef :: (Repository m, Tree t) => ObjRef t -> m t
 resolveTreeRef objRef = case objRef of
-    ByOid oid -> lookupTree (unTagged oid)
+    ByOid oid -> lookupTree oid
     Known obj -> return obj
 
 {- $commits -}
@@ -297,13 +302,12 @@ commitRef = Known
 
 resolveCommitRef :: (Repository m, Commit c) => ObjRef c -> m c
 resolveCommitRef objRef = case objRef of
-    ByOid oid -> lookupCommit (unTagged oid)
+    ByOid oid -> lookupCommit oid
     Known obj -> return obj
 
 {- $tags -}
 data Tag = Tag
-    { tagCommit  :: (Repository m, Commit c) => m (ObjRef c)
-    , tagCommit' :: (Repository m, Commit c) => m c
+    { tagCommit :: Commit c => ObjRef c
     }
 
 -- Repository.hs

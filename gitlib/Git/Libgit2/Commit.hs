@@ -35,15 +35,6 @@ import qualified Foreign.ForeignPtr.Unsafe as FU
 import           Foreign.Marshal.Array
 import qualified Prelude
 
-data Commit = Commit { commitInfo      :: Base Commit
-                     , commitAuthor    :: Signature
-                     , commitCommitter :: Signature
-                     , commitLog       :: Text
-                     , commitEncoding  :: Prelude.String
-                     , commitTree      :: ObjRef Tree
-                     , commitParents   :: [ObjRef Commit]
-                     , commitObj       :: ObjPtr C'git_commit }
-
 instance Show Commit where
   show x = case gitId (commitInfo x) of
     Pending _ -> "Commit..."
