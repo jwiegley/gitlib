@@ -17,6 +17,7 @@ import           Data.Attempt
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
+import           Data.Char (toLower)
 import           Data.Conduit
 -- import           Data.Conduit.Internal
 import qualified Data.Conduit.List as CList
@@ -125,7 +126,7 @@ instance Exc.Exception Exception
 newtype Oid = Oid ByteString deriving Eq
 
 instance Show Oid where
-    show (Oid x) = BC.unpack (hex x)
+    show (Oid x) = map toLower (BC.unpack (hex x))
 
 type BlobOid m   = Tagged (Blob m) Oid
 type TreeOid m   = Tagged (Tree m) Oid
@@ -135,21 +136,18 @@ type TagOid      = Tagged Tag Oid
 -- | Parse an ASCII hex string into a Git 'Oid'.
 --
 -- >>> let x = "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
--- >>> assert $ show (parseOid x) == x
-parseOid :: Repository m => Text -> m Oid
+-- >>> parseOid (T.pack x)
+-- Just 2506e7fcc2dbfe4c083e2bd741871e2e14126603
+parseOid :: Text -> Maybe Oid
 parseOid oid
-    | T.length oid /= 40 = failure (OidParseFailed oid)
+    | T.length oid /= 40 = Nothing
     | otherwise =
         -- 'unsafePerformIO' is used to force 'unhex' to run in the 'IO'
         -- monad, so we can catch the exception on failure and repackage it
-        -- using 'Control.Failure'.  It were really better if 'unhex' returned
-        -- an 'Either' value instead of calling 'fail'.
-        let x = unsafePerformIO $
-                Exc.catch (Success <$> unhex (T.encodeUtf8 oid))
-                          (\e -> return (Failure (e :: Exc.IOException)))
-        in case x of
-            Success y -> return (Oid y)
-            Failure _ -> failure (OidParseFailed oid)
+        -- using 'Maybe'.  Why does 'unhex' have to be in IO at all?
+        unsafePerformIO $
+        Exc.catch (Just . Oid <$> unhex (T.encodeUtf8 oid))
+                  (\x -> (x :: Exc.IOException) `seq` return Nothing)
 
 {- $references -}
 data RefTarget = RefOid Oid | RefSymbolic Text deriving (Show, Eq)
@@ -199,7 +197,10 @@ blobToByteString :: Repository m => Blob m -> m ByteString
 blobToByteString = blobContentsToByteString . blobContents
 
 catBlob :: Repository m => Text -> m ByteString
-catBlob = parseOid >=> lookupBlob . Tagged >=> blobToByteString
+catBlob str = do
+    case parseOid str of
+        Nothing  -> failure (OidParseFailed str)
+        Just oid -> lookupBlob (Tagged oid) >>= blobToByteString
 
 catBlobUtf8 :: Repository m => Text -> m Text
 catBlobUtf8 = catBlob >=> return . T.decodeUtf8
