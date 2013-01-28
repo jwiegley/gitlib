@@ -11,21 +11,36 @@ module Git.Libgit2.Reference
        where
 
 import           Bindings.Libgit2
+import           Control.Applicative
+import           Control.Exception
+import           Control.Failure
+import           Control.Monad
+import           Control.Monad.IO.Class
 import           Data.ByteString
-import qualified Git
-import           Git.Libgit2.Internal
 import           Data.IORef
+import           Data.Stringable
+import           Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
+import           Foreign.C.String
+import           Foreign.C.Types
+import           Foreign.ForeignPtr
+import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
-import qualified Prelude
-import           Prelude ((+),(-))
+import           Foreign.Marshal.Utils
+import           Foreign.Ptr
+import           Foreign.StablePtr
+import           Foreign.Storable
+import qualified Git
+import           Git.Libgit2.Internal
+import           Git.Libgit2.Types
 
 lgLookupRef :: Text -> LgRepository Git.Reference
 lgLookupRef name = do
     repo <- lgGet
     targ <- liftIO $ alloca $ \ptr -> do
-        r <- withForeignPtr (repositoryPtr repo) $ \repoPtr ->
+        r <- withForeignPtr (repoObj repo) $ \repoPtr ->
               withCStringable name $ \namePtr ->
                 c'git_reference_lookup ptr repoPtr namePtr
         if r < 0
@@ -143,7 +158,7 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
 -- listRefNames flags = do
 --     repo <- lgGet
 --     refs <- liftIO $ alloca $ \c'refs ->
---       withForeignPtr (repositoryPtr repo) $ \repoPtr -> do
+--       withForeignPtr (repoObj repo) $ \repoPtr -> do
 --         r <- c'git_reference_list c'refs repoPtr (flagsToInt flags)
 --         if r < 0
 --             then return Nothing

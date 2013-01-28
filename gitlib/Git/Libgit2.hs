@@ -26,49 +26,59 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Either
 import           Control.Monad.Trans.State
-import           Data.ByteString (ByteString)
+import           Data.ByteString (ByteString, packCString, useAsCString)
 import qualified Data.ByteString as B
-import           Data.ByteString.Unsafe
+import qualified Data.ByteString.Unsafe as BU
+import           Data.List as L
 import           Data.Map (Map)
 import qualified Data.Map as M
+import           Data.Maybe
 import           Data.Monoid
-import           Data.Stringable
+import           Data.Stringable as S
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Traversable
+import qualified Data.Text.Encoding as T
+import qualified Data.Text.ICU.Convert as U
+import           Data.Traversable hiding (sequence, mapM)
 import           Filesystem
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
 import           Foreign.C.Types
+import qualified Foreign.Concurrent as FC
 import           Foreign.ForeignPtr
+import qualified Foreign.ForeignPtr.Unsafe as FU
 import           Foreign.Marshal.Alloc
+import           Foreign.Marshal.Array
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git as Git
-import           Git.Libgit2.Blob
 import           Git.Libgit2.Internal
+import           Git.Libgit2.Reference
 import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
-import           System.IO.Unsafe
+import qualified System.IO.Unsafe as SU
+import qualified Unsafe.Coerce as CU
+
+type Tree   = Git.Tree LgRepository
+type Commit = Git.Commit LgRepository
 
 instance Git.Repository LgRepository where
-    data TreeType = Tree
-        { treeInfo     :: Base
+    data Tree LgRepository = Tree
+        { lgTreeInfo     :: Base
           -- jww (2013-01-28): Use a builder here directly, not a Map
-        , treeContents :: TreeMap }
+        , lgTreeContents :: TreeMap }
 
-    data CommitType = Commit
-        { commitInfo      :: Base
-        , commitAuthor    :: Git.Signature
-        , commitCommitter :: Git.Signature
-        , commitLog       :: Text
-        , commitEncoding  :: String
-        , commitTree      :: Git.ObjRef Git.TreeType
-        , commitParents   :: [Git.ObjRef Git.CommitType]
-        , commitObj       :: ObjPtr C'git_commit }
+    data Commit LgRepository = Commit
+        { lgCommitInfo      :: Base
+        , lgCommitAuthor    :: Git.Signature
+        , lgCommitCommitter :: Git.Signature
+        , lgCommitLog       :: Text
+        , lgCommitEncoding  :: String
+        , lgCommitTree      :: Git.TreeOid LgRepository
+        , lgCommitParents   :: [Git.CommitOid LgRepository] }
 
     lookupRef    = undefined
     updateRef    = undefined
@@ -80,10 +90,8 @@ instance Git.Repository LgRepository where
     lookupTag    = undefined
     newTree      = lgNewTree
     createBlob   = lgCreateBlob
-    createCommit = undefined
-
-instance Git.Object (Git.Blob LgRepository) where
-    update blob = lgCreateBlob (Git.blobContents blob)
+    createCommit = lgCreateCommit
+    createTag    = undefined
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -101,16 +109,16 @@ lgCreateBlob b = do
 
   where
     createBlobFromByteString repo coid bs =
-        unsafeUseAsCStringLen bs $
+        BU.unsafeUseAsCStringLen bs $
             uncurry (\cstr len ->
                       withForeignPtr coid $ \coid' ->
                       withForeignPtr (repoObj repo) $ \repoPtr ->
                         c'git_blob_create_frombuffer
                           coid' repoPtr (castPtr cstr) (fromIntegral len))
 
-lgLookupBlob :: Git.Oid -> LgRepository (Git.Blob m)
+lgLookupBlob :: Git.BlobOid m -> LgRepository (Git.Blob m)
 lgLookupBlob oid =
-    lookupObject' oid 40 c'git_blob_lookup c'git_blob_lookup_prefix
+    lookupObject' (unTagged oid) 40 c'git_blob_lookup c'git_blob_lookup_prefix
     $ \coid obj _ ->
     withForeignPtr obj $ \ptr -> do
         size <- c'git_blob_rawsize (castPtr ptr)
@@ -118,7 +126,7 @@ lgLookupBlob oid =
         -- The lifetime of buf is tied to the lifetime of the blob object in
         -- libgit2, which this Blob object controls, so we can use
         -- unsafePackCStringLen to refer to its bytes.
-        bstr <- curry unsafePackCStringLen (castPtr buf)
+        bstr <- curry BU.unsafePackCStringLen (castPtr buf)
                       (fromIntegral size)
         return (Git.Blob (Git.BlobString bstr))
 
@@ -141,24 +149,20 @@ type TreeMap = Map Text TreeEntry
 --     show (Git.BlobEntry blob _) = "BlobEntry (" ++ show blob ++ ")"
 --     show (Git.TreeEntry tree)   = "TreeEntry (" ++ show tree ++ ")"
 
-instance Git.Tree Git.TreeType where
+instance Git.Treeish Tree where
+    type TreeRepository = LgRepository
     modifyTree = lgModifyTree
-
-instance Git.Object Git.TreeType where
-    update = writeTree
+    writeTree  = lgWriteTree
 
-newTreeBase :: Git.TreeType -> Base
-newTreeBase t = Base Nothing Nothing
-
 -- | Create a new, empty tree.
 --
 --   Since empty trees cannot exist in Git, attempting to write out an empty
 --   tree is a no-op.
-lgNewTree :: LgRepository Git.TreeType
-lgNewTree = return Tree { treeInfo     = Base Nothing Nothing
-                        , treeContents = M.empty }
+lgNewTree :: LgRepository Tree
+lgNewTree = return Tree { lgTreeInfo     = Base Nothing Nothing
+                        , lgTreeContents = M.empty }
 
-lgLookupTree :: Tagged Git.TreeType Git.Oid -> LgRepository Git.TreeType
+lgLookupTree :: Tagged Tree Git.Oid -> LgRepository Tree
 lgLookupTree oid =
     -- jww (2013-01-28): Verify the oid here
   lookupObject' (unTagged oid) 40 c'git_tree_lookup c'git_tree_lookup_prefix $
@@ -185,15 +189,16 @@ lgLookupTree oid =
                       if entryType == c'GIT_OBJ_BLOB
                          -- jww (2013-01-28): What about the executable
                          -- bit??
-                      then Git.BlobEntry (Git.ByOid (Tagged (coidToOid coid))) False
+                      then Git.BlobEntry (Tagged (coidToOid coid)) False
                       else Git.TreeEntry (Git.ByOid (Tagged (coidToOid coid)))
 
               return ((entryName,entryObj):m))
           [] [0..(entryCount-1)]
-      return Tree { treeInfo     = Base (Just coid) (Just obj)
-                  , treeContents = M.fromList entriesAList }
+      return Tree { lgTreeInfo     = Base (Just coid) (Just obj)
+                  , lgTreeContents = M.fromList entriesAList }
 
-doLookupTreeEntry :: Git.TreeType -> [Text] -> LgRepository (Maybe TreeEntry)
+doLookupTreeEntry :: Tree -> [Text]
+                     -> LgRepository (Maybe TreeEntry)
 doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
 doLookupTreeEntry t (name:names) = do
   -- Lookup the current name in this tree.  If it doesn't exist, and there are
@@ -204,7 +209,7 @@ doLookupTreeEntry t (name:names) = do
   -- Prelude.putStrLn $ "Tree: " ++ show t
   -- Prelude.putStrLn $ "Tree Entries: " ++ show (treeContents t)
   -- Prelude.putStrLn $ "Lookup: " ++ toString name
-  let y = M.lookup name (treeContents t)
+  let y = M.lookup name (lgTreeContents t)
 
   -- Prelude.putStrLn $ "Result: " ++ show y
   -- Prelude.putStrLn $ "Names: " ++ show names
@@ -216,7 +221,7 @@ doLookupTreeEntry t (name:names) = do
                                     doLookupTreeEntry t'' names
       _ -> return Nothing
 
-lookupTreeEntry :: Git.TreeType -> FilePath -> LgRepository TreeEntry
+lookupTreeEntry :: Tree -> FilePath -> LgRepository TreeEntry
 lookupTreeEntry tr path = do
     entry <- doLookupTreeEntry tr (splitPath path)
     maybe (failure (Git.TreeEntryLookupFailed path)) return entry
@@ -246,19 +251,19 @@ lookupTreeEntry tr path = do
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
-writeTree :: Git.TreeType -> LgRepository (Tagged Git.TreeType Git.Oid)
-writeTree t@(Tree { treeInfo = Base { gitId = Just coid } }) =
+lgWriteTree :: Tree -> LgRepository (Git.TreeOid LgRepository)
+lgWriteTree t@(Tree { lgTreeInfo = Base { gitId = Just coid } }) =
     return (Tagged (coidToOid coid))
-writeTree t = Tagged . coidToOid . snd <$> doWriteTree t
+lgWriteTree t = Tagged . coidToOid . snd <$> doWriteTree t
 
-doWriteTree :: Git.TreeType -> LgRepository (Git.TreeType, COid)
+doWriteTree :: Tree -> LgRepository (Tree,COid)
 doWriteTree t = do
     repo <- lgGet
     ptr <- liftIO malloc         -- jww (2013-01-28): memory leak!!!
     either failure return =<< runEitherT (go ptr (repoObj repo))
   where
     go :: Ptr (Ptr C'git_treebuilder) -> ForeignPtr C'git_repository
-          -> EitherT Git.Exception LgRepository (Git.TreeType,COid)
+          -> EitherT Git.Exception LgRepository (Tree,COid)
     go ptr repo = do
         r <- liftIO $ c'git_treebuilder_create ptr nullPtr
         when (r < 0) $ left Git.TreeBuilderCreateFailed
@@ -270,16 +275,20 @@ doWriteTree t = do
         -- this code is changed to write to the packed object backend, simply
         -- change the function 'parallel' to 'sequence' here.
         oids <- liftIO $ parallel $
-            flip map (M.toList (treeContents t)) $ \(k, v) ->
+            flip map (M.toList (lgTreeContents t)) $ \(k, v) ->
                 case v of
-                    x@(Git.BlobEntry _ exe) -> do
-                        return (k, x, if exe then 0o100755 else 0o100644)
-                    x@(Git.TreeEntry _) -> do
-                        return (k, x, 0o040000)
+                    x@(Git.BlobEntry oid exe) -> do
+                        return (k, x, (unTagged <$> return oid),
+                                if exe then 0o100755 else 0o100644)
+                    x@(Git.TreeEntry (Git.ByOid oid)) -> do
+                        return (k, x, (unTagged <$> return oid), 0o040000)
+                    x@(Git.TreeEntry (Git.Known tr)) -> do
+                        return (k, x, (unTagged <$> Git.writeTree tr),
+                                0o040000)
 
-        newList <- for oids $ \(k, entry, flags) -> do
-            coid <- oidToCoid . untag <$> lift (Git.update entry)
-            insertObject builder k coid flags
+        newList <- for oids $ \(k, entry, oidAction, flags) -> do
+            oid <- lift oidAction
+            insertObject builder k (oidToCoid oid) flags
             return (k, entry)
 
         (r3,coid) <- liftIO $ do
@@ -290,8 +299,8 @@ doWriteTree t = do
                     return (r3,coid)
         if r3 < 0
             then left Git.TreeBuilderWriteFailed
-            else return (t { treeInfo     = (treeInfo t) { gitId = Just coid }
-                           , treeContents = M.fromList newList }, coid)
+            else return (t { lgTreeInfo = (lgTreeInfo t) { gitId = Just coid }
+                           , lgTreeContents = M.fromList newList }, coid)
 
     insertObject :: (CStringable a)
                  => Ptr C'git_treebuilder -> a -> COid -> CUInt
@@ -304,11 +313,11 @@ doWriteTree t = do
           then left Git.TreeBuilderInsertFailed
           else return ()
 
-doModifyTree :: Git.TreeType
+doModifyTree :: Tree
              -> [Text]
              -> Bool
              -> (Maybe TreeEntry -> LgRepository (Maybe TreeEntry))
-             -> LgRepository (Git.TreeType,Maybe TreeEntry)
+             -> LgRepository (Tree, Maybe TreeEntry)
 doModifyTree t [] _ _ = return (t, Just (Git.TreeEntry (Git.Known t)))
 doModifyTree t (name:names) createIfNotExist f = do
     repo <- lgGet
@@ -317,7 +326,7 @@ doModifyTree t (name:names) createIfNotExist f = do
     -- are more names in the path and 'createIfNotExist' is True, create a new
     -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
     -- (TreeEntry {})@, and if not we'll have Nothing.
-    y <- case M.lookup name (treeContents t) of
+    y <- case M.lookup name (lgTreeContents t) of
             Nothing -> if createIfNotExist && not (null names)
                        then Just . Git.TreeEntry . Git.Known <$> Git.newTree
                        else return Nothing
@@ -349,19 +358,19 @@ doModifyTree t (name:names) createIfNotExist f = do
               Just (Git.TreeEntry st) -> do
                   st' <- Git.resolveTreeRef st
                   (st'',ze) <- doModifyTree st' names createIfNotExist f
-                  returnTree t name $ if M.null (treeContents st'')
+                  returnTree t name $ if M.null (lgTreeContents st'')
                                       then Nothing
                                       else ze
   where
     returnTree t n z =
         case z of
-            Nothing ->
-                return (t { treeContents = M.delete n (treeContents t) }, z)
-            Just z' ->
-                return (t { treeContents = M.insert n z' (treeContents t) }, z)
+            Nothing -> return (t { lgTreeContents =
+                                        M.delete n (lgTreeContents t) }, z)
+            Just z' -> return (t { lgTreeContents =
+                                        M.insert n z' (lgTreeContents t) }, z)
 
 lgModifyTree
-  :: Git.TreeType -> FilePath -> Bool
+  :: Tree -> FilePath -> Bool
      -> (Maybe TreeEntry -> LgRepository (Maybe TreeEntry))
      -> LgRepository (Maybe TreeEntry)
 lgModifyTree t path createIfNotExist f =
@@ -373,12 +382,111 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
-instance Git.Commit Git.CommitType where
-    commitParents = undefined
-    commitTree = undefined
-    commitTree' = undefined
+instance Git.Commitish Commit where
+    type CommitRepository = LgRepository
+    commitOid     = Tagged . coidToOid . fromJust . gitId . lgCommitInfo
+    commitParents = lgCommitParents
+    commitTree    = lgCommitTree
 
-instance Git.Object Git.CommitType where
-    update = undefined
+lgLookupCommit :: Git.Oid -> LgRepository Commit
+lgLookupCommit oid =
+  lookupObject' oid 40 c'git_commit_lookup
+                c'git_commit_lookup_prefix $ \coid obj _ ->
+      withForeignPtr obj $ \cobj -> do
+        let c = castPtr cobj
+
+        enc   <- c'git_commit_message_encoding c
+        encs  <- if enc == nullPtr
+                then return "UTF-8"
+                else peekCString enc
+        conv  <- U.open encs (Just False)
+
+        msg   <- c'git_commit_message c   >>= packCString
+        auth  <- c'git_commit_author c    >>= packSignature conv
+        comm  <- c'git_commit_committer c >>= packSignature conv
+        toid  <- c'git_commit_tree_oid c
+
+        pn    <- c'git_commit_parentcount c
+        poids <- sequence
+                 (zipWith ($) (replicate (fromIntegral (toInteger pn))
+                               (c'git_commit_parent_oid c)) [0..pn])
+
+        return Commit
+            { lgCommitInfo      = Base (Just coid) (Just obj)
+            , lgCommitAuthor    = auth
+            , lgCommitCommitter = comm
+            , lgCommitTree      = Tagged (coidPtrToOid toid)
+            , lgCommitParents   = map (Tagged . coidPtrToOid) poids
+            , lgCommitLog       = U.toUnicode conv msg
+            , lgCommitEncoding  = encs
+            }
+
+addCommitParent :: Commit -> Commit -> Commit
+addCommitParent co p =
+    co { lgCommitParents = lgCommitParents co ++ [Git.commitOid p] }
+
+-- | Write out a commit to its repository.  If it has already been written,
+--   nothing will happen.
+lgCreateCommit :: [Git.CommitOid LgRepository] -> Git.ObjRef Tree
+               -> Git.Signature -> Git.Signature -> Text -> Maybe Text
+               -> LgRepository Commit
+lgCreateCommit parents tree author committer logText ref = do
+    repo <- lgGet
+    tr   <- Git.resolveTreeRef tree
+    toid <- Git.writeTree tr
+    coid <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
+      coid <- mallocForeignPtr
+      withForeignPtr coid $ \coid' -> do
+        conv <- U.open "utf-8" (Just True)
+        useAsCString (U.fromUnicode conv logText) $ \message ->
+          withRef ref $ \update_ref ->
+          withSignature conv author $ \author' ->
+          withSignature conv committer $ \committer' ->
+          withEncStr "utf-8" $ \message_encoding ->
+          withForeignPtr (fromJust (gitObj (lgTreeInfo tr))) $ \tr -> do
+              parentPtrs <- getCommitParentPtrs repo parents
+              withForeignPtrs parentPtrs $ \pptrs -> do
+                parents' <- newArray pptrs
+                r <- c'git_commit_create coid' repoPtr
+                      update_ref author' committer'
+                      message_encoding message (castPtr tr)
+                      (fromIntegral (L.length parents)) parents'
+                when (r < 0) $ throwIO Git.CommitCreateFailed
+                return coid
+
+    return Commit
+        { lgCommitInfo      = Base (Just coid) Nothing
+        , lgCommitAuthor    = author
+        , lgCommitCommitter = committer
+        , lgCommitTree      = toid
+        , lgCommitParents   = parents
+        , lgCommitLog       = logText
+        , lgCommitEncoding  = "utf-8"
+        }
+
+  where
+    withRef Nothing     = flip ($) nullPtr
+    withRef (Just name) = useAsCString (T.encodeUtf8 name)
+
+    withEncStr ""  = flip ($) nullPtr
+    withEncStr enc = withCString enc
+
+withForeignPtrs :: [ForeignPtr a] -> ([Ptr a] -> IO b) -> IO b
+withForeignPtrs fos io = do
+    r <- io (map FU.unsafeForeignPtrToPtr fos)
+    mapM touchForeignPtr fos
+    return r
+
+getCommitParentPtrs :: Repository -> [Git.CommitOid LgRepository]
+                       -> IO [ForeignPtr C'git_commit]
+getCommitParentPtrs repo parents =
+    withForeignPtr (repoObj repo) $ \repoPtr ->
+    for parents $ \oid ->
+    alloca $ \ptr ->
+    withForeignPtr (oidToCoid (unTagged oid)) $ \coid -> do
+        r <- c'git_commit_lookup ptr repoPtr coid
+        when (r < 0) $ throwIO Git.CommitLookupFailed
+        ptr' <- peek ptr
+        FC.newForeignPtr ptr' (c'git_commit_free ptr')
 
 -- Libgit2.hs

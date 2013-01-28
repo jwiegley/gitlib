@@ -38,19 +38,15 @@ import           Data.Traversable
 import           Data.Typeable
 import           Filesystem.Path.CurrentOS
 import           Prelude hiding (FilePath)
+import           System.IO.Unsafe
 import           Text.Printf
-import System.IO.Unsafe
 
 {- $repositories -}
 -- | A 'Repository' is the central point of contact between user code and Git
 -- data objects.  Every object must belong to some repository.
---
--- Minimal complete definition: 'lookupRef', 'updateRef', 'lookupObject'.
-class (Applicative m, Monad m, Failure Exception m,
-       Tree TreeType, Object TreeType,
-       Commit CommitType, Object CommitType) => Repository m where
-    data TreeType :: *
-    data CommitType :: *
+class (Applicative m, Monad m, Failure Exception m) => Repository m where
+    data Tree m
+    data Commit m
 
     -- References
     lookupRef  :: Text -> m Reference
@@ -76,22 +72,24 @@ class (Applicative m, Monad m, Failure Exception m,
     -- lookupObject _ =
     --     failure (BackendError "Cannot lookup arbitrary objects in this backend")
 
-    lookupCommit :: Tagged c Oid -> m c
-    lookupTree :: Tagged t Oid -> m t
-    lookupBlob :: BlobOid m -> m (Blob m)
-    lookupTag :: TagOid -> m Tag
+    lookupCommit :: CommitOid m -> m (Commit m)
+    lookupTree   :: TreeOid m -> m (Tree m)
+    lookupBlob   :: BlobOid m -> m (Blob m)
+    lookupTag    :: TagOid -> m Tag
 
-    lookupCommitRef :: Commit c => Text -> m c
+    lookupCommitRef :: Text -> m (Commit m)
     lookupCommitRef = resolveRef >=> lookupCommit . Tagged
 
     lookupTagRef :: Text -> m Tag
     lookupTagRef = resolveRef >=> lookupTag . Tagged
 
     -- Object creation
-    newTree :: m t
+    newTree :: m (Tree m)
     createBlob :: BlobContents m -> m (BlobOid m)
-    createCommit ::
-        [ObjRef c] -> ObjRef t -> Signature -> Signature -> Text -> m c
+    createCommit :: [CommitOid m] -> ObjRef (Tree m)
+                    -> Signature -> Signature -> Text -> Maybe Text
+                    -> m (Commit m)
+    createTag :: CommitOid m -> Signature -> Signature -> Text -> m Tag
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
@@ -129,10 +127,10 @@ newtype Oid = Oid ByteString deriving Eq
 instance Show Oid where
     show (Oid x) = BC.unpack (hex x)
 
-type BlobOid m = Tagged (Blob m) Oid
-type TreeOid   = Tree t => Tagged t Oid
-type CommitOid = Commit c => Tagged c Oid
-type TagOid    = Tagged Tag Oid
+type BlobOid m   = Tagged (Blob m) Oid
+type TreeOid m   = Tagged (Tree m) Oid
+type CommitOid m = Tagged (Commit m) Oid
+type TagOid      = Tagged Tag Oid
 
 -- | Parse an ASCII hex string into a Git 'Oid'.
 --
@@ -162,16 +160,7 @@ data Reference = Reference
     } deriving (Show, Eq)
 
 {- $objects -}
-class Object o where
-    update :: Repository m => o -> m (Tagged o Oid)
-    update_ :: Repository m => o -> m ()
-    update_ = void . update
-
 data ObjRef a = ByOid (Tagged a Oid) | Known a
-
-instance Object a => Object (ObjRef a) where
-    update (ByOid oid) = return (retag oid)
-    update (Known obj) = retag <$> update obj
 
 {- $blobs -}
 newtype Blob m = Blob { blobContents :: BlobContents m }
@@ -215,23 +204,15 @@ catBlob = parseOid >=> lookupBlob . Tagged >=> blobToByteString
 catBlobUtf8 :: Repository m => Text -> m Text
 catBlobUtf8 = catBlob >=> return . T.decodeUtf8
 
-blobRef :: Blob m -> ObjRef (Blob m)
-blobRef = Known
-
 {- $trees -}
 data TreeEntry m where
-    BlobEntry :: Object (Blob m) => ObjRef (Blob m) -> Bool -> TreeEntry m
-    TreeEntry :: (Object t, Tree t) => ObjRef t -> TreeEntry m
+    BlobEntry :: BlobOid m -> Bool -> TreeEntry m
+    TreeEntry :: ObjRef (Tree m) -> TreeEntry m
 
-instance Object (TreeEntry m) where
-    update (BlobEntry bl _) = retag <$> update bl
-    update (TreeEntry tr)   = retag <$> update tr
+blobEntry :: Repository m => BlobOid m -> Bool -> TreeEntry m
+blobEntry = BlobEntry
 
-blobEntry ::
-    (Repository m, Object (Blob m)) => Blob m -> Bool -> TreeEntry m
-blobEntry b exe = BlobEntry (blobRef b) exe
-
-treeEntry :: (Repository m, Object t, Tree t) => t -> TreeEntry m
+treeEntry :: Repository m => Tree m -> TreeEntry m
 treeEntry t = TreeEntry (treeRef t)
 
 -- | A 'Tree' is anything that is "treeish".
@@ -239,39 +220,44 @@ treeEntry t = TreeEntry (treeRef t)
 -- Minimal complete definition: 'modifyTree'.  Note that for some treeish
 -- things, like Tags, it should always be an error to attempt to modify the
 -- tree in any way.
-class Tree t where
-    modifyTree :: Repository m =>
-                  t             -- the tree to "modify"
-                  -> FilePath    -- path within the tree
-                  -> Bool        -- create subtree's leading up to path?
-                  -> (Maybe (TreeEntry m) -> m (Maybe (TreeEntry m)))
-                  -> m (Maybe (TreeEntry m))
+class Repository TreeRepository => Treeish t where
+    type TreeRepository :: * -> *
 
-    getTreeEntry :: Repository m => t -> FilePath -> m (TreeEntry m)
+    modifyTree :: t             -- the tree to "modify"
+               -> FilePath    -- path within the tree
+               -> Bool        -- create subtree's leading up to path?
+               -> (Maybe (TreeEntry TreeRepository)
+                   -> TreeRepository (Maybe (TreeEntry TreeRepository)))
+               -> TreeRepository (Maybe (TreeEntry TreeRepository))
+
+    getTreeEntry :: t -> FilePath -> TreeRepository (TreeEntry TreeRepository)
     getTreeEntry t path = do
         entry <- modifyTree t path False return
         maybe (failure (TreeEntryLookupFailed path)) return entry
 
-    putTreeEntry :: Repository m => t -> FilePath -> TreeEntry m -> m ()
+    putTreeEntry :: t -> FilePath -> TreeEntry TreeRepository
+                    -> TreeRepository ()
     putTreeEntry t path =
         void . modifyTree t path True . const . return . Just
 
-    putBlobInTree :: (Repository m, Object (Blob m)) =>
-                     t -> FilePath -> ObjRef (Blob m) -> m ()
+    putBlobInTree :: t -> FilePath -> BlobOid TreeRepository
+                     -> TreeRepository ()
     putBlobInTree t path b = putTreeEntry t path (BlobEntry b False)
 
-    putTreeInTree :: (Repository m, Object t) =>
-                     t -> FilePath -> ObjRef t -> m ()
+    putTreeInTree :: t -> FilePath -> ObjRef (Tree TreeRepository)
+                     -> TreeRepository ()
     putTreeInTree t path tr = putTreeEntry t path (TreeEntry tr)
 
-    dropFromTree :: Repository m => t -> FilePath -> m ()
+    dropFromTree :: t -> FilePath -> TreeRepository ()
     dropFromTree t path =
         void (modifyTree t path False (const (return Nothing)))
 
-treeRef :: Tree t => t -> ObjRef t
+    writeTree :: t -> TreeRepository (TreeOid TreeRepository)
+
+treeRef :: Tree m -> ObjRef (Tree m)
 treeRef = Known
 
-resolveTreeRef :: (Repository m, Tree t) => ObjRef t -> m t
+resolveTreeRef :: Repository m => ObjRef (Tree m) -> m (Tree m)
 resolveTreeRef objRef = case objRef of
     ByOid oid -> lookupTree oid
     Known obj -> return obj
@@ -292,22 +278,26 @@ instance Default Signature where
                     , utctDayTime = secondsToDiffTime 0 }
         }
 
-class Commit c where
-    commitParents :: Repository m => c -> m [ObjRef c]
-    commitTree    :: (Repository m, Tree t) => c -> m (ObjRef t)
-    commitTree'   :: (Repository m, Tree t) => c -> m t
+class Repository CommitRepository => Commitish c where
+    type CommitRepository :: * -> *
 
-commitRef :: Commit c => c -> ObjRef c
+    commitOid     :: c -> CommitOid CommitRepository
+    commitParents :: c -> [CommitOid CommitRepository]
+    commitTree    :: c -> TreeOid CommitRepository
+
+    commitTree' :: c -> CommitRepository (Tree CommitRepository)
+    commitTree' = lookupTree . commitTree
+
+commitRef :: Commitish c => c -> ObjRef c
 commitRef = Known
 
-resolveCommitRef :: (Repository m, Commit c) => ObjRef c -> m c
+resolveCommitRef :: Repository m => ObjRef (Commit m) -> m (Commit m)
 resolveCommitRef objRef = case objRef of
     ByOid oid -> lookupCommit oid
     Known obj -> return obj
 
 {- $tags -}
 data Tag = Tag
-    { tagCommit :: Commit c => ObjRef c
-    }
+    { tagCommit :: Repository m => CommitOid m }
 
 -- Repository.hs

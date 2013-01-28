@@ -11,8 +11,6 @@ import           Control.Concurrent.ParallelIO
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Git
-import           Git.Libgit2
 import           Data.Maybe
 import           Data.Tagged
 import           Data.Text as T hiding (map)
@@ -25,6 +23,8 @@ import           Foreign.C.String
 import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
 import           Foreign.Storable
+import           Git
+import qualified Git.Libgit2 as Lg
 import qualified Prelude
 import           Prelude (putStrLn)
 import           Prelude hiding (FilePath, putStr, putStrLn)
@@ -43,7 +43,7 @@ main = do
       else exitSuccess
   stopGlobalPool
 
-withRepository :: Text -> LgRepository () -> LgRepository ()
+withRepository :: Text -> Lg.LgRepository () -> Lg.LgRepository ()
 withRepository dir action = do
   let p = fromText dir
   exists <- liftIO $ isDirectory p
@@ -57,22 +57,22 @@ withRepository dir action = do
   liftIO $ removeTree p
   return a
 
-oid' :: (Repository m, Object a) => a -> m Text
-oid' = update >=> return . oidToText . Just
+oid' :: Treeish t => t -> TreeRepository Text
+oid' = writeTree >=> return . oidToText
 
-oidToText :: Maybe (Tagged a Oid) -> Text
-oidToText = T.pack . show . fromJust
+oidToText :: Repository m => TreeOid m -> Text
+oidToText = T.pack . show
 
-sampleCommit :: (Repository m, Commit c, Tree t) => t -> Signature -> m c
+sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
-    createCommit [] (treeRef tr) sig sig "Sample log message."
+    createCommit [] (treeRef tr) sig sig "Sample log message." Nothing
 
 tests :: Test
 tests = test [
 
   "singleBlob" ~:
 
-  withLgRepository "singleBlob.git" True $ do
+  Lg.withLgRepository "singleBlob.git" True $ do
     createBlob (BlobString (T.encodeUtf8 "Hello, world!\n"))
 
     x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"

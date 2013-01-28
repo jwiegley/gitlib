@@ -85,11 +85,8 @@ Library
     exposed-modules:
         Git
         Git.Libgit2
-        Git.Libgit2.Blob
-        Git.Libgit2.Tree
-        Git.Libgit2.Commit
-        Git.Libgit2.Tag
-        Git.Libgit2.Reference
+        Git.Libgit2.Backend
         Git.Libgit2.Internal
+        Git.Libgit2.Reference
         Git.Libgit2.Types
         -- Git.Tutorial
