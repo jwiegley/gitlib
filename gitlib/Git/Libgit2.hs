@@ -53,6 +53,7 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
+import           Foreign.StablePtr
 import           Foreign.Storable
 import qualified Git as Git
 import           Git.Libgit2.Internal
@@ -62,10 +63,9 @@ import           Prelude hiding (FilePath)
 import qualified System.IO.Unsafe as SU
 import qualified Unsafe.Coerce as CU
 
-type Tree   = Git.Tree LgRepository
-type Commit = Git.Commit LgRepository
-
 instance Git.Repository LgRepository where
+    data Oid LgRepository = Oid { getOid :: ForeignPtr C'git_oid }
+
     data Tree LgRepository = Tree
         { lgTreeInfo     :: Base
         -- , lgTreeSize     :: IORef Int
@@ -77,12 +77,16 @@ instance Git.Repository LgRepository where
         , lgCommitCommitter :: Git.Signature
         , lgCommitLog       :: Text
         , lgCommitEncoding  :: String
-        , lgCommitTree      :: Git.ObjRef Tree
+        , lgCommitTree      :: Git.ObjRef LgRepository Tree
         , lgCommitParents   :: [Git.CommitOid LgRepository] }
 
-    lookupRef    = undefined
-    updateRef    = undefined
-    traverseRefs = undefined
+    data Tag LgRepository = Tag
+        { tagCommit :: Git.CommitOid LgRepository }
+
+    parseOid        = lgParseOid
+    lookupRef       = undefined
+    updateRef       = undefined
+    traverseRefs    = undefined
     -- lookupObject = lgLookupObject
     lookupCommit    = lgLookupCommit 40
     lookupTree      = lgLookupTree 40
@@ -93,6 +97,25 @@ instance Git.Repository LgRepository where
     createBlob      = lgCreateBlob
     createCommit    = lgCreateCommit
     createTag       = undefined
+
+lgParseOid :: Text -> LgRepository Oid
+lgParseOid str
+  | len > 40 = failure (Git.OidParseFailed str)
+  | otherwise = do
+      oid <- liftIO $ mallocForeignPtr
+      r <- liftIO $ withCStringable str $ \cstr ->
+          withForeignPtr oid $ \ptr ->
+              if len == 40
+                  then c'git_oid_fromstr ptr cstr
+                  else c'git_oid_fromstrn ptr cstr (fromIntegral len)
+      if r < 0
+          then failure (Git.OidParseFailed str)
+          else return (Oid oid)
+  where
+    len = S.length str
+
+instance Show (Git.Oid LgRepository) where
+    show (Oid coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -106,7 +129,7 @@ lgCreateBlob b = do
     r    <- Git.blobContentsToByteString b
             >>= \bs -> liftIO $ createBlobFromByteString repo ptr bs
     when (r < 0) $ failure Git.BlobCreateFailed
-    return (Tagged (coidToOid ptr))
+    return (Tagged (Oid ptr))
 
   where
     createBlobFromByteString repo coid bs =
@@ -117,19 +140,20 @@ lgCreateBlob b = do
                         c'git_blob_create_frombuffer
                           coid' repoPtr (castPtr cstr) (fromIntegral len))
 
-lgLookupBlob :: Git.BlobOid m -> LgRepository (Git.Blob m)
+lgLookupBlob :: Git.BlobOid LgRepository -> LgRepository (Git.Blob LgRepository)
 lgLookupBlob oid =
-    lookupObject' (unTagged oid) 40 c'git_blob_lookup c'git_blob_lookup_prefix
-    $ \coid obj _ ->
-    withForeignPtr obj $ \ptr -> do
-        size <- c'git_blob_rawsize (castPtr ptr)
-        buf  <- c'git_blob_rawcontent (castPtr ptr)
-        -- The lifetime of buf is tied to the lifetime of the blob object in
-        -- libgit2, which this Blob object controls, so we can use
-        -- unsafePackCStringLen to refer to its bytes.
-        bstr <- curry BU.unsafePackCStringLen (castPtr buf)
-                      (fromIntegral size)
-        return (Git.Blob (Git.BlobString bstr))
+    lookupObject' (getOid (unTagged oid)) 40
+        c'git_blob_lookup c'git_blob_lookup_prefix
+        $ \coid obj _ ->
+        withForeignPtr obj $ \ptr -> do
+            size <- c'git_blob_rawsize (castPtr ptr)
+            buf  <- c'git_blob_rawcontent (castPtr ptr)
+            -- The lifetime of buf is tied to the lifetime of the blob object
+            -- in libgit2, which this Blob object controls, so we can use
+            -- unsafePackCStringLen to refer to its bytes.
+            bstr <- curry BU.unsafePackCStringLen (castPtr buf)
+                          (fromIntegral size)
+            return (Git.Blob (Git.BlobString bstr))
 
 type TreeEntry = Git.TreeEntry LgRepository
 
@@ -175,26 +199,28 @@ lgNewTree = do
                     -- , lgTreeSize     = size
                     , lgTreeContents = fptr }
 
-lgLookupTree :: Int -> Tagged Tree Git.Oid -> LgRepository Tree
+lgLookupTree :: Int -> Tagged Tree Oid -> LgRepository Tree
 lgLookupTree len oid =
     -- jww (2013-01-28): Verify the oid here
-  lookupObject' (unTagged oid) len c'git_tree_lookup c'git_tree_lookup_prefix $
-    \coid obj _ -> do
-        withForeignPtr obj $ \objPtr -> do
-            -- count <- c'git_tree_entrycount (castPtr objPtr)
-            -- size <- newIORef 0
-            (r,fptr) <- alloca $ \pptr -> do
-                r <- c'git_treebuilder_create pptr (castPtr objPtr)
-                builder <- peek pptr
-                fptr <- FC.newForeignPtr builder
-                            (c'git_treebuilder_free builder)
-                return (r,fptr)
-            if r < 0
-                then failure Git.TreeCreateFailed
-                else
-                return Tree { lgTreeInfo     = Base (Just coid) (Just obj)
-                            -- , lgTreeSize     = size
-                            , lgTreeContents = fptr }
+  lookupObject' (getOid (unTagged oid)) len
+      c'git_tree_lookup c'git_tree_lookup_prefix $
+      \coid obj _ -> do
+          withForeignPtr obj $ \objPtr -> do
+              -- count <- c'git_tree_entrycount (castPtr objPtr)
+              -- size <- newIORef 0
+              (r,fptr) <- alloca $ \pptr -> do
+                  r <- c'git_treebuilder_create pptr (castPtr objPtr)
+                  builder <- peek pptr
+                  fptr <- FC.newForeignPtr builder
+                              (c'git_treebuilder_free builder)
+                  return (r,fptr)
+              if r < 0
+                  then failure Git.TreeCreateFailed
+                  else
+                  return Tree { lgTreeInfo =
+                                     Base (Just (Oid coid)) (Just obj)
+                              -- , lgTreeSize = size
+                              , lgTreeContents = fptr }
 
 doLookupTreeEntry :: Tree -> [Text] -> LgRepository (Maybe TreeEntry)
 doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
@@ -213,13 +239,14 @@ doLookupTreeEntry t (name:names) = do
           then return Nothing
           else do
           coid  <- c'git_tree_entry_id entry
+          oid   <- coidPtrToOid coid
           typ   <- c'git_tree_entry_type entry
           attrs <- c'git_tree_entry_attributes entry
           return $ if typ == c'GIT_OBJ_BLOB
-                   then Just (Git.BlobEntry (Tagged (coidPtrToOid coid))
-                              (attrs == 0o100755))
+                   then Just (Git.BlobEntry (Tagged (Oid oid))
+                                            (attrs == 0o100755))
                    else Just (Git.TreeEntry
-                              (Git.ByOid (Tagged (coidPtrToOid coid))))
+                              (Git.ByOid (Tagged (Oid oid))))
 
   -- Prelude.putStrLn $ "Result: " ++ show y
   -- Prelude.putStrLn $ "Names: " ++ show names
@@ -263,15 +290,15 @@ lookupTreeEntry tr path = do
 --   nothing will happen.
 lgWriteTree :: Tree -> LgRepository (Git.TreeOid LgRepository)
 lgWriteTree t@(Tree { lgTreeInfo = Base { gitId = Just coid } }) =
-    return (Tagged (coidToOid coid))
-lgWriteTree t = Tagged . coidToOid <$> doWriteTree t
+    return (Tagged coid)
+lgWriteTree t = Tagged <$> doWriteTree t
 
-doWriteTree :: Tree -> LgRepository COid
+doWriteTree :: Tree -> LgRepository Oid
 doWriteTree t = do repo <- lgGet
                    go (lgTreeContents t) (repoObj repo)
   where
     go :: ForeignPtr C'git_treebuilder -> ForeignPtr C'git_repository
-          -> LgRepository COid
+          -> LgRepository Oid
     go fptr repo = do
         (r3,coid) <- liftIO $ do
             coid <- mallocForeignPtr
@@ -281,7 +308,7 @@ doWriteTree t = do repo <- lgGet
                     r3 <- c'git_treebuilder_write coid' repoPtr builder
                     return (r3,coid)
         when (r3 < 0) $ failure Git.TreeBuilderWriteFailed
-        return coid
+        return (Oid coid)
 
 doModifyTree :: Tree
              -> [Text]
@@ -328,22 +355,23 @@ doModifyTree t (name:names) createIfNotExist f = do
           -- 'Left' values.
           case y of
               Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-              Just (Git.TreeEntry st') -> do
+              Just (Git.TreeEntry (Git.ByOid st')) ->
+                  failure Git.TreeWalkFailed
+              Just (Git.TreeEntry (Git.Known st)) -> do
                   liftIO $ putStrLn "doModifyTree 4.."
-                  st <- Git.resolveTreeRef st'
                   ze <- doModifyTree st names createIfNotExist f
                   -- stSize <- readIORef (lgTreeSize st)
                   -- returnTree t name $ if stSize == 0
                   --                     then Nothing
                   --                     else ze
-                  returnTree t name ze
+                  returnTree t name y
   where
     returnTree t n z = do
         case z of
             Nothing -> dropEntry (lgTreeContents t) n
             Just z' -> do
                 (oid,mode) <- treeEntryToOid z'
-                insertEntry (lgTreeContents t) n (oidToCoid oid) mode
+                insertEntry (lgTreeContents t) n oid mode
         return z
 
     treeEntryToOid (Git.BlobEntry oid exe) =
@@ -355,13 +383,13 @@ doModifyTree t (name:names) createIfNotExist f = do
         return (unTagged oid, 0o040000)
 
     insertEntry :: CStringable a
-                => ForeignPtr C'git_treebuilder -> a -> COid -> CUInt
+                => ForeignPtr C'git_treebuilder -> a -> Oid -> CUInt
                 -> LgRepository ()
-    insertEntry builder key coid attrs = do
-      r2 <- liftIO $ withForeignPtr coid $ \coid' ->
+    insertEntry builder key oid attrs = do
+      r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
           withForeignPtr builder $ \ptr ->
           withCStringable key $ \name ->
-              c'git_treebuilder_insert nullPtr ptr name coid' attrs
+              c'git_treebuilder_insert nullPtr ptr name coid attrs
       when (r2 < 0) $ failure Git.TreeBuilderInsertFailed
 
     dropEntry :: CStringable a
@@ -388,7 +416,7 @@ splitPath path = T.splitOn "/" text
 
 instance Git.Commitish Commit where
     type CommitRepository = LgRepository
-    commitOid     = Tagged . coidToOid . fromJust . gitId . lgCommitInfo
+    commitOid     = Tagged . fromJust . gitId . lgCommitInfo
     commitParents = lgCommitParents
     commitTree    = lgCommitTree
 
@@ -400,7 +428,7 @@ instance Git.Treeish Commit where
 
 lgLookupCommit :: Int -> Git.CommitOid LgRepository -> LgRepository Commit
 lgLookupCommit len oid =
-  lookupObject' (unTagged oid) len c'git_commit_lookup
+  lookupObject' (getOid (unTagged oid)) len c'git_commit_lookup
                 c'git_commit_lookup_prefix $ \coid obj _ ->
       withForeignPtr obj $ \cobj -> do
         let c = castPtr cobj
@@ -415,18 +443,20 @@ lgLookupCommit len oid =
         auth  <- c'git_commit_author c    >>= packSignature conv
         comm  <- c'git_commit_committer c >>= packSignature conv
         toid  <- c'git_commit_tree_oid c
+        toid' <- coidPtrToOid toid
 
         pn    <- c'git_commit_parentcount c
         poids <- sequence
                  (zipWith ($) (replicate (fromIntegral (toInteger pn))
                                (c'git_commit_parent_oid c)) [0..pn])
+        poids' <- mapM (\x -> Tagged . Oid <$> coidPtrToOid x) poids
 
         return Commit
-            { lgCommitInfo      = Base (Just coid) (Just obj)
+            { lgCommitInfo      = Base (Just (Oid coid)) (Just obj)
             , lgCommitAuthor    = auth
             , lgCommitCommitter = comm
-            , lgCommitTree      = Git.ByOid (Tagged (coidPtrToOid toid))
-            , lgCommitParents   = map (Tagged . coidPtrToOid) poids
+            , lgCommitTree      = Git.ByOid (Tagged (Oid toid'))
+            , lgCommitParents   = poids'
             , lgCommitLog       = U.toUnicode conv msg
             , lgCommitEncoding  = encs
             }
@@ -447,7 +477,7 @@ lgLookupObject str len
         case fptr of
             Nothing -> failure (Git.ObjectLookupFailed str len)
             Just x  ->
-                lookupObject' (coidToOid x) len
+                lookupObject' x len
                   (\x y z -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
                   (\x y z l ->
                     c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY) go
@@ -457,16 +487,16 @@ lgLookupObject str len
     go coid x y = do
         typ <- liftIO $ c'git_object_type y
         if typ == c'GIT_OBJ_BLOB
-            then ret Git.BlobRef coid
+            then ret Git.BlobRef (Oid coid)
             else if typ == c'GIT_OBJ_TREE
-                 then ret Git.TreeRef coid
+                 then ret Git.TreeRef (Oid coid)
                  else if typ == c'GIT_OBJ_COMMIT
-                      then ret Git.CommitRef coid
+                      then ret Git.CommitRef (Oid coid)
                       else if typ == c'GIT_OBJ_TAG
-                           then ret Git.TagRef coid
+                           then ret Git.TagRef (Oid coid)
                            else failure (Git.ObjectLookupFailed str len)
 
-    ret f = return . f . Git.ByOid . Tagged . coidToOid
+    ret f = return . f . Git.ByOid . Tagged
 
 addCommitParent :: Commit -> Commit -> Commit
 addCommitParent co p =
@@ -474,8 +504,12 @@ addCommitParent co p =
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-lgCreateCommit :: [Git.CommitOid LgRepository] -> Git.ObjRef Tree
-               -> Git.Signature -> Git.Signature -> Text -> Maybe Text
+lgCreateCommit :: [Git.CommitOid LgRepository]
+               -> Git.ObjRef LgRepository Tree
+               -> Git.Signature
+               -> Git.Signature
+               -> Text
+               -> Maybe Text
                -> LgRepository Commit
 lgCreateCommit parents tree author committer logText ref = do
     repo <- lgGet
@@ -502,7 +536,7 @@ lgCreateCommit parents tree author committer logText ref = do
                 return coid
 
     return Commit
-        { lgCommitInfo      = Base (Just coid) Nothing
+        { lgCommitInfo      = Base (Just (Oid coid)) Nothing
         , lgCommitAuthor    = author
         , lgCommitCommitter = committer
         , lgCommitTree      = tree
@@ -530,10 +564,191 @@ getCommitParentPtrs repo parents =
     withForeignPtr (repoObj repo) $ \repoPtr ->
     for parents $ \oid ->
     alloca $ \ptr ->
-    withForeignPtr (oidToCoid (unTagged oid)) $ \coid -> do
+    withForeignPtr (getOid (unTagged oid)) $ \coid -> do
         r <- c'git_commit_lookup ptr repoPtr coid
         when (r < 0) $ throwIO Git.CommitLookupFailed
         ptr' <- peek ptr
         FC.newForeignPtr ptr' (c'git_commit_free ptr')
+
+lgLookupRef :: Text -> LgRepository (Git.Reference LgRepository)
+lgLookupRef name = do
+    repo <- lgGet
+    targ <- liftIO $ alloca $ \ptr -> do
+        r <- withForeignPtr (repoObj repo) $ \repoPtr ->
+              withCStringable name $ \namePtr ->
+                c'git_reference_lookup ptr repoPtr namePtr
+        if r < 0
+            then failure (Git.ReferenceLookupFailed name)
+            else do
+            ref  <- peek ptr
+            fptr <- newForeignPtr p'git_reference_free ref
+            typ  <- c'git_reference_type ref
+            if typ == c'GIT_REF_OID
+                then do oidPtr <- c'git_reference_oid ref
+                        Git.RefOid . Oid <$> coidPtrToOid oidPtr
+                else do targName <- c'git_reference_target ref
+                        packCString targName
+                            >>= return . Git.RefSymbolic . T.decodeUtf8
+    return $ Git.Reference { Git.refName   = name
+                           , Git.refTarget = targ }
+
+lgWriteRef :: Git.Reference LgRepository -> LgRepository ()
+lgWriteRef ref = do
+    repo <- lgGet
+    liftIO $ alloca $ \ptr ->
+        withForeignPtr (repoObj repo) $ \repoPtr ->
+        withCStringable (Git.refName ref) $ \namePtr -> do
+            r <- case Git.refTarget ref of
+                Git.RefOid oid ->
+                    withForeignPtr (getOid oid) $ \coidPtr ->
+                        c'git_reference_create_oid ptr repoPtr namePtr
+                                                   coidPtr (fromBool True)
+
+                Git.RefSymbolic symName ->
+                  withCStringable symName $ \symPtr ->
+                    c'git_reference_create_symbolic ptr repoPtr namePtr
+                                                    symPtr (fromBool True)
+            when (r < 0) $ failure Git.ReferenceCreateFailed
+
+-- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
+--   const char *name)
+
+lgResolveRef :: Text -> LgRepository Oid
+lgResolveRef name = do
+    repo <- lgGet
+    oid <- liftIO $ alloca $ \ptr ->
+        withCStringable name $ \namePtr ->
+        withForeignPtr (repoObj repo) $ \repoPtr -> do
+            r <- c'git_reference_name_to_oid ptr repoPtr namePtr
+            if r < 0
+                then return Nothing
+                else Just <$> coidPtrToOid ptr
+    maybe (failure (Git.ReferenceLookupFailed name))
+          (return . Oid) oid
+
+-- int git_reference_rename(git_reference *ref, const char *new_name,
+--   int force)
+
+--renameRef = c'git_reference_rename
+
+-- int git_reference_delete(git_reference *ref)
+
+--deleteRef = c'git_reference_delete
+
+-- int git_reference_packall(git_repository *repo)
+
+--packallRefs = c'git_reference_packall
+
+data ListFlags = ListFlags { listFlagInvalid  :: Bool
+                           , listFlagOid      :: Bool
+                           , listFlagSymbolic :: Bool
+                           , listFlagPacked   :: Bool
+                           , listFlagHasPeel  :: Bool }
+               deriving (Show, Eq)
+
+allRefsFlag :: ListFlags
+allRefsFlag = ListFlags { listFlagInvalid  = False
+                        , listFlagOid      = True
+                        , listFlagSymbolic = True
+                        , listFlagPacked   = True
+                        , listFlagHasPeel  = False }
+
+-- symbolicRefsFlag :: ListFlags
+-- symbolicRefsFlag = ListFlags { listFlagInvalid  = False
+--                              , listFlagOid      = False
+--                              , listFlagSymbolic = True
+--                              , listFlagPacked   = False
+--                              , listFlagHasPeel  = False }
+
+-- oidRefsFlag :: ListFlags
+-- oidRefsFlag = ListFlags { listFlagInvalid  = False
+--                         , listFlagOid      = True
+--                         , listFlagSymbolic = False
+--                         , listFlagPacked   = True
+--                         , listFlagHasPeel  = False }
+
+-- looseOidRefsFlag :: ListFlags
+-- looseOidRefsFlag = ListFlags { listFlagInvalid  = False
+--                              , listFlagOid      = True
+--                              , listFlagSymbolic = False
+--                              , listFlagPacked   = False
+--                              , listFlagHasPeel  = False }
+
+gitStrArray2List :: Ptr C'git_strarray -> IO [Text]
+gitStrArray2List gitStrs = do
+  count <- fromIntegral <$> ( peek $ p'git_strarray'count gitStrs )
+  strings <- peek $ p'git_strarray'strings gitStrs
+
+  r0 <- Foreign.Marshal.Array.peekArray count strings
+  r1 <- sequence $ fmap peekCString r0
+  return $ fmap T.pack r1
+
+flagsToInt :: ListFlags -> CUInt
+flagsToInt flags = (if listFlagOid flags      then 1 else 0)
+                 + (if listFlagSymbolic flags then 2 else 0)
+                 + (if listFlagPacked flags   then 4 else 0)
+                 + (if listFlagHasPeel flags  then 8 else 0)
+
+-- listRefNames :: ListFlags -> LgRepository [Text]
+-- listRefNames flags = do
+--     repo <- lgGet
+--     refs <- liftIO $ alloca $ \c'refs ->
+--       withForeignPtr (repoObj repo) $ \repoPtr -> do
+--         r <- c'git_reference_list c'refs repoPtr (flagsToInt flags)
+--         if r < 0
+--             then return Nothing
+--             else do refs <- gitStrArray2List c'refs
+--                     c'git_strarray_free c'refs
+--                     return (Just refs)
+--     maybe (failure Git.ReferenceListingFailed) return refs
+
+foreachRefCallback :: CString -> Ptr () -> IO CInt
+foreachRefCallback name payload = do
+  (callback,results) <- peek (castPtr payload) >>= deRefStablePtr
+  result <- packCString name >>= callback . T.decodeUtf8
+  modifyIORef results (\xs -> result:xs)
+  return 0
+
+foreign export ccall "foreachRefCallback"
+  foreachRefCallback :: CString -> Ptr () -> IO CInt
+foreign import ccall "&foreachRefCallback"
+  foreachRefCallbackPtr :: FunPtr (CString -> Ptr () -> IO CInt)
+
+lgTraverseRefs ::
+    (Git.Reference LgRepository -> LgRepository a) -> LgRepository [a]
+lgTraverseRefs cb = do
+    repo <- lgGet
+    liftIO $ do
+        ioRef <- newIORef []
+        bracket
+            (newStablePtr (cb,ioRef))
+            deRefStablePtr
+            (\ptr -> with ptr $ \pptr ->
+              withForeignPtr (repoObj repo) $ \repoPtr -> do
+                  _ <- c'git_reference_foreach
+                           repoPtr (flagsToInt allRefsFlag)
+                           foreachRefCallbackPtr (castPtr pptr)
+                  readIORef ioRef)
+
+-- mapAllRefs :: (Text -> LgRepository a) -> LgRepository [a]
+-- mapAllRefs repo = mapRefs repo allRefsFlag
+-- mapOidRefs :: (Text -> LgRepository a) -> LgRepository [a]
+-- mapOidRefs repo = mapRefs repo oidRefsFlag
+-- mapLooseOidRefs :: (Text -> LgRepository a) -> LgRepository [a]
+-- mapLooseOidRefs repo = mapRefs repo looseOidRefsFlag
+-- mapSymbolicRefs :: (Text -> LgRepository a) -> LgRepository [a]
+-- mapSymbolicRefs repo = mapRefs repo symbolicRefsFlag
+
+-- int git_reference_is_packed(git_reference *ref)
+
+--refIsPacked = c'git_reference_is_packed
+
+-- int git_reference_reload(git_reference *ref)
+
+--reloadRef = c'git_reference_reload
+
+-- int git_reference_cmp(git_reference *ref1, git_reference *ref2)
+
+--compareRef = c'git_reference_cmp
 
 -- Libgit2.hs

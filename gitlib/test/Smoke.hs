@@ -56,7 +56,7 @@ withRepository dir action = do
 oid :: Treeish t => t -> TreeRepository Text
 oid = writeTree >=> return . oidToText . unTagged
 
-oidToText :: Oid -> Text
+oidToText :: Repository m => Oid m -> Text
 oidToText = T.pack . show
 
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)

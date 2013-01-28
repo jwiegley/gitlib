@@ -79,45 +79,55 @@ openRepositoryWith path fn = do
 
 type ObjPtr a = Maybe (ForeignPtr a)
 
-data Base = Base { gitId  :: Maybe COid
+data Base = Base { gitId  :: Maybe (Git.Oid LgRepository)
                  , gitObj :: ObjPtr C'git_object }
-          deriving Eq
 
-instance Show Base where
-  show x = case gitId x of
-             Nothing -> "Base..."
-             Just y  -> "Base#" ++ show y
+-- instance Show Base where
+--   show x = case gitId x of
+--              Nothing -> "Base..."
+--              Just y  -> "Base#" ++ show y
 
--- | 'COid' is a type wrapper for a foreign pointer to libgit2's 'git_oid'
---   structure.  Users should not have to deal with this type.
-type COid = ForeignPtr C'git_oid
+-- -- | 'COid' is a type wrapper for a foreign pointer to libgit2's 'git_oid'
+-- --   structure.  Users should not have to deal with this type.
+-- type COid = ForeignPtr C'git_oid
 
-coidToOid :: COid -> Git.Oid
-coidToOid coid =
-    Git.Oid (unsafePerformIO $ withForeignPtr coid $ packCString . castPtr)
+-- coidToOid :: COid -> Oid
+-- coidToOid coid =
+--     Oid (unsafePerformIO $ withForeignPtr coid $ packCString . castPtr)
 
-coidPtrToOid :: Ptr C'git_oid -> Git.Oid
-coidPtrToOid coidptr =
-    Git.Oid (unsafePerformIO (packCString (castPtr coidptr)))
+-- coidPtrToOid :: Ptr C'git_oid -> Oid
+-- coidPtrToOid coidptr =
+--     Oid (unsafePerformIO (packCString (castPtr coidptr)))
 
-oidToCoid :: Git.Oid -> COid
-oidToCoid (Git.Oid oid) = unsafePerformIO $ do
+-- oidToCoid :: Oid -> COid
+-- oidToCoid (Oid oid) = unsafePerformIO $ do
+--     fptr <- mallocForeignPtr
+--     withForeignPtr fptr $ \ptr ->
+--         useAsCString oid (c'git_oid_fromraw ptr . castPtr)
+--     return fptr
+
+coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
+coidPtrToOid coidptr = do
     fptr <- mallocForeignPtr
     withForeignPtr fptr $ \ptr ->
-        useAsCString oid (c'git_oid_fromraw ptr . castPtr)
+        c'git_oid_cpy ptr coidptr
     return fptr
 
+oidToStr :: Ptr C'git_oid -> IO String
+oidToStr = c'git_oid_allocfmt >=> peekCString
+
 lookupObject'
-  :: Git.Oid -> Int
+  :: ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
-  -> (COid -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
+  -> (ForeignPtr C'git_oid
+      -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
   -> LgRepository b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- lgGet
     liftIO $ alloca $ \ptr -> do
       r <- withForeignPtr (repoObj repo) $ \repoPtr ->
-          withForeignPtr (oidToCoid oid) $ \oidPtr ->
+          withForeignPtr oid $ \oidPtr ->
               if len == 40
               then lookupFn ptr repoPtr oidPtr
               else lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
