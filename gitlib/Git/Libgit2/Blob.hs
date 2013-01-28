@@ -26,7 +26,7 @@ import           Git.Libgit2.Types
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the give string is 'empty', it is an error.
 lgCreateBlob ::
-    Git.Repository m => Git.BlobContents m -> LgRepository (Git.BlobOid m)
+    Git.BlobContents LgRepository -> LgRepository (Git.BlobOid LgRepository)
 lgCreateBlob b = do
     repo <- lgGet
     ptr  <- liftIO $ mallocForeignPtr
