@@ -10,3 +10,6 @@
 [submodule "vendor/c2hsc"]
 	path = vendor/c2hsc
 	url = git://github.com/jwiegley/c2hsc.git
+[submodule "vendor/conduit"]
+	path = vendor/conduit
+	url = git://github.com/snoyberg/conduit.git
