@@ -31,3 +31,6 @@
 [submodule "vendor/http-types"]
 	path = vendor/http-types
 	url = git://github.com/jwiegley/http-types.git
+[submodule "vendor/rest-client"]
+	path = vendor/rest-client
+	url = git://github.com/fpco/rest-client
