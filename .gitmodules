@@ -7,3 +7,6 @@
 [submodule "vendor/aws"]
 	path = vendor/aws
 	url = git://github.com/jwiegley/aws
+[submodule "vendor/c2hsc"]
+	path = vendor/c2hsc
+	url = git://github.com/jwiegley/c2hsc.git
