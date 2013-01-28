@@ -13,3 +13,6 @@
 [submodule "vendor/conduit"]
 	path = vendor/conduit
 	url = git://github.com/snoyberg/conduit.git
+[submodule "vendor/convertible"]
+	path = vendor/convertible
+	url = git://github.com/jwiegley/convertible
