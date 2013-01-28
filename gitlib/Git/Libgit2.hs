@@ -39,7 +39,6 @@ import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git as Git
 import           Git.Libgit2.Blob
-import           Git.Libgit2.Internal
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
