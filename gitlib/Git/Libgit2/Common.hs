@@ -5,15 +5,18 @@ module Git.Libgit2.Common
        , withSignature )
        where
 
+import           Bindings.Libgit2
 import qualified Data.ByteString as BS
-import qualified Git
-import           Git.Libgit2.Internal
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
-import qualified Prelude
+import           Foreign.Marshal.Alloc
+import           Foreign.Ptr
+import           Foreign.Storable
+import qualified Git
+import           Git.Libgit2.Internal
 
 -- | Convert a time in seconds (from Stripe's servers) to 'UTCTime'. See
 --   "Data.Time.Format" for more on working with 'UTCTime'.

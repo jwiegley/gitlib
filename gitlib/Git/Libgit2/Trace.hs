@@ -5,13 +5,11 @@
 
 module Data.Git.Backend.Trace ( traceBackend ) where
 
-import Data.ByteString.Unsafe
-import Data.Git.Backend
-import Data.Git.Error
-import Data.Git.Internal
-import Data.Git.Oid
-import Debug.Trace (trace)
-import Prelude hiding ((.), mapM_)
+import           Data.ByteString.Unsafe
+import           Debug.Trace (trace)
+import qualified Git
+import           Git.Libgit2
+import           Prelude hiding ((.), mapM_)
 
 data TraceBackend = TraceBackend { traceParent :: C'git_odb_backend
                                  , traceNext   :: Ptr C'git_odb_backend }

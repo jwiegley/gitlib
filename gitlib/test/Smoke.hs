@@ -63,7 +63,7 @@ oid' = update >=> return . oidToText . Just
 oidToText :: Maybe (Tagged a Oid) -> Text
 oidToText = T.pack . show . fromJust
 
-sampleCommit :: Repository m => Tree -> Signature -> m Commit
+sampleCommit :: (Repository m, Commit c, Tree t) => t -> Signature -> m c
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message."
 

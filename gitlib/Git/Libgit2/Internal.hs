@@ -8,10 +8,12 @@ module Git.Libgit2.Internal where
 
 import           Bindings.Libgit2
 import           Control.Applicative
+import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.State
 import           Data.ByteString
+import           Data.Dynamic
 import           Data.Stringable
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -101,20 +103,19 @@ oidToCoid (Git.Oid oid) = unsafePerformIO $ do
     return fptr
 
 lookupObject'
-  :: Git.Oid
+  :: Git.Oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
   -> (COid -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
   -> LgRepository b
-lookupObject' oid lookupFn lookupPrefixFn createFn = do
+lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- lgGet
     liftIO $ alloca $ \ptr -> do
       r <- withForeignPtr (repoObj repo) $ \repoPtr ->
           withForeignPtr (oidToCoid oid) $ \oidPtr ->
-              lookupFn ptr repoPtr oidPtr
-               -- PartialOid (COid oid') len ->
-               --   withForeignPtr oid' $ \oidPtr ->
-               --     lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
+              if len == 40
+              then lookupFn ptr repoPtr oidPtr
+              else lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
       if r < 0
         then error "lookupObject' failed"
         else do
@@ -125,5 +126,41 @@ lookupObject' oid lookupFn lookupPrefixFn createFn = do
 
         fptr <- newForeignPtr p'git_object_free ptr'
         createFn coidCopy fptr ptr'
+
+lgLookupObject :: Text -> LgRepository Dynamic
+lgLookupObject str
+    | len > 40 = failure (Git.ObjectLookupFailed str)
+    | otherwise = do
+        fptr <- liftIO $ do
+            fptr <- mallocForeignPtr
+            withForeignPtr fptr $ \ptr ->
+                withCStringable str $ \cstr -> do
+                    r <- c'git_oid_fromstrn ptr cstr (fromIntegral len)
+                    return $ if r < 0
+                             then Nothing
+                             else Just fptr
+        case fptr of
+            Nothing -> failure (Git.ObjectLookupFailed str)
+            Just x  ->
+                lookupObject' (coidToOid x) len
+                  (\x y z -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
+                  (\x y z l ->
+                    c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
+                  (\coid x y ->
+                    c'git_object_type y >>= createObject coid x)
+  where
+    len = T.length str
+
+createObject :: COid -> ForeignPtr C'git_object -> C'git_otype -> IO Dynamic
+createObject coid obj typ
+  | typ == c'GIT_OBJ_BLOB = undefined
+    -- return $ toDyn Git.Blob { Git.blobContents = Git.BlobString "" }
+
+  | typ == c'GIT_OBJ_TREE = undefined
+    -- return $ toDyn Git.Tree { treeInfo =
+    --                                newBase repo (Stored coid) (Just obj)
+    --                         , treeContents = M.empty }
+
+  | otherwise = return undefined
 
 -- Blob.hs

@@ -14,8 +14,14 @@ module Git.Libgit2.Backend
        )
        where
 
-import           Git.Libgit2.Internal
-import qualified Prelude
+import Bindings.Libgit2
+import Foreign.C.Types
+import Foreign.ForeignPtr
+import Foreign.Marshal.Alloc
+import Foreign.Ptr
+import Foreign.Storable
+import Git.Libgit2.Internal
+import Git.Libgit2.Types
 
 type F'git_odb_backend_read_callback =
   Ptr (Ptr ()) -> Ptr CSize -> Ptr C'git_otype -> Ptr C'git_odb_backend
@@ -40,7 +46,7 @@ type F'git_odb_backend_exists_callback =
 type F'git_odb_backend_free_callback = Ptr C'git_odb_backend -> IO ()
 
 odbBackendAdd :: Repository -> Ptr C'git_odb_backend -> Int
-                 -> IO (Result Repository)
+                 -> IO (Either String Repository)
 odbBackendAdd repo backend priority =
   withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \odbPtr -> do
