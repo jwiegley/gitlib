@@ -37,3 +37,6 @@
 [submodule "vendor/stringable"]
 	path = vendor/stringable
 	url = git://github.com/jwiegley/stringable.git
+[submodule "vendor/svndump"]
+	path = vendor/svndump
+	url = git://github.com/jwiegley/svndump.git
