@@ -22,3 +22,6 @@
 [submodule "vendor/general-prelude"]
 	path = vendor/general-prelude
 	url = git://github.com/jwiegley/general-prelude.git
+[submodule "vendor/hsubconvert"]
+	path = vendor/hsubconvert
+	url = git://github.com/jwiegley/svndump.git
