@@ -1,6 +1,6 @@
 Name:                gitlib
 Version:             1.0.0
-Synopsis:            Higher-level types for working with hlibgit2
+Synopsis:            API library for working with Git repositories
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley
@@ -9,84 +9,79 @@ Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
 Description:
-  @gitlib@ is a high-level, lazy and conduit-aware type wrapper around the
-  libgit2 C library (<http://libgit2.github.com>).  The aim is both
-  type-safety and convenience of use for Haskell users, combined with high
-  performance and minimal memory footprint by taking advantage of Haskell's
-  laziness and the conduit library's deterministic resource cleanup.
+  @gitlib@ is a high-level, lazy and conduit-aware set of abstractions for
+  programming with Git types.  Several different backends are available,
+  including one for the libgit2 C library (<http://libgit2.github.com>).  The
+  aim is both type-safety and convenience of use for Haskell users, combined
+  with high performance and minimal memory footprint by taking advantage of
+  Haskell's laziness and the conduit library's deterministic resource cleanup.
   .
-  For further information, as well as typical use cases, see
-  "Git.Tutorial".
+  For further information, as well as typical use cases, see "Git.Tutorial".
 
 Source-repository head
   type: git
   location: git://github.com/fpco/gitlib.git
 
 Test-suite smoke
-  Default-language: Haskell98
-  Type: exitcode-stdio-1.0
-  Main-is: Smoke.hs
-  Hs-source-dirs: test
-  Build-depends: base >=3
-    , gitlib
-    , hlibgit2        >= 0.17
-    , HUnit           >= 1.2.5
-    , bytestring      >= 0.9.2.1
-    , containers      >= 0.4.2
-    , lens            >= 2.8
-    , parallel-io     >= 0.3.2.1
-    , stringable      >= 0.1.1
-    , system-fileio   >= 0.3.9
-    , system-filepath >= 0.4.7
-    , text            >= 0.11.2
-    , time            >= 1.4
+    Default-language: Haskell98
+    Type: exitcode-stdio-1.0
+    Main-is: Smoke.hs
+    Hs-source-dirs: test
+    Build-depends: 
+          base >=3
+        , gitlib
+        , hlibgit2        >= 0.17
+        , HUnit           >= 1.2.5
+        , bytestring      >= 0.9.2.1
+        , containers      >= 0.4.2
+        , failure         >= 0.2.0.1
+        , lens            >= 2.8
+        , parallel-io     >= 0.3.2.1
+        , stringable      >= 0.1.1
+        , system-fileio   >= 0.3.9
+        , system-filepath >= 0.4.7
+        , tagged          >= 0.4.4
+        , text            >= 0.11.2
+        , time            >= 1.4
+        , transformers    >= 0.3
 
 Test-suite doctests
-  Default-language: Haskell98
-  Type:    exitcode-stdio-1.0
-  Main-is: Doctest.hs
-  Hs-source-dirs: test
-  Build-depends: base == 4.*
-    , directory >= 1.0 && < 1.3
-    , doctest   >= 0.8 && <= 0.10
-    , filepath  >= 1.3 && < 1.4
+    Default-language: Haskell98
+    Type:    exitcode-stdio-1.0
+    Main-is: Doctest.hs
+    Hs-source-dirs: test
+    Build-depends:      
+          base
+        , directory    >= 1.0
+        , doctest      >= 0.8
+        , doctest-prop >= 0.1
+        , filepath     >= 1.3
 
 Library
-  default-language:   Haskell98
-  default-extensions: ForeignFunctionInterface
-  build-depends:
-      base            >= 3 && < 5
-    , hlibgit2        >= 0.17
-    , bytestring      >= 0.9.2.1
-    , conduit         >= 0.5.5
-    , containers      >= 0.4.2
-    , data-default    >= 0.5.0
-    , failure         >= 0.2.0.1
-    , hex             >= 0.1.2
-    , lens            >= 3.7
-    , parallel-io     >= 0.3.2.1
-    , pointless-fun   >= 1.1.0.1
-    , stringable      >= 0.1.1
-    , system-fileio   >= 0.3.9
-    , system-filepath >= 0.4.7
-    , tagged          >= 0.2.3.1
-    , text            >= 0.11.2
-    , text-icu        >= 0.6.3
-    , time            >= 1.4
-    , transformers    >= 0.3.0.0
-  exposed-modules:
-    Git
-    Git.Backend.Libgit2
-    -- Git.Backend.Trace
-    -- Git.Blob
-    -- Git.Commit
-    -- Git.Common
-    -- Git.Internal
-    -- Git.Object
-    -- Git.Oid
-    -- Git.Reference
-    -- Git.Tag
-    -- Git.Tree
-    -- Git.Tutorial
-  -- other-modules:
-  --   Git.Internal
+    default-language:   Haskell98
+    default-extensions: ForeignFunctionInterface
+    build-depends:
+          base            >= 3 && < 5
+        , hlibgit2        >= 0.17
+        , attempt         >= 0.4.0
+        , bytestring      >= 0.9.2.1
+        , conduit         >= 0.5.5
+        , containers      >= 0.4.2
+        , data-default    >= 0.5.0
+        , failure         >= 0.2.0.1
+        , hex             >= 0.1.2
+        , lens            >= 3.7
+        , parallel-io     >= 0.3.2.1
+        , pointless-fun   >= 1.1.0.1
+        , stringable      >= 0.1.1
+        , system-fileio   >= 0.3.9
+        , system-filepath >= 0.4.7
+        , tagged          >= 0.2.3.1
+        , text            >= 0.11.2
+        , text-icu        >= 0.6.3
+        , time            >= 1.4
+        , transformers    >= 0.3.0.0
+    exposed-modules:
+        Git
+        Git.Libgit2
+        -- Git.Tutorial

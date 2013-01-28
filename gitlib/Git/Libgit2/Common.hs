@@ -1,17 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Data.Git.Common
-       ( Signature(..)
-       , createSignature
-       , packSignature
-       , withSignature
-
-       , Base(..)
-       , newBase )
+module Git.Libgit2.Common
+       ( packSignature
+       , withSignature )
        where
 
 import qualified Data.ByteString as BS
-import           Data.Git.Internal
+import qualified Git
+import           Git.Libgit2.Internal
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
 import           Data.Time
@@ -19,11 +15,6 @@ import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
 import qualified Prelude
 
-data Signature = Signature { signatureName  :: Text
-                           , signatureEmail :: Text
-                           , signatureWhen  :: UTCTime }
-               deriving (Show, Eq)
-
 -- | Convert a time in seconds (from Stripe's servers) to 'UTCTime'. See
 --   "Data.Time.Format" for more on working with 'UTCTime'.
 fromSeconds :: Integer -> UTCTime
@@ -43,34 +34,24 @@ packGitTime utcTime =
   C'git_time { c'git_time'time   = fromIntegral (toSeconds utcTime)
              , c'git_time'offset = 0 } -- jww (2012-09-29): NYI
 
-createSignature :: Signature
-createSignature =
-  Signature { signatureName  = T.empty
-            , signatureEmail = T.empty
-            , signatureWhen  =
-              UTCTime { utctDay =
-                           ModifiedJulianDay {
-                             toModifiedJulianDay = 0 }
-                      , utctDayTime = secondsToDiffTime 0 } }
-
-packSignature :: U.Converter -> Ptr C'git_signature -> IO Signature
+packSignature :: U.Converter -> Ptr C'git_signature -> IO Git.Signature
 packSignature conv sig = do
   name  <- peek (p'git_signature'name sig)  >>= BS.packCString
   email <- peek (p'git_signature'email sig) >>= BS.packCString
   time  <- peekGitTime (p'git_signature'when sig)
   return $
-    Signature { signatureName  = U.toUnicode conv name
-              , signatureEmail = U.toUnicode conv email
-              , signatureWhen  = time }
+    Git.Signature { Git.signatureName  = U.toUnicode conv name
+                  , Git.signatureEmail = U.toUnicode conv email
+                  , Git.signatureWhen  = time }
 
-withSignature :: U.Converter -> Signature
+withSignature :: U.Converter -> Git.Signature
               -> (Ptr C'git_signature -> IO a) -> IO a
 withSignature conv sig f =
-  BS.useAsCString (U.fromUnicode conv (signatureName sig)) $ \nameCStr ->
-    BS.useAsCString (U.fromUnicode conv (signatureEmail sig)) $ \emailCStr ->
-      alloca $ \ptr -> do
-        poke ptr (C'git_signature nameCStr emailCStr
-                                  (packGitTime (signatureWhen sig)))
-        f ptr
+  BS.useAsCString (U.fromUnicode conv (Git.signatureName sig)) $ \nameCStr ->
+  BS.useAsCString (U.fromUnicode conv (Git.signatureEmail sig)) $ \emailCStr ->
+  alloca $ \ptr -> do
+      poke ptr (C'git_signature nameCStr emailCStr
+                (packGitTime (Git.signatureWhen sig)))
+      f ptr
 
 -- Common.hs

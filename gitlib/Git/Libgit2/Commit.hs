@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Data.Git.Commit
+module Git.Libgit2.Commit
        ( Commit(..)
        , PinnedEntry(..)
        , newCommitBase
@@ -23,10 +23,10 @@ module Data.Git.Commit
 import           Bindings.Libgit2
 import qualified Data.ByteString as BS
 import           Data.ByteString.Unsafe
-import           Data.Git.Common
-import           Data.Git.Internal
-import           Data.Git.Reference
-import           Data.Git.Tree
+import           Git.Libgit2.Common
+import           Git.Libgit2.Internal
+import           Git.Libgit2.Reference
+import           Git.Libgit2.Tree
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.ICU.Convert as U
@@ -69,22 +69,22 @@ newCommitBase t =
 --
 --   Since empty commits cannot exist in Git, attempting to write out an empty
 --   commit is a no-op.
-createCommit :: Repository -> Signature -> Commit
-createCommit repo sig =
+lgCreateCommit :: Signature -> LgRepository Commit
+lgCreateCommit sig =
   Commit { commitInfo     =
-           newBase repo (Pending (flip doWriteCommit Nothing >=> return . snd))
+           newBase (Pending (flip doWriteCommit Nothing >=> return . snd))
                    Nothing
          , commitAuthor    = sig
          , commitCommitter = sig
-         , commitTree      = ObjRef (createTree repo)
+         , commitTree      = ObjRef newTree
          , commitParents   = []
          , commitLog       = T.empty
          , commitEncoding  = ""
          , commitObj       = Nothing }
 
-lookupCommit :: Repository -> Oid -> IO (Maybe Commit)
-lookupCommit repo oid =
-  lookupObject' repo oid c'git_commit_lookup c'git_commit_lookup_prefix $
+lgLookupCommit :: Oid -> LgRepository Commit
+lgLookupCommit oid =
+  lookupObject' oid c'git_commit_lookup c'git_commit_lookup_prefix $
     \coid obj _ ->
       withForeignPtr obj $ \cobj -> do
         let c = castPtr cobj
@@ -107,7 +107,7 @@ lookupCommit repo oid =
                                               (c'git_commit_parent_oid c))
                                    [0..pn])
 
-        return Commit { commitInfo      = newBase repo (Stored coid) (Just obj)
+        return Commit { commitInfo      = newBase (Stored coid) (Just obj)
                       , commitAuthor    = auth
                       , commitCommitter = comm
                       , commitTree      = toid
@@ -116,10 +116,10 @@ lookupCommit repo oid =
                       , commitEncoding  = encs
                       , commitObj       = Just $ unsafeCoerce obj }
 
-lookupRefCommit :: Repository -> Text -> IO (Maybe Commit)
-lookupRefCommit repo ref = do
-  oid <- resolveRef repo ref
-  maybe (return Nothing) (lookupCommit repo) oid
+lookupRefCommit :: Text -> LgRepository Commit
+lookupRefCommit ref = do
+  oid <- resolveRef ref
+  maybe (return Nothing) lookupCommit oid
 
 addCommitParent :: Commit -> Commit -> Commit
 addCommitParent co p = co { commitParents = commitParents co ++ [ObjRef p] }

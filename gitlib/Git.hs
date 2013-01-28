@@ -13,6 +13,7 @@ import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.Attempt
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
@@ -35,6 +36,7 @@ import           Data.Typeable
 import           Filesystem.Path.CurrentOS
 import           Prelude hiding (FilePath)
 import           Text.Printf
+import System.IO.Unsafe
 
 {- $repositories -}
 -- | A 'Repository' is the central point of contact between user code and Git
@@ -73,14 +75,14 @@ class (Applicative m, Monad m, Failure Exception m) => Repository m where
 
     -- Object creation
     newTree :: m Tree
-    createBlob :: ByteSource m -> m (BlobOid m)
+    createBlob :: BlobContents m -> m (BlobOid m)
     createCommit :: [ObjRef Commit] -> ObjRef Tree -> Signature -> Signature
                     -> Text -> m c
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
-data Exception = RepositoryNotExist FilePath
+data Exception = RepositoryNotExist
                | RepositoryInvalid
                | BlobCreateFailed
                | BlobEmptyCreateFailed
@@ -96,6 +98,7 @@ data Exception = RepositoryNotExist FilePath
                | CommitLookupFailed
                | ReferenceCreateFailed
                | RefCannotCreateFromPartialOid
+               | ReferenceListingFailed
                | ReferenceLookupFailed Text
                | ObjectLookupFailed Oid
                | ObjectRefRequiresFullOid
@@ -116,12 +119,24 @@ type TreeOid   = Tagged Tree Oid
 type CommitOid = Tagged Commit Oid
 type TagOid    = Tagged Tag Oid
 
+-- | Parse an ASCII hex string into a Git 'Oid'.
+--
+-- >>> let x = "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+-- >>> assert $ show (parseOid x) == x
 parseOid :: Repository m => Text -> m Oid
 parseOid oid
-    | len /= 40 = failure (OidParseFailed oid)
-    -- jww (2013-01-27): If unhex fails, rewrap the error using "failure"
-    | otherwise = Oid <$> unhex (T.encodeUtf8 oid)
-  where len = T.length oid
+    | T.length oid /= 40 = failure (OidParseFailed oid)
+    | otherwise =
+        -- 'unsafePerformIO' is used to force 'unhex' to run in the 'IO'
+        -- monad, so we can catch the exception on failure and repackage it
+        -- using 'Control.Failure'.  It were really better if 'unhex' returned
+        -- an 'Either' value instead of calling 'fail'.
+        let x = unsafePerformIO $
+                Exc.catch (Success <$> unhex (T.encodeUtf8 oid))
+                          (\e -> return (Failure (e :: Exc.IOException)))
+        in case x of
+            Success y -> return (Oid y)
+            Failure _ -> failure (OidParseFailed oid)
 
 {- $references -}
 data RefTarget = RefOid Oid | RefSymbolic Text deriving (Show, Eq)
@@ -149,7 +164,7 @@ instance Object a => Object (ObjRef a) where
 --     Known obj -> return obj
 
 {- $blobs -}
-newtype Blob m = Blob (BlobContents m)
+newtype Blob m = Blob { blobContents :: BlobContents m }
 
 type ByteSource m = GSource m ByteString
 
@@ -161,14 +176,26 @@ instance Eq (BlobContents m) where
   BlobString str1 == BlobString str2 = str1 == str2
   _ == _ = False
 
-blobSourceToString :: MonadIO m => BlobContents m -> m ByteString
-blobSourceToString (BlobString bs) = return bs
-blobSourceToString (BlobStream bs) = do
+blobContentsToByteString :: Repository m => BlobContents m -> m ByteString
+blobContentsToByteString (BlobString bs) = return bs
+blobContentsToByteString (BlobStream bs) = do
     strs <- bs $$ CList.consume
     return (B.concat strs)
-blobSourceToString (BlobSizedStream bs _) = do
+blobContentsToByteString (BlobSizedStream bs _) = do
     strs <- bs $$ CList.consume
     return (B.concat strs)
+
+blobToByteString :: Repository m => Blob m -> m ByteString
+blobToByteString = blobContentsToByteString . blobContents
+
+catBlob :: Repository m => Text -> m ByteString
+catBlob = parseOid >=> lookupBlob >=> blobToByteString
+
+catBlobUtf8 :: Repository m => Text -> m Text
+catBlobUtf8 = catBlob >=> return . T.decodeUtf8
+
+blobRef :: Blob m -> ObjRef (Blob m)
+blobRef = Known
 
 {- $trees -}
 data TreeEntry m = BlobEntry (ObjRef (Blob m))

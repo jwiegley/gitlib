@@ -16,11 +16,12 @@ main = getSources >>= \sources -> doctest $
   : sources
 
 getSources :: IO [FilePath]
-getSources = filter (isSuffixOf ".hs") <$> go "Data/Git"
+getSources =
+    filter (\n -> ".hs" `isSuffixOf` n && n /= "./Setup.hs") <$> go "."
   where
     go dir = do
       (dirs, files) <- getFilesAndDirectories dir
-      (files ++) . concat <$> mapM go dirs
+      (files ++) . concat <$> mapM go (filter (not . (== "./test")) dirs)
 
 getFilesAndDirectories :: FilePath -> IO ([FilePath], [FilePath])
 getFilesAndDirectories dir = do

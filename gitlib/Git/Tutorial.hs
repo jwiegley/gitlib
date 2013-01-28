@@ -2,7 +2,7 @@
     section followed by a lengthy discussion of the library's design and idioms.
 -}
 
-module Data.Git.Tutorial
+module Git.Libgit2.Tutorial
        (
          -- * Introduction
          -- $intro
@@ -27,14 +27,14 @@ module Data.Git.Tutorial
 
 {- $repositories
 
-   Every use of @gitlib@ must begin with a 'Data.Git.Repository' object.  At
+   Every use of @gitlib@ must begin with a 'Git.Libgit2.Repository' object.  At
    the moment each 'Repository' must be associated with a local directory,
    even if the Git objects are kept elsewhere via a custom backend (see
    <https://github.com/libgit2/libgit2/issues/1213>).
 
-   If no 'Repository' exists yet, use 'Data.Git.Repository.createRepository';
-   if one does exist, use 'Data.Git.Repository.openRepository'; or, you can
-   use 'Data.Git.Repository.openOrCreateRepository'.  For example:
+   If no 'Repository' exists yet, use 'Git.Libgit2.Repository.createRepository';
+   if one does exist, use 'Git.Libgit2.Repository.openRepository'; or, you can
+   use 'Git.Libgit2.Repository.openOrCreateRepository'.  For example:
 
 > repo <- openOrCreateRepository path False -- False here means "not bare"
 > ... make use of the repository ...
@@ -54,8 +54,8 @@ module Data.Git.Tutorial
 
    'resolveRef' works for both symbolic and specific refs.  Further, this
    pattern is rather common, so there is a shortcut called
-   'Data.Git.Commit.lookupRefCommit'.  Or, if you have a SHA string, you can
-   use 'Data.Git.Commit.lookupCommit' with 'Data.Git.Oid.parseOid'.
+   'Git.Libgit2.Commit.lookupRefCommit'.  Or, if you have a SHA string, you can
+   use 'Git.Libgit2.Commit.lookupCommit' with 'Git.Libgit2.Oid.parseOid'.
 
 > repo          <- openOrCreateRepository path False
 > commitFromRef <- lookupRefCommit repo "HEAD"             :: Maybe Commit
@@ -66,8 +66,8 @@ module Data.Git.Tutorial
 {- $commits
 
    If you don't have a commit object, the recommend way to create one is by
-   creating a 'Data.Git.Common.Signature' and using it to modify the return
-   value from 'Data.Git.Commit.create'.  This requires a 'Repository' object:
+   creating a 'Git.Libgit2.Common.Signature' and using it to modify the return
+   value from 'Git.Libgit2.Commit.create'.  This requires a 'Repository' object:
 
 > now <- getCurrentTime
 > let sig = Signature {
@@ -79,8 +79,8 @@ module Data.Git.Tutorial
 >             , commitCommitter = sig }
 >             
 
-   Load a 'Data.Git.Commit.Commit', and thereafter its history through its
-      parents, or load a 'Data.Git.Tree.Tree' or 'Data.Git.Blob.Blob' from
+   Load a 'Git.Libgit2.Commit.Commit', and thereafter its history through its
+      parents, or load a 'Git.Libgit2.Tree.Tree' or 'Git.Libgit2.Blob.Blob' from
       its contents.
 
    3. Construct a new commit

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Data.Git.Backend
+module Git.Libgit2.Backend
        ( odbBackendAdd
 
        , F'git_odb_backend_read_callback
@@ -14,8 +14,7 @@ module Data.Git.Backend
        )
        where
 
-import           Data.Git.Error
-import           Data.Git.Internal
+import           Git.Libgit2.Internal
 import qualified Prelude
 
 type F'git_odb_backend_read_callback =

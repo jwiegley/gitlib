@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Data.Git.Tag where
+module Git.Libgit2.Tag where
 
-import           Data.Git.Common
-import           Data.Git.Internal
+import           Git.Libgit2.Common
+import           Git.Libgit2.Internal
 import qualified Data.Text as T
 import qualified Prelude
 
