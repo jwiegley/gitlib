@@ -28,3 +28,6 @@
 [submodule "vendor/http-conduit"]
 	path = vendor/http-conduit
 	url = git://github.com/snoyberg/http-conduit.git
+[submodule "vendor/http-types"]
+	path = vendor/http-types
+	url = git://github.com/jwiegley/http-types.git
