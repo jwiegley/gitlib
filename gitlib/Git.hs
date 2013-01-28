@@ -246,7 +246,7 @@ treeEntry t = TreeEntry (treeRef t)
 class Repository TreeRepository => Treeish t where
     type TreeRepository :: * -> *
 
-    modifyTree :: t             -- the tree to "modify"
+    modifyTree :: t           -- the tree to "modify"
                -> FilePath    -- path within the tree
                -> Bool        -- create subtree's leading up to path?
                -> (Maybe (TreeEntry TreeRepository)

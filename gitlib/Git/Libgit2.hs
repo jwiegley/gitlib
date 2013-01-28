@@ -198,6 +198,7 @@ lgNewTree = do
     if r < 0
         then failure Git.TreeCreateFailed
         else do
+        liftIO $ putStrLn "lgNewTree!"
         upds <- liftIO $ newIORef HashMap.empty
         return Tree { lgTreeInfo     = Base Nothing Nothing
                     -- , lgTreeSize     = size
@@ -222,6 +223,7 @@ lgLookupTree len oid =
               if r < 0
                   then failure Git.TreeCreateFailed
                   else do
+                  liftIO $ putStrLn "lgLookupTree!"
                   upds <- liftIO $ newIORef HashMap.empty
                   return Tree { lgTreeInfo =
                                      Base (Just (Oid coid)) (Just obj)
@@ -237,30 +239,27 @@ doLookupTreeEntry t (name:names) = do
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
 
-  -- Prelude.putStrLn $ "Tree: " ++ show t
-  -- Prelude.putStrLn $ "Tree Entries: " ++ show (treeContents t)
-  -- Prelude.putStrLn $ "Lookup: " ++ toString name
+  liftIO $ Prelude.putStrLn $ "Lookup: " ++ show name
   upds <- liftIO $ readIORef (lgPendingUpdates t)
   y <- case HashMap.lookup name upds of
-          Just m -> return . Just . Git.TreeEntry . Git.Known $ m
-          Nothing ->
-              liftIO $ withForeignPtr (lgTreeContents t) $ \builder -> do
-                  entry <- withCStringable name (c'git_treebuilder_get builder)
-                  if entry == nullPtr
-                      then return Nothing
-                      else do
-                      coid  <- c'git_tree_entry_id entry
-                      oid   <- coidPtrToOid coid
-                      typ   <- c'git_tree_entry_type entry
-                      attrs <- c'git_tree_entry_attributes entry
-                      return $ if typ == c'GIT_OBJ_BLOB
-                               then Just (Git.BlobEntry (Tagged (Oid oid))
-                                                        (attrs == 0o100755))
-                               else Just (Git.TreeEntry
-                                          (Git.ByOid (Tagged (Oid oid))))
+      Just m -> return . Just . Git.TreeEntry . Git.Known $ m
+      Nothing ->
+          liftIO $ withForeignPtr (lgTreeContents t) $ \builder -> do
+              entry <- withCStringable name (c'git_treebuilder_get builder)
+              if entry == nullPtr
+                  then return Nothing
+                  else do
+                  coid  <- c'git_tree_entry_id entry
+                  oid   <- coidPtrToOid coid
+                  typ   <- c'git_tree_entry_type entry
+                  attrs <- c'git_tree_entry_attributes entry
+                  return $ if typ == c'GIT_OBJ_BLOB
+                           then Just (Git.BlobEntry (Tagged (Oid oid))
+                                                    (attrs == 0o100755))
+                           else Just (Git.TreeEntry
+                                      (Git.ByOid (Tagged (Oid oid))))
 
-  -- Prelude.putStrLn $ "Result: " ++ show y
-  -- Prelude.putStrLn $ "Names: " ++ show names
+  liftIO $ Prelude.putStrLn $ "Names: " ++ show names
   if null names
       then return y
       else case y of
@@ -423,13 +422,20 @@ doModifyTree t (name:names) createIfNotExist f = do
                   return ze
   where
     returnTree t n z = do
+        let contents = lgTreeContents t
+        cntb <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
+        liftIO $ putStrLn $ "returnTree for "
+            ++ show n ++ ", count before = " ++ show cntb
         case z of
-            Nothing -> dropEntry (lgTreeContents t) n
+            Nothing -> dropEntry contents n
             Just z' -> do
                 (oid,mode) <- treeEntryToOid z'
                 case oid of
-                    Nothing   -> dropEntry (lgTreeContents t) n
-                    Just oid' -> insertEntry (lgTreeContents t) n oid' mode
+                    Nothing   -> dropEntry contents n
+                    Just oid' -> insertEntry contents n oid' mode
+        cnta <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
+        liftIO $ putStrLn $ "returnTree for "
+            ++ show n ++ ", count after = " ++ show cnta
         return z
 
     treeEntryToOid (Git.BlobEntry oid exe) =
@@ -552,6 +558,8 @@ lgCreateCommit :: [Git.CommitOid LgRepository]
                -> LgRepository Commit
 lgCreateCommit parents tree author committer logText ref = do
     repo <- lgGet
+    -- jww (2013-01-28): Hack libgit2 so that create_commit can take oids
+    -- instead
     tr   <- Git.resolveTreeRef tree
     toid <- Git.writeTree tr
     coid <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
