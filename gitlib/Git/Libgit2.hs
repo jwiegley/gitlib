@@ -29,6 +29,8 @@ import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString, packCString, useAsCString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import           Data.IORef
 import           Data.List as L
 import           Data.Maybe
@@ -67,9 +69,10 @@ instance Git.Repository LgRepository where
     data Oid LgRepository = Oid { getOid :: ForeignPtr C'git_oid }
 
     data Tree LgRepository = Tree
-        { lgTreeInfo     :: Base
-        -- , lgTreeSize     :: IORef Int
-        , lgTreeContents :: ForeignPtr C'git_treebuilder }
+        { lgTreeInfo       :: Base
+        -- , lgTreeSize    :: IORef Int
+        , lgPendingUpdates :: IORef (HashMap Text Tree)
+        , lgTreeContents   :: ForeignPtr C'git_treebuilder }
 
     data Commit LgRepository = Commit
         { lgCommitInfo      :: Base
@@ -194,9 +197,11 @@ lgNewTree = do
 
     if r < 0
         then failure Git.TreeCreateFailed
-        else
+        else do
+        upds <- liftIO $ newIORef HashMap.empty
         return Tree { lgTreeInfo     = Base Nothing Nothing
                     -- , lgTreeSize     = size
+                    , lgPendingUpdates = upds
                     , lgTreeContents = fptr }
 
 lgLookupTree :: Int -> Tagged Tree Oid -> LgRepository Tree
@@ -216,10 +221,12 @@ lgLookupTree len oid =
                   return (r,fptr)
               if r < 0
                   then failure Git.TreeCreateFailed
-                  else
+                  else do
+                  upds <- liftIO $ newIORef HashMap.empty
                   return Tree { lgTreeInfo =
                                      Base (Just (Oid coid)) (Just obj)
                               -- , lgTreeSize = size
+                              , lgPendingUpdates = upds
                               , lgTreeContents = fptr }
 
 doLookupTreeEntry :: Tree -> [Text] -> LgRepository (Maybe TreeEntry)
@@ -233,20 +240,24 @@ doLookupTreeEntry t (name:names) = do
   -- Prelude.putStrLn $ "Tree: " ++ show t
   -- Prelude.putStrLn $ "Tree Entries: " ++ show (treeContents t)
   -- Prelude.putStrLn $ "Lookup: " ++ toString name
-  y <- liftIO $ withForeignPtr (lgTreeContents t) $ \builder -> do
-      entry <- withCStringable name (c'git_treebuilder_get builder)
-      if entry == nullPtr
-          then return Nothing
-          else do
-          coid  <- c'git_tree_entry_id entry
-          oid   <- coidPtrToOid coid
-          typ   <- c'git_tree_entry_type entry
-          attrs <- c'git_tree_entry_attributes entry
-          return $ if typ == c'GIT_OBJ_BLOB
-                   then Just (Git.BlobEntry (Tagged (Oid oid))
-                                            (attrs == 0o100755))
-                   else Just (Git.TreeEntry
-                              (Git.ByOid (Tagged (Oid oid))))
+  upds <- liftIO $ readIORef (lgPendingUpdates t)
+  y <- case HashMap.lookup name upds of
+          Just m -> return . Just . Git.TreeEntry . Git.Known $ m
+          Nothing ->
+              liftIO $ withForeignPtr (lgTreeContents t) $ \builder -> do
+                  entry <- withCStringable name (c'git_treebuilder_get builder)
+                  if entry == nullPtr
+                      then return Nothing
+                      else do
+                      coid  <- c'git_tree_entry_id entry
+                      oid   <- coidPtrToOid coid
+                      typ   <- c'git_tree_entry_type entry
+                      attrs <- c'git_tree_entry_attributes entry
+                      return $ if typ == c'GIT_OBJ_BLOB
+                               then Just (Git.BlobEntry (Tagged (Oid oid))
+                                                        (attrs == 0o100755))
+                               else Just (Git.TreeEntry
+                                          (Git.ByOid (Tagged (Oid oid))))
 
   -- Prelude.putStrLn $ "Result: " ++ show y
   -- Prelude.putStrLn $ "Names: " ++ show names
@@ -288,27 +299,67 @@ lookupTreeEntry tr path = do
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
-lgWriteTree :: Tree -> LgRepository (Git.TreeOid LgRepository)
+lgWriteTree :: Tree -> LgRepository (Maybe (Git.TreeOid LgRepository))
 lgWriteTree t@(Tree { lgTreeInfo = Base { gitId = Just coid } }) =
-    return (Tagged coid)
-lgWriteTree t = Tagged <$> doWriteTree t
+    return (Just (Tagged coid))
+lgWriteTree t = fmap Tagged <$> doWriteTree t
 
-doWriteTree :: Tree -> LgRepository Oid
-doWriteTree t = do repo <- lgGet
-                   go (lgTreeContents t) (repoObj repo)
+insertEntry :: CStringable a
+            => ForeignPtr C'git_treebuilder -> a -> Oid -> CUInt
+            -> LgRepository ()
+insertEntry builder key oid attrs = do
+  r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
+      withForeignPtr builder $ \ptr ->
+      withCStringable key $ \name ->
+          c'git_treebuilder_insert nullPtr ptr name coid attrs
+  when (r2 < 0) $ failure Git.TreeBuilderInsertFailed
+
+dropEntry :: (CStringable a, Show a)
+            => ForeignPtr C'git_treebuilder -> a -> LgRepository ()
+dropEntry builder key = do
+  liftIO $ putStrLn ("dropEntry: " ++ show key)
+  r2 <- liftIO $ withForeignPtr builder $ \ptr ->
+      withCStringable key $ \name ->
+          c'git_treebuilder_remove ptr name
+  when (r2 < 0) $ failure Git.TreeBuilderRemoveFailed
+  -- liftIO $ modifyIORef (subtract 1) (lgTreeSize st)
+
+doWriteTree :: Tree -> LgRepository (Maybe Oid)
+doWriteTree t = do
+    repo <- lgGet
+    liftIO $ putStrLn $ "doWriteTree"
+
+    let contents = lgTreeContents t
+    upds <- liftIO $ readIORef (lgPendingUpdates t)
+    mapM_ (\(k,v) -> do
+                liftIO $ putStrLn $ "Pending write for: " ++ show k
+                oid <- doWriteTree v
+                liftIO $ putStrLn $ "Will delete: " ++ show (isNothing oid)
+                case oid of
+                    Nothing   -> dropEntry contents k
+                    Just oid' -> insertEntry contents k oid' 0o040000)
+          (HashMap.toList upds)
+    liftIO $ writeIORef (lgPendingUpdates t) HashMap.empty
+
+    cnt <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
+    liftIO $ putStrLn $ "cnt = " ++ show cnt
+    if cnt == 0
+        then return Nothing
+        else go contents (repoObj repo)
   where
     go :: ForeignPtr C'git_treebuilder -> ForeignPtr C'git_repository
-          -> LgRepository Oid
+          -> LgRepository (Maybe Oid)
     go fptr repo = do
         (r3,coid) <- liftIO $ do
             coid <- mallocForeignPtr
             withForeignPtr coid $ \coid' ->
                 withForeignPtr fptr $ \builder ->
                 withForeignPtr repo $ \repoPtr -> do
+                    liftIO $ putStrLn $ "doWriteTree.3"
                     r3 <- c'git_treebuilder_write coid' repoPtr builder
                     return (r3,coid)
         when (r3 < 0) $ failure Git.TreeBuilderWriteFailed
-        return (Oid coid)
+        return (Just (Oid coid))
 
 doModifyTree :: Tree
              -> [Text]
@@ -354,52 +405,40 @@ doModifyTree t (name:names) createIfNotExist f = do
           -- required, throw an exception to avoid colliding with user-defined
           -- 'Left' values.
           case y of
+              Nothing -> return Nothing
               Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-              Just (Git.TreeEntry (Git.ByOid st')) ->
-                  failure Git.TreeWalkFailed
-              Just (Git.TreeEntry (Git.Known st)) -> do
+              Just (Git.TreeEntry st') -> do
                   liftIO $ putStrLn "doModifyTree 4.."
+                  st <- Git.resolveTreeRef st'
+                  liftIO $ putStrLn "doModifyTree 5.."
                   ze <- doModifyTree st names createIfNotExist f
+                  liftIO $ putStrLn $ "doModifyTree 6: " ++ show name
                   -- stSize <- readIORef (lgTreeSize st)
                   -- returnTree t name $ if stSize == 0
                   --                     then Nothing
                   --                     else ze
-                  returnTree t name y
+                  liftIO $ putStrLn "doModifyTree 7.."
+                  liftIO $ modifyIORef
+                      (lgPendingUpdates t) (HashMap.insert name st)
+                  return ze
   where
     returnTree t n z = do
         case z of
             Nothing -> dropEntry (lgTreeContents t) n
             Just z' -> do
                 (oid,mode) <- treeEntryToOid z'
-                insertEntry (lgTreeContents t) n oid mode
+                case oid of
+                    Nothing   -> dropEntry (lgTreeContents t) n
+                    Just oid' -> insertEntry (lgTreeContents t) n oid' mode
         return z
 
     treeEntryToOid (Git.BlobEntry oid exe) =
-        return (unTagged oid, if exe then 0o100755 else 0o100644)
+        return (Just (unTagged oid), if exe then 0o100755 else 0o100644)
     treeEntryToOid (Git.TreeEntry (Git.ByOid oid)) =
-        return (unTagged oid, 0o040000)
+        return (Just (unTagged oid), 0o040000)
     treeEntryToOid (Git.TreeEntry (Git.Known tr)) = do
         oid <- Git.writeTree tr
-        return (unTagged oid, 0o040000)
-
-    insertEntry :: CStringable a
-                => ForeignPtr C'git_treebuilder -> a -> Oid -> CUInt
-                -> LgRepository ()
-    insertEntry builder key oid attrs = do
-      r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
-          withForeignPtr builder $ \ptr ->
-          withCStringable key $ \name ->
-              c'git_treebuilder_insert nullPtr ptr name coid attrs
-      when (r2 < 0) $ failure Git.TreeBuilderInsertFailed
-
-    dropEntry :: CStringable a
-                => ForeignPtr C'git_treebuilder -> a -> LgRepository ()
-    dropEntry builder key = do
-      r2 <- liftIO $ withForeignPtr builder $ \ptr ->
-          withCStringable key $ \name ->
-              c'git_treebuilder_remove ptr name
-      when (r2 < 0) $ failure Git.TreeBuilderRemoveFailed
-      -- liftIO $ modifyIORef (subtract 1) (lgTreeSize st)
+        return (unTagged <$> oid, 0o040000)
 
 lgModifyTree
   :: Tree -> FilePath -> Bool

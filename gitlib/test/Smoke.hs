@@ -54,7 +54,11 @@ withRepository dir action = do
   return a
 
 oid :: Treeish t => t -> TreeRepository Text
-oid = writeTree >=> return . oidToText . unTagged
+oid t = do
+    oid' <- writeTree t
+    case oid' of
+        Nothing    -> return "<none>"
+        Just oid'' -> return . oidToText . unTagged $ oid''
 
 oidToText :: Repository m => Oid m -> Text
 oidToText = T.pack . show
@@ -86,44 +90,53 @@ tests = test [
     x <- oid tr
     liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  --   return()
+  , "twoTrees" ~:
 
-  -- , "twoTrees" ~:
+  withRepository "twoTrees.git" $ do
+    hello <- createBlobUtf8 "Hello, world!\n"
+    tr <- newTree
+    putBlobInTree tr "hello/world.txt" hello
+    x <- oid tr
+    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  -- withRepository "twoTrees.git" $ do
-  --   let hello = createBlobUtf8 "Hello, world!\n"
-  --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
-  --   x  <- oid tr
-  --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    goodbye <- createBlobUtf8 "Goodbye, world!\n"
+    putBlobInTree tr "goodbye/files/world.txt" goodbye
+    x <- oid tr
+    liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
-  --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   x  <- oid tr
-  --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+  , "deleteTree" ~:
 
-  --   return()
+  withRepository "deleteTree.git" $ do
+    liftIO $ putStrLn "deleteTree: step 1.."
+    hello <- createBlobUtf8 "Hello, world!\n"
+    liftIO $ putStrLn "deleteTree: step 2.."
+    tr <- newTree
+    liftIO $ putStrLn "deleteTree: step 3.."
+    putBlobInTree tr "hello/world.txt" hello
+    liftIO $ putStrLn "deleteTree: step 4.."
+    x <- oid tr
+    liftIO $ putStrLn "deleteTree: step 5.."
+    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    liftIO $ putStrLn "deleteTree: step 6.."
 
-  -- , "deleteTree" ~:
+    putBlobInTree tr "goodbye/files/world.txt"
+        =<< createBlobUtf8 "Goodbye, world!\n"
+    liftIO $ putStrLn "deleteTree: step 7.."
+    x <- oid tr
+    liftIO $ putStrLn "deleteTree: step 8.."
+    liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    liftIO $ putStrLn "deleteTree: step 9.."
 
-  -- withRepository "deleteTree.git" $ do
-  --   let hello = createBlobUtf8 "Hello, world!\n"
-  --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
-  --   x  <- oid tr
-  --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
-  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
-  --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   x  <- oid tr
-  --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-
-  --   -- Confirm that deleting world.txt also deletes the now-empty subtree
-  --   -- goodbye/files, which also deletes the then-empty subtree goodbye,
-  --   -- returning us back the original tree.
-  --   tr <- dropFromTree tr "goodbye/files/world.txt"
-  --   x  <- oid tr
-  --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
-  --   return()
+    -- Confirm that deleting world.txt also deletes the now-empty subtree
+    -- goodbye/files, which also deletes the then-empty subtree goodbye,
+    -- returning us back the original tree.
+    liftIO $ putStrLn "deleteTree: step 10.."
+    dropFromTree tr "goodbye/files/world.txt"
+    liftIO $ putStrLn "deleteTree: step 11.."
+    x <- oid tr
+    liftIO $ putStrLn "deleteTree: step 12.."
+    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    liftIO $ putStrLn "deleteTree: step 13.."
 
   -- , "createCommit" ~:
 

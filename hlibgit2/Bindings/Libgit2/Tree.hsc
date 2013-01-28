@@ -13,6 +13,7 @@ import Bindings.Libgit2.Object
 #cinline git_tree_free , Ptr <git_tree> -> IO ()
 #ccall git_tree_id , Ptr <git_tree> -> IO (Ptr <git_oid>)
 #ccall git_tree_entrycount , Ptr <git_tree> -> IO (CUInt)
+#ccall git_treebuilder_entrycount , Ptr <git_treebuilder> -> IO (CUInt)
 #ccall git_tree_entry_byname , Ptr <git_tree> -> CString -> IO (Ptr <git_tree_entry>)
 #ccall git_tree_entry_byindex , Ptr <git_tree> -> CUInt -> IO (Ptr <git_tree_entry>)
 #ccall git_tree_entry_attributes , Ptr <git_tree_entry> -> IO (CUInt)

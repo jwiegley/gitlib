@@ -30,7 +30,7 @@ Test-suite smoke
     Build-depends: 
           base >=3
         , gitlib
-        , hlibgit2        >= 0.17
+        , hlibgit2        >= 0.17.0.5
         , HUnit           >= 1.2.5
         , bytestring      >= 0.9.2.1
         , containers      >= 0.4.2
@@ -61,27 +61,28 @@ Library
     default-language:   Haskell98
     default-extensions: ForeignFunctionInterface
     build-depends:
-          base            >= 3 && < 5
-        , hlibgit2        >= 0.17
-        , attempt         >= 0.4.0
-        , bytestring      >= 0.9.2.1
-        , conduit         >= 0.5.5
-        , containers      >= 0.4.2
-        , data-default    >= 0.5.0
-        , either          >= 3.0.3
-        , failure         >= 0.2.0.1
-        , hex             >= 0.1.2
-        , lens            >= 3.7
-        , parallel-io     >= 0.3.2.1
-        , pointless-fun   >= 1.1.0.1
-        , stringable      >= 0.1.1
-        , system-fileio   >= 0.3.9
-        , system-filepath >= 0.4.7
-        , tagged          >= 0.2.3.1
-        , text            >= 0.11.2
-        , text-icu        >= 0.6.3
-        , time            >= 1.4
-        , transformers    >= 0.3.0.0
+          base                 >= 3 && < 5
+        , hlibgit2             >= 0.17.0.5
+        , attempt              >= 0.4.0
+        , bytestring           >= 0.9.2.1
+        , conduit              >= 0.5.5
+        , containers           >= 0.4.2
+        , data-default         >= 0.5.0
+        , either               >= 3.0.3
+        , failure              >= 0.2.0.1
+        , hex                  >= 0.1.2
+        , lens                 >= 3.7
+        , parallel-io          >= 0.3.2.1
+        , pointless-fun        >= 1.1.0.1
+        , stringable           >= 0.1.1
+        , system-fileio        >= 0.3.9
+        , system-filepath      >= 0.4.7
+        , tagged               >= 0.2.3.1
+        , text                 >= 0.11.2
+        , text-icu             >= 0.6.3
+        , time                 >= 1.4
+        , transformers         >= 0.3.0.0
+        , unordered-containers >= 0.2.3
     exposed-modules:
         Git
         Git.Utils

@@ -276,7 +276,7 @@ class Repository TreeRepository => Treeish t where
     dropFromTree t path =
         void (modifyTree t path False (const (return Nothing)))
 
-    writeTree :: t -> TreeRepository (TreeOid TreeRepository)
+    writeTree :: t -> TreeRepository (Maybe (TreeOid TreeRepository))
 
 treeRef :: Tree m -> ObjRef m (Tree m)
 treeRef = Known
