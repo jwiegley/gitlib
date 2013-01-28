@@ -43,24 +43,20 @@ main = do
       else exitSuccess
   stopGlobalPool
 
-withRepository :: Text -> Lg.LgRepository () -> Lg.LgRepository ()
+withRepository :: FilePath -> Lg.LgRepository () -> IO ()
 withRepository dir action = do
-  let p = fromText dir
-  exists <- liftIO $ isDirectory p
-  when exists $ liftIO $ removeTree p
+  exists <- isDirectory dir
+  when exists $ removeTree dir
 
-  -- jww (2013-01-27): Restore
-  -- f =<< initDiskRepository p True
-  a <- action
-
+  a <- Lg.withLgRepository dir True action
   -- we want exceptions to leave the repo behind
-  liftIO $ removeTree p
+  removeTree dir
   return a
 
-oid' :: Treeish t => t -> TreeRepository Text
-oid' = writeTree >=> return . oidToText
+oid :: Treeish t => t -> TreeRepository Text
+oid = writeTree >=> return . oidToText . unTagged
 
-oidToText :: Repository m => TreeOid m -> Text
+oidToText :: Oid -> Text
 oidToText = T.pack . show
 
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
@@ -72,36 +68,37 @@ tests = test [
 
   "singleBlob" ~:
 
-  Lg.withLgRepository "singleBlob.git" True $ do
-    createBlob (BlobString (T.encodeUtf8 "Hello, world!\n"))
+  withRepository "singleBlob.git" $ do
+    createBlobUtf8 "Hello, world!\n"
 
     x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
     liftIO $ x @?= "Hello, world!\n"
 
-    -- x <- catBlob "af5626b"
-    -- liftIO $ x @?= "Hello, world!\n"
+    x <- catBlob "af5626b"
+    liftIO $ x @?= "Hello, world!\n"
 
-  -- , "singleTree" ~:
+  , "singleTree" ~:
 
-  -- withRepository "singleTree.git" $ do
-  --   let hello = createBlob (T.encodeUtf8 "Hello, world!\n")
-  --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
-  --   x  <- oid' tr
-  --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+  withRepository "singleTree.git" $ do
+    hello <- createBlobUtf8 "Hello, world!\n"
+    tr <- newTree
+    putBlobInTree tr "hello/world.txt" hello
+    x <- oid tr
+    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   --   return()
 
   -- , "twoTrees" ~:
 
   -- withRepository "twoTrees.git" $ do
-  --   let hello = createBlob (T.encodeUtf8 "Hello, world!\n")
+  --   let hello = createBlobUtf8 "Hello, world!\n"
   --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  --   let goodbye = createBlob (T.encodeUtf8 "Goodbye, world!\n")
+  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
   --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   --   return()
@@ -109,21 +106,21 @@ tests = test [
   -- , "deleteTree" ~:
 
   -- withRepository "deleteTree.git" $ do
-  --   let hello = createBlob (T.encodeUtf8 "Hello, world!\n")
+  --   let hello = createBlobUtf8 "Hello, world!\n"
   --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  --   let goodbye = createBlob (T.encodeUtf8 "Goodbye, world!\n")
+  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
   --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   --   -- Confirm that deleting world.txt also deletes the now-empty subtree
   --   -- goodbye/files, which also deletes the then-empty subtree goodbye,
   --   -- returning us back the original tree.
   --   tr <- dropFromTree tr "goodbye/files/world.txt"
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   --   return()
@@ -131,12 +128,12 @@ tests = test [
   -- , "createCommit" ~:
 
   -- withRepository "createCommit.git" $ do
-  --   let hello = createBlob (T.encodeUtf8 "Hello, world!\n")
+  --   let hello = createBlobUtf8 "Hello, world!\n"
   --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
 
-  --   let goodbye = createBlob (T.encodeUtf8 "Goodbye, world!\n")
+  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
   --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   --   -- The Oid has been cleared in tr, so this tests that it gets written as
@@ -146,7 +143,7 @@ tests = test [
   --         , signatureEmail = "johnw@newartisans.com"
   --         , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
-  --   x <- oid' $ sampleCommit tr sig
+  --   x <- oid $ sampleCommit tr sig
   --   x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
   --   return()
@@ -162,13 +159,13 @@ tests = test [
   --   -- backend   <- traceBackend loosePtr'
   --   -- odbBackendAdd backend 3
 
-  --   let hello = createBlob (T.encodeUtf8 "Hello, world!\n")
+  --   let hello = createBlobUtf8 "Hello, world!\n"
   --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
 
-  --   let goodbye = createBlob (T.encodeUtf8 "Goodbye, world!\n")
+  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
   --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
   --   tr <- update tr
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   --   -- The Oid has been cleared in tr, so this tests that it gets written as
@@ -179,13 +176,13 @@ tests = test [
   --         , signatureWhen  = posixSecondsToUTCTime 1348980883 }
   --       c   = sampleCommit tr sig
   --   c <- update c
-  --   x <- oid' c
+  --   x <- oid c
   --   x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
-  --   let goodbye2 = createBlob (T.encodeUtf8 "Goodbye, world again!\n")
+  --   let goodbye2 = createBlobUtf8 "Goodbye, world again!\n"
   --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye2)
   --   tr <- update tr
-  --   x  <- oid' tr
+  --   x  <- oid tr
   --   x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
   --   let sig = Signature {
@@ -194,7 +191,7 @@ tests = test [
   --         , signatureWhen  = posixSecondsToUTCTime 1348981883 }
   --       c2  = sampleCommit [commitRef c] tr sig sig
   --                          "Second sample log message."
-  --   x <- oid' c2
+  --   x <- oid c2
   --   x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
   --   cid <- update c2
@@ -213,10 +210,10 @@ tests = test [
   --   -- ehist2 <- commitEntryHistory c2 "goodbye/files/world.txt"
   --   -- Prelude.putStrLn $ "ehist2: " ++ show ehist2
 
-  --   -- oid' <- parseOid ("2506e7fc" :: Text)
-  --   -- c4 <- lookupCommit (fromJust oid')
-  --   -- c5 <- maybe (return Nothing) (lookupCommit) oid'
-  --   -- c6 <- lookupCommit (fromJust oid')
+  --   -- oid <- parseOid ("2506e7fc" :: Text)
+  --   -- c4 <- lookupCommit (fromJust oid)
+  --   -- c5 <- maybe (return Nothing) (lookupCommit) oid
+  --   -- c6 <- lookupCommit (fromJust oid)
   --   -- ehist4 <- commitEntryHistory (fromJust c4) "goodbye/files/world.txt"
   --   -- Prelude.putStrLn $ "ehist4: " ++ show (Prelude.head ehist4)
 
@@ -224,7 +221,7 @@ tests = test [
 
   -- withRepository "smallTest1.git" $ do
   --   let blob =
-  --         createBlob "# Auto-createdsitory for tutorial contents\n"
+  --         createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
   --       masterRef = "refs/heads/master"
   --       sig = Signature { signatureName   = "First Name"
   --                       , signatureEmail = "user1@email.org"
@@ -237,7 +234,7 @@ tests = test [
   --   let sig2 = Signature { signatureName   = "Second Name"
   --                        , signatureEmail = "user2@email.org"
   --                        , signatureWhen  = posixSecondsToUTCTime 1348982883 }
-  --   blob <- createBlob "This is some content."
+  --   blob <- createBlobUtf8 "This is some content."
   --   blobOID <- update blob
   --   tree' <- putBlobInTree tree "foo.txt" (blobRef blob)
   --   commit' <- createCommit [commitRef commit] (treeRef tree') sig sig

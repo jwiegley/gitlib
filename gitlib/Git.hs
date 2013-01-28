@@ -78,6 +78,8 @@ class (Applicative m, Monad m, Failure Exception m) => Repository m where
     lookupBlob   :: BlobOid m -> m (Blob m)
     lookupTag    :: TagOid -> m Tag
 
+    lookupObject :: Text -> Int -> m (Object m)
+
     lookupCommitRef :: Text -> m (Commit m)
     lookupCommitRef = resolveRef >=> lookupCommit . Tagged
 
@@ -92,6 +94,11 @@ class (Applicative m, Monad m, Failure Exception m) => Repository m where
                     -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Signature -> Text -> m Tag
 
+data Object m = BlobRef   (ObjRef (Blob m))
+              | TreeRef   (ObjRef (Tree m))
+              | CommitRef (ObjRef (Commit m))
+              | TagRef    (ObjRef Tag)
+
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
@@ -103,6 +110,7 @@ data Exception = BackendError Text
                | TreeCreateFailed
                | TreeBuilderCreateFailed
                | TreeBuilderInsertFailed
+               | TreeBuilderRemoveFailed
                | TreeBuilderWriteFailed
                | TreeLookupFailed
                | TreeCannotTraverseBlob
@@ -114,7 +122,7 @@ data Exception = BackendError Text
                | RefCannotCreateFromPartialOid
                | ReferenceListingFailed
                | ReferenceLookupFailed Text
-               | ObjectLookupFailed Text
+               | ObjectLookupFailed Text Int
                | ObjectRefRequiresFullOid
                | OidCopyFailed
                | OidParseFailed Text
@@ -198,12 +206,24 @@ blobToByteString = blobContentsToByteString . blobContents
 
 catBlob :: Repository m => Text -> m ByteString
 catBlob str = do
-    case parseOid str of
+    if len == 40
+        then case parseOid str of
         Nothing  -> failure (OidParseFailed str)
         Just oid -> lookupBlob (Tagged oid) >>= blobToByteString
 
+        else do
+        obj <- lookupObject str len
+        case obj of
+            BlobRef (ByOid oid) -> lookupBlob oid >>= blobToByteString
+            _ -> failure (ObjectLookupFailed str len)
+  where
+    len = T.length str
+
 catBlobUtf8 :: Repository m => Text -> m Text
 catBlobUtf8 = catBlob >=> return . T.decodeUtf8
+
+createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
+createBlobUtf8 = createBlob . BlobString . T.encodeUtf8
 
 {- $trees -}
 data TreeEntry m where
