@@ -25,3 +25,6 @@
 [submodule "vendor/hsubconvert"]
 	path = vendor/hsubconvert
 	url = git://github.com/jwiegley/svndump.git
+[submodule "vendor/http-conduit"]
+	path = vendor/http-conduit
+	url = git://github.com/snoyberg/http-conduit.git
