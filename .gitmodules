@@ -34,3 +34,6 @@
 [submodule "vendor/rest-client"]
 	path = vendor/rest-client
 	url = git://github.com/fpco/rest-client
+[submodule "vendor/stringable"]
+	path = vendor/stringable
+	url = git://github.com/jwiegley/stringable.git
