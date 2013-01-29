@@ -88,8 +88,8 @@ instance Git.Repository LgRepository where
 
     parseOid     = lgParseOid
     renderOid    = lgRenderOid
-    lookupRef    = undefined
-    updateRef    = undefined
+    lookupRef    = lgLookupRef
+    updateRef    = lgUpdateRef
     mapRefs      = lgMapRefs
     lookupCommit = lgLookupCommit 40
     lookupTree   = lgLookupTree 40
@@ -241,7 +241,7 @@ doLookupTreeEntry t (name:names) = do
 
   upds <- liftIO $ readIORef (lgPendingUpdates t)
   y <- case HashMap.lookup name upds of
-      Just m -> return . Just . Git.TreeEntry . Git.Known $ (trace "hello1" m)
+      Just m -> return . Just . Git.TreeEntry . Git.Known $ m
       Nothing ->
           liftIO $ withForeignPtr (lgTreeContents t) $ \builder -> do
               entry <- withCStringable name (c'git_treebuilder_get builder)
@@ -333,7 +333,7 @@ doModifyTree :: Tree
              -> Bool
              -> (Maybe TreeEntry -> LgRepository (Maybe TreeEntry))
              -> LgRepository (Maybe TreeEntry)
-doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ (trace "hello2" t)
+doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
     repo <- lgGet
 
@@ -343,7 +343,7 @@ doModifyTree t (name:names) createIfNotExist f = do
     -- (TreeEntry {})@, and if not we'll have Nothing.
     y' <- doLookupTreeEntry t [name]
     y  <- if isNothing y' && createIfNotExist && not (null names)
-          then Just . Git.TreeEntry . Git.Known <$> (trace "hello3" Git.newTree)
+          then Just . Git.TreeEntry . Git.Known <$> Git.newTree
           else return y'
 
     if null names
@@ -587,13 +587,14 @@ lgLookupRef name = do
     return $ Git.Reference { Git.refName   = name
                            , Git.refTarget = targ }
 
-lgWriteRef :: Git.Reference LgRepository Commit -> LgRepository ()
-lgWriteRef ref = do
+lgUpdateRef :: Text -> Git.RefTarget LgRepository Commit
+            -> LgRepository (Git.Reference LgRepository Commit)
+lgUpdateRef name refTarg = do
     repo <- lgGet
     liftIO $ alloca $ \ptr ->
         withForeignPtr (repoObj repo) $ \repoPtr ->
-        withCStringable (Git.refName ref) $ \namePtr -> do
-            r <- case Git.refTarget ref of
+        withCStringable name $ \namePtr -> do
+            r <- case refTarg of
                 Git.RefObj (Git.ByOid oid) ->
                     withForeignPtr (getOid (unTagged oid)) $ \coidPtr ->
                         c'git_reference_create_oid ptr repoPtr namePtr
@@ -610,6 +611,9 @@ lgWriteRef ref = do
                     c'git_reference_create_symbolic ptr repoPtr namePtr
                                                     symPtr (fromBool True)
             when (r < 0) $ failure Git.ReferenceCreateFailed
+
+    return Git.Reference { Git.refName   = name
+                         , Git.refTarget = refTarg }
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
@@ -705,8 +709,9 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
 
 foreachRefCallback :: CString -> Ptr () -> IO CInt
 foreachRefCallback name payload = do
-  (callback,results) <- peek (castPtr payload) >>= deRefStablePtr
-  result <- packCString name >>= callback . T.decodeUtf8
+  (callback,results) <- deRefStablePtr =<< peek (castPtr payload)
+  nameStr <- peekCString name
+  result <- callback (T.pack nameStr)
   modifyIORef results (\xs -> result:xs)
   return 0
 
@@ -715,21 +720,20 @@ foreign export ccall "foreachRefCallback"
 foreign import ccall "&foreachRefCallback"
   foreachRefCallbackPtr :: FunPtr (CString -> Ptr () -> IO CInt)
 
-lgMapRefs ::
-    (Git.Reference LgRepository Commit -> LgRepository a) -> LgRepository [a]
+lgMapRefs :: (Text -> LgRepository a) -> LgRepository [a]
 lgMapRefs cb = do
     repo <- lgGet
     liftIO $ do
-        ioRef <- newIORef []
-        bracket
-            (newStablePtr (cb,ioRef))
-            deRefStablePtr
-            (\ptr -> with ptr $ \pptr ->
-              withForeignPtr (repoObj repo) $ \repoPtr -> do
-                  _ <- c'git_reference_foreach
+        withForeignPtr (repoObj repo) $ \repoPtr -> do
+            ioRef <- newIORef []
+            bracket
+                (newStablePtr (cb,ioRef))
+                freeStablePtr
+                (\ptr -> with ptr $ \pptr -> do
+                      _ <- c'git_reference_foreach
                            repoPtr (flagsToInt allRefsFlag)
                            foreachRefCallbackPtr (castPtr pptr)
-                  readIORef ioRef)
+                      readIORef ioRef)
 
 -- mapAllRefs :: (Text -> LgRepository a) -> LgRepository [a]
 -- mapAllRefs repo = mapRefs repo allRefsFlag

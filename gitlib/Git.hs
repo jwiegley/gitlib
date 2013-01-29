@@ -58,7 +58,7 @@ class (Applicative m, Monad m, Failure Exception m,
     updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
     updateRef_ = void .: updateRef
 
-    mapRefs :: (Reference m (Commit m) -> m a) -> m [a]
+    mapRefs :: (Text -> m a) -> m [a]
 
     resolveRef :: Text -> m (ObjRef m (Commit m))
     resolveRef name = lookupRef name >>= \ref ->
@@ -71,10 +71,6 @@ class (Applicative m, Monad m, Failure Exception m,
                 else failure (ReferenceLookupFailed name)
 
     -- Lookup
-    -- lookupObject :: Text -> m Dynamic
-    -- lookupObject _ =
-    --     failure (BackendError "Cannot lookup arbitrary objects in this backend")
-
     lookupCommit :: CommitOid m -> m (Commit m)
     lookupTree   :: TreeOid m -> m (Tree m)
     lookupBlob   :: BlobOid m -> m (Blob m)
@@ -89,11 +85,6 @@ class (Applicative m, Monad m, Failure Exception m,
                     -> Signature -> Signature -> Text -> Maybe Text
                     -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Signature -> Text -> m (Tag m)
-
-data Object m = BlobRef   (ObjRef m (Blob m))
-              | TreeRef   (ObjRef m (Tree m))
-              | CommitRef (ObjRef m (Commit m))
-              | TagRef    (ObjRef m (Tag m))
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
@@ -143,11 +134,13 @@ data Reference m a = Reference
 {- $objects -}
 data ObjRef m a = ByOid (Tagged a (Oid m)) | Known a
 
+data Object m = BlobRef   (ObjRef m (Blob m))
+              | TreeRef   (ObjRef m (Tree m))
+              | CommitRef (ObjRef m (Commit m))
+              | TagRef    (ObjRef m (Tag m))
+
 {- $blobs -}
 type Blob m = BlobContents m
-
--- instance Typeable (Blob m) where
---     typeOf (Blob x) = mkTyConApp (mkTyCon3 "gitlib" "Git" "Blob") [typeOf x]
 
 type ByteSource m = GSource m ByteString
 

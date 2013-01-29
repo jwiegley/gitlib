@@ -51,7 +51,113 @@ sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message." Nothing
 
 main :: IO ()
-main = hspec spec
+main =
+    withNewRepository "createTwoCommits.git" $ do
+      liftIO $ putStrLn " step 1.. "
+      liftIO $ withCString "createTwoCommits.git/objects" $ \objectsDir ->
+        alloca $ \loosePtr -> do
+          r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
+          when (r < 0) $ error "Failed to create loose objects backend"
+          -- jww (2013-01-27): Restore
+          -- loosePtr' <- peek loosePtr
+          -- backend   <- traceBackend loosePtr'
+          -- odbBackendAdd backend 3
+
+      liftIO $ putStrLn " step 2.. "
+      hello <- createBlobUtf8 "Hello, world!\n"
+      liftIO $ putStrLn " step 3.. "
+      tr <- newTree
+      liftIO $ putStrLn " step 4.. "
+      putBlob tr "hello/world.txt" hello
+
+      liftIO $ putStrLn " step 5.. "
+      goodbye <- createBlobUtf8 "Goodbye, world!\n"
+      liftIO $ putStrLn " step 6.. "
+      putBlob tr "goodbye/files/world.txt" goodbye
+      liftIO $ putStrLn " step 7.. "
+      x <- oid tr
+      liftIO $ putStrLn " step 8.. "
+      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+      liftIO $ putStrLn " step 9.. "
+
+      -- The Oid has been cleared in tr, so this tests that it gets written as
+      -- needed.
+      liftIO $ putStrLn " step 10.. "
+      let sig = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+      liftIO $ putStrLn " step 11.. "
+      c <- sampleCommit tr sig
+      liftIO $ putStrLn " step 12.. "
+      let x = renderOid (commitOid c)
+      liftIO $ putStrLn " step 13.. "
+      liftIO $ x @?= "df1b2a6bfc78e57ac336de9ca6ed3ae8c850104d"
+      liftIO $ putStrLn " step 14.. "
+
+      liftIO $ putStrLn " step 15.. "
+      goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
+      liftIO $ putStrLn " step 16.. "
+      putBlob tr "goodbye/files/world.txt" goodbye2
+      liftIO $ putStrLn " step 17.. "
+      x <- oid tr
+      liftIO $ putStrLn " step 18.. "
+      liftIO $ x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
+      liftIO $ putStrLn " step 19.. "
+
+      let sig = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+      liftIO $ putStrLn " step 20.. "
+      c2 <- createCommit [commitRef c] (treeRef tr) sig sig
+                        "Second sample log message." Nothing
+      liftIO $ putStrLn " step 21.. "
+      let x = renderOid (commitOid c2)
+      liftIO $ putStrLn " step 22.. "
+      liftIO $ x @?= "02727e0666c0092cb6dac62d70876ae99097a74a"
+      liftIO $ putStrLn " step 23.. "
+
+      liftIO $ putStrLn " step 24.. "
+      updateRef_ "refs/heads/master" (RefObj (commitRef c2))
+      liftIO $ putStrLn " step 25.. "
+      updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
+      liftIO $ putStrLn " step 26.. "
+
+      liftIO $ putStrLn " step 27.. "
+      c3 <- resolveRef "refs/heads/master"
+      liftIO $ putStrLn " step 28.. "
+      c3 <- resolveCommit c3
+      liftIO $ putStrLn " step 29.. "
+      let x = renderOid (commitOid c3)
+      liftIO $ putStrLn " step 30.. "
+      liftIO $ x @?= "02727e0666c0092cb6dac62d70876ae99097a74a"
+      liftIO $ putStrLn " step 31.. "
+
+      liftIO $ putStrLn " step 32.. "
+      refs <- mapRefs return
+      liftIO $ putStrLn " step 33.. "
+      liftIO $ print refs
+      liftIO $ putStrLn $ " step 34.. " ++ show refs
+      liftIO $ show refs @?= "[ \"master\" ]"
+      liftIO $ putStrLn " step 35.. "
+
+      -- jww (2013-01-27): Restore
+      -- ehist <- commitHistoryFirstParent c2
+      -- Prelude.putStrLn $ "ehist: " ++ show ehist
+
+      -- ehist2 <- commitEntryHistory c2 "goodbye/files/world.txt"
+      -- Prelude.putStrLn $ "ehist2: " ++ show ehist2
+
+      -- oid <- parseOid ("2506e7fc" :: Text)
+      -- c4 <- lookupCommit (fromJust oid)
+      -- c5 <- maybe (return Nothing) (lookupCommit) oid
+      -- c6 <- lookupCommit (fromJust oid)
+      -- ehist4 <- commitEntryHistory (fromJust c4) "goodbye/files/world.txt"
+      -- Prelude.putStrLn $ "ehist4: " ++ show (Prelude.head ehist4)
+
+      return ()
+-- main = hspec spec
 
 spec :: Spec
 spec = describe "Smoke tests" $ do
@@ -116,7 +222,6 @@ spec = describe "Smoke tests" $ do
       putBlob tr "goodbye/files/world.txt" goodbye
       x <- oid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-      liftIO $ putStrLn $ "step 1: " ++ show x
 
       -- The Oid has been cleared in tr, so this tests that it gets
       -- written as needed.
@@ -125,13 +230,9 @@ spec = describe "Smoke tests" $ do
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
-      liftIO $ putStrLn $ "step 2"
       c <- sampleCommit tr sig
-      liftIO $ putStrLn $ "step 3"
-      x <- oid c
-      liftIO $ putStrLn $ "step 4"
-      liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
-      liftIO $ putStrLn $ "step 5: " ++ show x
+      let x = renderOid (commitOid c)
+      liftIO $ x @?= "df1b2a6bfc78e57ac336de9ca6ed3ae8c850104d"
 
   it "create two commits" $ do
     withNewRepository "createTwoCommits.git" $ do
@@ -160,8 +261,8 @@ spec = describe "Smoke tests" $ do
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = posixSecondsToUTCTime 1348980883 }
       c <- sampleCommit tr sig
-      x <- oid c
-      liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
+      let x = renderOid (commitOid c)
+      liftIO $ x @?= "df1b2a6bfc78e57ac336de9ca6ed3ae8c850104d"
 
       goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
       putBlob tr "goodbye/files/world.txt" goodbye2
@@ -174,19 +275,19 @@ spec = describe "Smoke tests" $ do
             , signatureWhen  = posixSecondsToUTCTime 1348981883 }
       c2 <- createCommit [commitRef c] (treeRef tr) sig sig
                         "Second sample log message." Nothing
-      x <- oid c2
-      liftIO $ x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+      let x = renderOid (commitOid c2)
+      liftIO $ x @?= "02727e0666c0092cb6dac62d70876ae99097a74a"
 
       updateRef_ "refs/heads/master" (RefObj (commitRef c2))
       updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
 
       c3 <- resolveRef "refs/heads/master"
       c3 <- resolveCommit c3
-      let x = commitOid c3
-      liftIO $ renderOid x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+      let x = renderOid (commitOid c3)
+      liftIO $ x @?= "02727e0666c0092cb6dac62d70876ae99097a74a"
 
-      _ <- mapRefs (\(Reference name _) ->
-                     liftIO $ Prelude.putStrLn $ "Ref: " ++ unpack name)
+      refs <- mapRefs return
+      liftIO $ show refs @?= "[ \"master\" ]"
 
       -- jww (2013-01-27): Restore
       -- ehist <- commitHistoryFirstParent c2
