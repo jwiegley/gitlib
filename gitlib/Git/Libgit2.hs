@@ -88,6 +88,7 @@ instance Git.Repository LgRepository where
         { tagCommit :: Git.CommitOid LgRepository }
 
     parseOid        = lgParseOid
+    renderOid       = lgRenderOid
     lookupRef       = undefined
     updateRef       = undefined
     traverseRefs    = undefined
@@ -117,6 +118,9 @@ lgParseOid str
           else return (Oid oid)
   where
     len = S.length str
+
+lgRenderOid :: Oid -> Text
+lgRenderOid = T.pack . show
 
 instance Show (Git.Oid LgRepository) where
     show (Oid coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr

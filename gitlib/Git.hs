@@ -49,7 +49,7 @@ class (Applicative m, Monad m, Failure Exception m,
     data Commit m
     data Tag m
 
-    parseOid :: Text -> m (Oid m)
+    parseOid  :: Text   -> m (Oid m)
     renderOid :: Oid m -> Text
 
     -- References
