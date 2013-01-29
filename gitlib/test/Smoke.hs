@@ -138,28 +138,28 @@ tests = test [
     liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
     liftIO $ putStrLn "deleteTree: step 13.."
 
-  -- , "createCommit" ~:
+  , "createCommit" ~:
 
-  -- withRepository "createCommit.git" $ do
-  --   let hello = createBlobUtf8 "Hello, world!\n"
-  --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
+  withRepository "createCommit.git" $ do
+    hello <- createBlobUtf8 "Hello, world!\n"
+    tr <- newTree
+    putBlobInTree tr "hello/world.txt" hello
 
-  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
-  --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   x  <- oid tr
-  --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    goodbye <- createBlobUtf8 "Goodbye, world!\n"
+    putBlobInTree tr "goodbye/files/world.txt" goodbye
+    x <- oid tr
+    liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  --   -- The Oid has been cleared in tr, so this tests that it gets written as
-  --   -- needed.
-  --   let sig  = Signature {
-  --           signatureName  = "John Wiegley"
-  --         , signatureEmail = "johnw@newartisans.com"
-  --         , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+    -- The Oid has been cleared in tr, so this tests that it gets written as
+    -- needed.
+    let sig  = Signature {
+            signatureName  = "John Wiegley"
+          , signatureEmail = "johnw@newartisans.com"
+          , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
-  --   x <- oid $ sampleCommit tr sig
-  --   x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
-
-  --   return()
+    c <- sampleCommit tr sig
+    x <- oid c
+    liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
   -- , "createTwoCommits" ~:
 

@@ -58,6 +58,7 @@ import           Foreign.Ptr
 import           Foreign.StablePtr
 import           Foreign.Storable
 import qualified Git as Git
+import qualified Git.Utils as Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Reference
 import           Git.Libgit2.Types
@@ -129,7 +130,7 @@ lgCreateBlob ::
 lgCreateBlob b = do
     repo <- lgGet
     ptr  <- liftIO $ mallocForeignPtr
-    r    <- Git.blobContentsToByteString b
+    r    <- Git.blobToByteString b
             >>= \bs -> liftIO $ createBlobFromByteString repo ptr bs
     when (r < 0) $ failure Git.BlobCreateFailed
     return (Tagged (Oid ptr))
@@ -156,7 +157,7 @@ lgLookupBlob oid =
             -- unsafePackCStringLen to refer to its bytes.
             bstr <- curry BU.unsafePackCStringLen (castPtr buf)
                           (fromIntegral size)
-            return (Git.Blob (Git.BlobString bstr))
+            return (Git.BlobString bstr)
 
 type TreeEntry = Git.TreeEntry LgRepository
 
