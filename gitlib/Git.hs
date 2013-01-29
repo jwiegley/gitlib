@@ -244,7 +244,7 @@ instance Default Signature where
 class (Repository CommitRepository, Treeish c) => Commitish c where
     type CommitRepository :: * -> *
 
-    commitOid     :: c -> CommitOid CommitRepository
+    commitOid     :: c -> Maybe (CommitOid CommitRepository)
     commitParents :: c -> [CommitOid CommitRepository]
     commitTree    :: c -> ObjRef CommitRepository (Tree CommitRepository)
 

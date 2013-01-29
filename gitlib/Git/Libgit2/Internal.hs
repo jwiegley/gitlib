@@ -15,6 +15,7 @@ import           Control.Monad.Trans.State
 import           Data.ByteString
 import           Data.Dynamic
 import           Data.Stringable
+import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
@@ -79,32 +80,8 @@ openRepositoryWith path fn = do
 
 type ObjPtr a = Maybe (ForeignPtr a)
 
-data Base = Base { gitId  :: Maybe (Git.Oid LgRepository)
-                 , gitObj :: ObjPtr C'git_object }
-
--- instance Show Base where
---   show x = case gitId x of
---              Nothing -> "Base..."
---              Just y  -> "Base#" ++ show y
-
--- -- | 'COid' is a type wrapper for a foreign pointer to libgit2's 'git_oid'
--- --   structure.  Users should not have to deal with this type.
--- type COid = ForeignPtr C'git_oid
-
--- coidToOid :: COid -> Oid
--- coidToOid coid =
---     Oid (unsafePerformIO $ withForeignPtr coid $ packCString . castPtr)
-
--- coidPtrToOid :: Ptr C'git_oid -> Oid
--- coidPtrToOid coidptr =
---     Oid (unsafePerformIO (packCString (castPtr coidptr)))
-
--- oidToCoid :: Oid -> COid
--- oidToCoid (Oid oid) = unsafePerformIO $ do
---     fptr <- mallocForeignPtr
---     withForeignPtr fptr $ \ptr ->
---         useAsCString oid (c'git_oid_fromraw ptr . castPtr)
---     return fptr
+data Base a b = Base { gitId  :: Maybe (Tagged a (Git.Oid LgRepository))
+                     , gitObj :: ObjPtr b }
 
 coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
 coidPtrToOid coidptr = do
@@ -120,8 +97,7 @@ lookupObject'
   :: ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
-  -> (ForeignPtr C'git_oid
-      -> ForeignPtr C'git_object -> Ptr C'git_object -> IO b)
+  -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> IO b)
   -> LgRepository b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- lgGet
@@ -134,13 +110,13 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
       if r < 0
         then error "lookupObject' failed"
         else do
-        ptr'     <- castPtr <$> peek ptr
-        coid     <- c'git_object_id ptr'
+        ptr'     <- peek ptr
+        coid     <- c'git_object_id (castPtr ptr')
         coidCopy <- mallocForeignPtr
         withForeignPtr coidCopy $ flip c'git_oid_cpy coid
 
-        fptr <- newForeignPtr p'git_object_free ptr'
-        createFn coidCopy fptr ptr'
+        fptr <- newForeignPtr p'git_object_free (castPtr ptr')
+        createFn coidCopy (castForeignPtr fptr) ptr'
 
 -- lgLookupObject :: Text -> LgRepository Dynamic
 -- lgLookupObject str

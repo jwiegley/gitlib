@@ -15,6 +15,7 @@ import Bindings.Libgit2.Oid
 #num GIT_REPOSITORY_OPEN_NO_SEARCH
 #num GIT_REPOSITORY_OPEN_CROSS_FS
 #ccall git_repository_open_ext , Ptr (Ptr <git_repository>) -> CString -> CUInt -> CString -> IO (CInt)
+#ccall git_repository_new , Ptr (Ptr <git_repository>) -> IO (CInt)
 #ccall git_repository_free , Ptr <git_repository> -> IO ()
 #ccall git_repository_init , Ptr (Ptr <git_repository>) -> CString -> CUInt -> IO (CInt)
 #ccall git_repository_head , Ptr (Ptr <git_reference>) -> Ptr <git_repository> -> IO (CInt)
