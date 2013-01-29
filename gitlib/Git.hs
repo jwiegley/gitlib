@@ -42,14 +42,15 @@ import           Text.Printf
 {- $repositories -}
 -- | A 'Repository' is the central point of contact between user code and Git
 -- data objects.  Every object must belong to some repository.
-class (Applicative m, Monad m, Failure Exception m, Show (Oid m))
-      => Repository m where
+class (Applicative m, Monad m, Failure Exception m,
+       Eq (Oid m), Ord (Oid m), Show (Oid m)) => Repository m where
     data Oid m
     data Tree m
     data Commit m
     data Tag m
 
     parseOid :: Text -> m (Oid m)
+    renderOid :: Oid m -> Text
 
     -- References
     lookupRef  :: Text -> m (Reference m)

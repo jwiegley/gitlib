@@ -121,6 +121,21 @@ lgParseOid str
 instance Show (Git.Oid LgRepository) where
     show (Oid coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
 
+instance Ord (Git.Oid LgRepository) where
+    Oid coid1 `compare` Oid coid2 =
+        SU.unsafePerformIO $
+        withForeignPtr coid1 $ \coid1Ptr ->
+        withForeignPtr coid2 $ \coid2Ptr -> do
+            r <- c'git_oid_cmp coid1Ptr coid2Ptr
+            if r < 0
+                then return LT
+                else if r > 0
+                     then return GT
+                     else return EQ
+
+instance Eq (Git.Oid LgRepository) where
+    Oid coid1 == Oid coid2 = coid1 `compare` coid2 == EQ
+
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
