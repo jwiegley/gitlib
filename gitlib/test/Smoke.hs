@@ -24,6 +24,7 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
 import           Foreign.Storable
 import           Git
+import           Git.Utils
 import qualified Git.Libgit2 as Lg
 import qualified Prelude
 import           Prelude (putStrLn)
