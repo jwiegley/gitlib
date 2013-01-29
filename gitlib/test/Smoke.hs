@@ -51,34 +51,7 @@ sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message." Nothing
 
 main :: IO ()
-main =
-    withNewRepository "createCommit.git" $ do
-      hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlobInTree tr "hello/world.txt" hello
-
-      goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlobInTree tr "goodbye/files/world.txt" goodbye
-      x <- oid tr
-      -- liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-      liftIO $ putStrLn $ "step 1: " ++ show x
-
-      -- The Oid has been cleared in tr, so this tests that it gets
-      -- written as needed.
-      let sig  = Signature {
-              signatureName  = "John Wiegley"
-            , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
-
-      liftIO $ putStrLn $ "step 2"
-      c <- sampleCommit tr sig
-      liftIO $ putStrLn $ "step 3"
-      x <- oid c
-      liftIO $ putStrLn $ "step 4"
-      -- liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
-      liftIO $ putStrLn $ "step 5: " ++ show x
-
--- main = hspec spec
+main = hspec spec
 
 spec :: Spec
 spec = describe "Smoke tests" $ do
@@ -96,7 +69,7 @@ spec = describe "Smoke tests" $ do
     withNewRepository "singleTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
-      putBlobInTree tr "hello/world.txt" hello
+      putBlob tr "hello/world.txt" hello
       x <- oid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
@@ -104,12 +77,12 @@ spec = describe "Smoke tests" $ do
     withNewRepository "twoTrees.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
-      putBlobInTree tr "hello/world.txt" hello
+      putBlob tr "hello/world.txt" hello
       x <- oid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlobInTree tr "goodbye/files/world.txt" goodbye
+      putBlob tr "goodbye/files/world.txt" goodbye
       x <- oid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
@@ -117,11 +90,11 @@ spec = describe "Smoke tests" $ do
     withNewRepository "deleteTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
-      putBlobInTree tr "hello/world.txt" hello
+      putBlob tr "hello/world.txt" hello
       x <- oid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-      putBlobInTree tr "goodbye/files/world.txt"
+      putBlob tr "goodbye/files/world.txt"
           =<< createBlobUtf8 "Goodbye, world!\n"
       x <- oid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
@@ -137,10 +110,10 @@ spec = describe "Smoke tests" $ do
     withNewRepository "createCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
-      putBlobInTree tr "hello/world.txt" hello
+      putBlob tr "hello/world.txt" hello
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlobInTree tr "goodbye/files/world.txt" goodbye
+      putBlob tr "goodbye/files/world.txt" goodbye
       x <- oid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
       liftIO $ putStrLn $ "step 1: " ++ show x
@@ -160,103 +133,98 @@ spec = describe "Smoke tests" $ do
       liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
       liftIO $ putStrLn $ "step 5: " ++ show x
 
-  -- , "createTwoCommits" $ do
+  it "create two commits" $ do
+    withNewRepository "createTwoCommits.git" $ do
+      liftIO $ withCString "createTwoCommits.git/objects" $ \objectsDir ->
+        alloca $ \loosePtr -> do
+          r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
+          when (r < 0) $ error "Failed to create loose objects backend"
+          -- jww (2013-01-27): Restore
+          -- loosePtr' <- peek loosePtr
+          -- backend   <- traceBackend loosePtr'
+          -- odbBackendAdd backend 3
 
-  -- withNewRepository "createTwoCommits.git" $ \repo -> alloca $ \loosePtr -> do
-  --   withCString "createTwoCommits.git/objects" $ \objectsDir -> do
-  --     r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
-  --     when (r < 0) $ error "Failed to create loose objects backend"
-  --   -- jww (2013-01-27): Restore
-  --   -- loosePtr' <- peek loosePtr
-  --   -- backend   <- traceBackend loosePtr'
-  --   -- odbBackendAdd backend 3
+      hello <- createBlobUtf8 "Hello, world!\n"
+      tr <- newTree
+      putBlob tr "hello/world.txt" hello
 
-  --   let hello = createBlobUtf8 "Hello, world!\n"
-  --   tr <- putBlobInTree newTree "hello/world.txt" (blobRef hello)
+      goodbye <- createBlobUtf8 "Goodbye, world!\n"
+      putBlob tr "goodbye/files/world.txt" goodbye
+      x <- oid tr
+      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  --   let goodbye = createBlobUtf8 "Goodbye, world!\n"
-  --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye)
-  --   tr <- update tr
-  --   x  <- oid tr
-  --   x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+      -- The Oid has been cleared in tr, so this tests that it gets written as
+      -- needed.
+      let sig = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+      c <- sampleCommit tr sig
+      x <- oid c
+      liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
 
-  --   -- The Oid has been cleared in tr, so this tests that it gets written as
-  --   -- needed.
-  --   let sig = Signature {
-  --           signatureName  = "John Wiegley"
-  --         , signatureEmail = "johnw@fpcomplete.com"
-  --         , signatureWhen  = posixSecondsToUTCTime 1348980883 }
-  --       c   = sampleCommit tr sig
-  --   c <- update c
-  --   x <- oid c
-  --   x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
+      goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
+      putBlob tr "goodbye/files/world.txt" goodbye2
+      x <- oid tr
+      liftIO $ x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
-  --   let goodbye2 = createBlobUtf8 "Goodbye, world again!\n"
-  --   tr <- putBlobInTree tr "goodbye/files/world.txt" (blobRef goodbye2)
-  --   tr <- update tr
-  --   x  <- oid tr
-  --   x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
+      let sig = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+      c2 <- createCommit [commitRef c] (treeRef tr) sig sig
+                        "Second sample log message." Nothing
+      x <- oid c2
+      liftIO $ x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
-  --   let sig = Signature {
-  --           signatureName  = "John Wiegley"
-  --         , signatureEmail = "johnw@fpcomplete.com"
-  --         , signatureWhen  = posixSecondsToUTCTime 1348981883 }
-  --       c2  = sampleCommit [commitRef c] tr sig sig
-  --                          "Second sample log message."
-  --   x <- oid c2
-  --   x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+      updateRef_ "refs/heads/master" (RefObj (commitRef c2))
+      updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
 
-  --   cid <- update c2
-  --   updateRef_ "refs/heads/master" (RefOid cid)
-  --   updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
+      c3 <- resolveRef "refs/heads/master"
+      c3 <- resolveCommit c3
+      let x = commitOid c3
+      liftIO $ renderOid x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
 
-  --   x <- oidToText <$> resolveRef "refs/heads/master"
-  --   x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
+      _ <- mapRefs (\(Reference name _) ->
+                     liftIO $ Prelude.putStrLn $ "Ref: " ++ unpack name)
 
-  --   traverseRefs (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
+      -- jww (2013-01-27): Restore
+      -- ehist <- commitHistoryFirstParent c2
+      -- Prelude.putStrLn $ "ehist: " ++ show ehist
 
-  --   -- jww (2013-01-27): Restore
-  --   -- ehist <- commitHistoryFirstParent c2
-  --   -- Prelude.putStrLn $ "ehist: " ++ show ehist
+      -- ehist2 <- commitEntryHistory c2 "goodbye/files/world.txt"
+      -- Prelude.putStrLn $ "ehist2: " ++ show ehist2
 
-  --   -- ehist2 <- commitEntryHistory c2 "goodbye/files/world.txt"
-  --   -- Prelude.putStrLn $ "ehist2: " ++ show ehist2
+      -- oid <- parseOid ("2506e7fc" :: Text)
+      -- c4 <- lookupCommit (fromJust oid)
+      -- c5 <- maybe (return Nothing) (lookupCommit) oid
+      -- c6 <- lookupCommit (fromJust oid)
+      -- ehist4 <- commitEntryHistory (fromJust c4) "goodbye/files/world.txt"
+      -- Prelude.putStrLn $ "ehist4: " ++ show (Prelude.head ehist4)
 
-  --   -- oid <- parseOid ("2506e7fc" :: Text)
-  --   -- c4 <- lookupCommit (fromJust oid)
-  --   -- c5 <- maybe (return Nothing) (lookupCommit) oid
-  --   -- c6 <- lookupCommit (fromJust oid)
-  --   -- ehist4 <- commitEntryHistory (fromJust c4) "goodbye/files/world.txt"
-  --   -- Prelude.putStrLn $ "ehist4: " ++ show (Prelude.head ehist4)
+      return ()
 
-  -- , "smallTest1" $ do
+  it "another small test" $ do
+    withNewRepository "smallTest1.git" $ do
+      blob <- createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
+      let masterRef = "refs/heads/master"
+          sig = Signature { signatureName   = "First Name"
+                          , signatureEmail = "user1@email.org"
+                          , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+      tree <- newTree
+      putBlob tree "README.md" blob
+      commit <- createCommit [] (treeRef tree) sig sig "Initial commit" Nothing
+      liftIO $ print $ "commit1 sha = " ++ show (renderOid (commitOid commit))
 
-  -- withNewRepository "smallTest1.git" $ do
-  --   let blob =
-  --         createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
-  --       masterRef = "refs/heads/master"
-  --       sig = Signature { signatureName   = "First Name"
-  --                       , signatureEmail = "user1@email.org"
-  --                       , signatureWhen  = posixSecondsToUTCTime 1348981883 }
-  --   tree <- putBlobInTree newTree "README.md" (blobRef blob)
-  --   commit <- createCommit [] (treeRef tree) sig sig "Initial commit"
-  --   c1id <- update commit
-  --   print $ "commit1 sha = " ++ show c1id
+      let sig2 = Signature { signatureName   = "Second Name"
+                           , signatureEmail = "user2@email.org"
+                           , signatureWhen  = posixSecondsToUTCTime 1348982883 }
+      blob <- createBlobUtf8 "This is some content."
+      putBlob tree "foo.txt" blob
+      commit' <- createCommit [commitRef commit] (treeRef tree) sig sig
+                             "This is another log message." (Just masterRef)
+      liftIO $ print $ "commit2 sha = " ++ show (renderOid (commitOid commit'))
 
-  --   let sig2 = Signature { signatureName   = "Second Name"
-  --                        , signatureEmail = "user2@email.org"
-  --                        , signatureWhen  = posixSecondsToUTCTime 1348982883 }
-  --   blob <- createBlobUtf8 "This is some content."
-  --   blobOID <- update blob
-  --   tree' <- putBlobInTree tree "foo.txt" (blobRef blob)
-  --   commit' <- createCommit [commitRef commit] (treeRef tree') sig sig
-  --                          "This is another log message."
-  --   commitOID <- update commit'
-  --   print $ "commit2 sha = " ++ show commitOID
-  --   updateRef_ masterRef (RefOid commitOID)
-
-  --   True @?= True
-
-  --   return ()
+      liftIO $ True @?= True
 
 -- Main.hs ends here

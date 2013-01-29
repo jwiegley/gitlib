@@ -53,19 +53,18 @@ class (Applicative m, Monad m, Failure Exception m,
     renderOid :: Tagged a (Oid m) -> Text
 
     -- References
-    lookupRef  :: Text -> m (Reference m)
-    updateRef  :: Text -> Reference m -> m (Reference m)
-    updateRef_ :: Text -> Reference m -> m ()
+    lookupRef  :: Text -> m (Reference m (Commit m))
+    updateRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
+    updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
     updateRef_ = void .: updateRef
 
-    traverseRefs :: Traversable tr => (Reference m -> m b) -> m (tr b)
-    traverseRefs _ =
-        failure (BackendError "Backend does not allow traversal of references")
+    mapRefs :: (Reference m (Commit m) -> m a) -> m [a]
 
-    resolveRef :: Text -> m (Oid m)
+    resolveRef :: Text -> m (ObjRef m (Commit m))
     resolveRef name = lookupRef name >>= \ref ->
         case ref of
-            Reference { refTarget = RefOid oid } -> return oid
+            Reference { refTarget = (RefObj x@(ByOid (Tagged oid))) } ->
+                return x
             Reference { refTarget = RefSymbolic name' } ->
                 if name /= name'
                 then resolveRef name'
@@ -83,16 +82,10 @@ class (Applicative m, Monad m, Failure Exception m,
 
     lookupObject :: Text -> Int -> m (Object m)
 
-    lookupCommitRef :: Text -> m (Commit m)
-    lookupCommitRef = resolveRef >=> lookupCommit . Tagged
-
-    lookupTagRef :: Text -> m (Tag m)
-    lookupTagRef = resolveRef >=> lookupTag . Tagged
-
     -- Object creation
     newTree :: m (Tree m)
     createBlob :: BlobContents m -> m (BlobOid m)
-    createCommit :: [CommitOid m] -> ObjRef m (Tree m)
+    createCommit :: [ObjRef m (Commit m)] -> ObjRef m (Tree m)
                     -> Signature -> Signature -> Text -> Maybe Text
                     -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Signature -> Text -> m (Tag m)
@@ -141,11 +134,11 @@ type CommitOid m = Tagged (Commit m) (Oid m)
 type TagOid m    = Tagged (Tag m) (Oid m)
 
 {- $references -}
-data RefTarget m = RefOid (Oid m) | RefSymbolic Text
+data RefTarget m a = RefObj (ObjRef m a) | RefSymbolic Text
 
-data Reference m = Reference
+data Reference m a = Reference
     { refName   :: Text
-    , refTarget :: RefTarget m }
+    , refTarget :: RefTarget m a }
 
 {- $objects -}
 data ObjRef m a = ByOid (Tagged a (Oid m)) | Known a
@@ -198,18 +191,18 @@ class Repository TreeRepository => Treeish t where
         maybe (failure (TreeEntryLookupFailed path)) return entry
 
     putTreeEntry :: t -> FilePath -> TreeEntry TreeRepository
-                    -> TreeRepository ()
+                 -> TreeRepository ()
     putTreeEntry t path =
         void . modifyTree t path True . const . return . Just
 
-    putBlobInTree :: t -> FilePath -> BlobOid TreeRepository
-                     -> TreeRepository ()
-    putBlobInTree t path b = putTreeEntry t path (BlobEntry b False)
+    putBlob :: t -> FilePath -> BlobOid TreeRepository
+               -> TreeRepository ()
+    putBlob t path b = putTreeEntry t path (BlobEntry b False)
 
-    putTreeInTree :: t -> FilePath
-                  -> ObjRef TreeRepository (Tree TreeRepository)
-                  -> TreeRepository ()
-    putTreeInTree t path tr = putTreeEntry t path (TreeEntry tr)
+    putTree :: t -> FilePath
+            -> ObjRef TreeRepository (Tree TreeRepository)
+            -> TreeRepository ()
+    putTree t path tr = putTreeEntry t path (TreeEntry tr)
 
     dropFromTree :: t -> FilePath -> TreeRepository ()
     dropFromTree t path =
@@ -220,8 +213,14 @@ class Repository TreeRepository => Treeish t where
 treeRef :: Tree m -> ObjRef m (Tree m)
 treeRef = Known
 
-resolveTreeRef :: Repository m => ObjRef m (Tree m) -> m (Tree m)
-resolveTreeRef objRef = case objRef of
+treeRefOid :: (Repository TreeRepository, Treeish (Tree TreeRepository))
+           => ObjRef TreeRepository (Tree TreeRepository)
+           -> TreeRepository (Maybe (TreeOid TreeRepository))
+treeRefOid (ByOid x) = return (Just x)
+treeRefOid (Known x) = writeTree x
+
+resolveTree :: Repository m => ObjRef m (Tree m) -> m (Tree m)
+resolveTree objRef = case objRef of
     ByOid oid -> lookupTree oid
     Known obj -> return obj
 
@@ -244,8 +243,8 @@ instance Default Signature where
 class (Repository CommitRepository, Treeish c) => Commitish c where
     type CommitRepository :: * -> *
 
-    commitOid     :: c -> Maybe (CommitOid CommitRepository)
-    commitParents :: c -> [CommitOid CommitRepository]
+    commitOid     :: c -> CommitOid CommitRepository
+    commitParents :: c -> [ObjRef CommitRepository (Commit CommitRepository)]
     commitTree    :: c -> ObjRef CommitRepository (Tree CommitRepository)
 
     commitTree' :: c -> CommitRepository (Tree CommitRepository)
@@ -256,8 +255,15 @@ class (Repository CommitRepository, Treeish c) => Commitish c where
 commitRef :: Commit c -> ObjRef m (Commit c)
 commitRef = Known
 
-resolveCommitRef :: Repository m => ObjRef m (Commit m) -> m (Commit m)
-resolveCommitRef objRef = case objRef of
+commitRefOid :: (Repository CommitRepository,
+                 Commitish (Commit CommitRepository))
+             => ObjRef CommitRepository (Commit CommitRepository)
+             -> CommitOid CommitRepository
+commitRefOid (ByOid x) = x
+commitRefOid (Known x) = commitOid x
+
+resolveCommit :: Repository m => ObjRef m (Commit m) -> m (Commit m)
+resolveCommit objRef = case objRef of
     ByOid oid -> lookupCommit oid
     Known obj -> return obj
 

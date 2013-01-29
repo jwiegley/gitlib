@@ -81,25 +81,25 @@ instance Git.Repository LgRepository where
         , lgCommitLog       :: Text
         , lgCommitEncoding  :: String
         , lgCommitTree      :: Git.ObjRef LgRepository Tree
-        , lgCommitParents   :: [Git.CommitOid LgRepository] }
+        , lgCommitParents   :: [Git.ObjRef LgRepository Commit] }
 
     data Tag LgRepository = Tag
         { tagCommit :: Git.CommitOid LgRepository }
 
-    parseOid        = lgParseOid
-    renderOid       = lgRenderOid
-    lookupRef       = undefined
-    updateRef       = undefined
-    traverseRefs    = undefined
-    lookupCommit    = lgLookupCommit 40
-    lookupTree      = lgLookupTree 40
-    lookupBlob      = lgLookupBlob
-    lookupTag       = undefined
-    lookupObject    = lgLookupObject
-    newTree         = lgNewTree
-    createBlob      = lgCreateBlob
-    createCommit    = lgCreateCommit
-    createTag       = undefined
+    parseOid     = lgParseOid
+    renderOid    = lgRenderOid
+    lookupRef    = undefined
+    updateRef    = undefined
+    mapRefs      = lgMapRefs
+    lookupCommit = lgLookupCommit 40
+    lookupTree   = lgLookupTree 40
+    lookupBlob   = lgLookupBlob
+    lookupTag    = undefined
+    lookupObject = lgLookupObject
+    newTree      = lgNewTree
+    createBlob   = lgCreateBlob
+    createCommit = lgCreateCommit
+    createTag    = undefined
 
 lgParseOid :: Text -> LgRepository Oid
 lgParseOid str
@@ -262,7 +262,7 @@ doLookupTreeEntry t (name:names) = do
       then return y
       else case y of
       Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-      Just (Git.TreeEntry t') -> do t'' <- Git.resolveTreeRef t'
+      Just (Git.TreeEntry t') -> do t'' <- Git.resolveTree t'
                                     doLookupTreeEntry t'' names
       _ -> return Nothing
 
@@ -371,7 +371,7 @@ doModifyTree t (name:names) createIfNotExist f = do
               Nothing -> return Nothing
               Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
               Just (Git.TreeEntry st') -> do
-                  st <- Git.resolveTreeRef st'
+                  st <- Git.resolveTree st'
                   ze <- doModifyTree st names createIfNotExist f
                   liftIO $ modifyIORef
                       (lgPendingUpdates t) (HashMap.insert name st)
@@ -413,7 +413,7 @@ splitPath path = T.splitOn "/" text
 
 instance Git.Commitish Commit where
     type CommitRepository = LgRepository
-    commitOid     = gitId . lgCommitInfo
+    commitOid     = fromJust . gitId . lgCommitInfo
     commitParents = lgCommitParents
     commitTree    = lgCommitTree
 
@@ -446,7 +446,7 @@ lgLookupCommit len oid =
         poids <- sequence
                  (zipWith ($) (replicate (fromIntegral (toInteger pn))
                                (c'git_commit_parent_oid c)) [0..pn])
-        poids' <- mapM (\x -> Tagged . Oid <$> coidPtrToOid x) poids
+        poids' <- mapM (\x -> Git.ByOid . Tagged . Oid <$> coidPtrToOid x) poids
 
         return Commit
             { lgCommitInfo      = Base (Just (Tagged (Oid coid))) (Just obj)
@@ -497,7 +497,7 @@ lgLookupObject str len
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-lgCreateCommit :: [Git.CommitOid LgRepository]
+lgCreateCommit :: [Git.ObjRef LgRepository Commit]
                -> Git.ObjRef LgRepository Tree
                -> Git.Signature
                -> Git.Signature
@@ -506,22 +506,22 @@ lgCreateCommit :: [Git.CommitOid LgRepository]
                -> LgRepository Commit
 lgCreateCommit parents tree author committer logText ref = do
     repo  <- lgGet
-    tr    <- Git.resolveTreeRef tree
-    mtoid <- Git.writeTree tr
+    mtoid <- Git.treeRefOid tree
     toid  <- maybe (failure Git.CommitCreateFailed)
                    (return . getOid . unTagged) mtoid
+    let pptrs = map Git.commitRefOid parents
     coid  <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
         coid <- mallocForeignPtr
         conv <- U.open "utf-8" (Just True)
         withForeignPtr coid $ \coid' ->
             withForeignPtr toid $ \toid' ->
-            withForeignPtrs (map (getOid . unTagged) parents) $ \pptrs ->
+            withForeignPtrs (map (getOid . unTagged) pptrs) $ \pptrs' ->
             useAsCString (U.fromUnicode conv logText) $ \message ->
             withRef ref $ \update_ref ->
             withSignature conv author $ \author' ->
             withSignature conv committer $ \committer' ->
             withEncStr "utf-8" $ \message_encoding -> do
-                parents' <- newArray pptrs
+                parents' <- newArray pptrs'
                 r <- c'git_commit_create_oid coid' repoPtr
                      update_ref author' committer'
                      message_encoding message toid'
@@ -564,7 +564,7 @@ getCommitParentPtrs repo parents =
         ptr' <- peek ptr
         FC.newForeignPtr ptr' (c'git_commit_free ptr')
 
-lgLookupRef :: Text -> LgRepository (Git.Reference LgRepository)
+lgLookupRef :: Text -> LgRepository (Git.Reference LgRepository Commit)
 lgLookupRef name = do
     repo <- lgGet
     targ <- liftIO $ alloca $ \ptr -> do
@@ -579,22 +579,29 @@ lgLookupRef name = do
             typ  <- c'git_reference_type ref
             if typ == c'GIT_REF_OID
                 then do oidPtr <- c'git_reference_oid ref
-                        Git.RefOid . Oid <$> coidPtrToOid oidPtr
+                        Git.RefObj . Git.ByOid . Tagged . Oid
+                            <$> coidPtrToOid oidPtr
                 else do targName <- c'git_reference_target ref
                         packCString targName
                             >>= return . Git.RefSymbolic . T.decodeUtf8
     return $ Git.Reference { Git.refName   = name
                            , Git.refTarget = targ }
 
-lgWriteRef :: Git.Reference LgRepository -> LgRepository ()
+lgWriteRef :: Git.Reference LgRepository Commit -> LgRepository ()
 lgWriteRef ref = do
     repo <- lgGet
     liftIO $ alloca $ \ptr ->
         withForeignPtr (repoObj repo) $ \repoPtr ->
         withCStringable (Git.refName ref) $ \namePtr -> do
             r <- case Git.refTarget ref of
-                Git.RefOid oid ->
-                    withForeignPtr (getOid oid) $ \coidPtr ->
+                Git.RefObj (Git.ByOid oid) ->
+                    withForeignPtr (getOid (unTagged oid)) $ \coidPtr ->
+                        c'git_reference_create_oid ptr repoPtr namePtr
+                                                   coidPtr (fromBool True)
+
+                Git.RefObj (Git.Known c) ->
+                    withForeignPtr
+                        (getOid (unTagged (Git.commitOid c))) $ \coidPtr ->
                         c'git_reference_create_oid ptr repoPtr namePtr
                                                    coidPtr (fromBool True)
 
@@ -708,9 +715,9 @@ foreign export ccall "foreachRefCallback"
 foreign import ccall "&foreachRefCallback"
   foreachRefCallbackPtr :: FunPtr (CString -> Ptr () -> IO CInt)
 
-lgTraverseRefs ::
-    (Git.Reference LgRepository -> LgRepository a) -> LgRepository [a]
-lgTraverseRefs cb = do
+lgMapRefs ::
+    (Git.Reference LgRepository Commit -> LgRepository a) -> LgRepository [a]
+lgMapRefs cb = do
     repo <- lgGet
     liftIO $ do
         ioRef <- newIORef []
