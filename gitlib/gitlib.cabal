@@ -30,20 +30,22 @@ Test-suite smoke
     Build-depends: 
           base >=3
         , gitlib
-        , hlibgit2        >= 0.17.0.5
-        , HUnit           >= 1.2.5
-        , bytestring      >= 0.9.2.1
-        , containers      >= 0.4.2
-        , failure         >= 0.2.0.1
-        , lens            >= 2.8
-        , parallel-io     >= 0.3.2.1
-        , stringable      >= 0.1.1
-        , system-fileio   >= 0.3.9
-        , system-filepath >= 0.4.7
-        , tagged          >= 0.4.4
-        , text            >= 0.11.2
-        , time            >= 1.4
-        , transformers    >= 0.3
+        , hlibgit2           >= 0.17.0.5
+        , HUnit              >= 1.2.5
+        , bytestring         >= 0.9.2.1
+        , containers         >= 0.4.2
+        , failure            >= 0.2.0.1
+        , hspec              >= 1.4.4
+        , hspec-expectations >= 0.3
+        , lens               >= 2.8
+        , parallel-io        >= 0.3.2.1
+        , stringable         >= 0.1.1
+        , system-fileio      >= 0.3.9
+        , system-filepath    >= 0.4.7
+        , tagged             >= 0.4.4
+        , text               >= 0.11.2
+        , time               >= 1.4
+        , transformers       >= 0.3
 
 Test-suite doctests
     Default-language: Haskell98

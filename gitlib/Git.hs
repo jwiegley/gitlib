@@ -49,8 +49,8 @@ class (Applicative m, Monad m, Failure Exception m,
     data Commit m
     data Tag m
 
-    parseOid  :: Text   -> m (Oid m)
-    renderOid :: Oid m -> Text
+    parseOid  :: Text -> m (Oid m)
+    renderOid :: Tagged a (Oid m) -> Text
 
     -- References
     lookupRef  :: Text -> m (Reference m)

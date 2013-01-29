@@ -24,147 +24,118 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
 import           Foreign.Storable
 import           Git
-import           Git.Utils
 import qualified Git.Libgit2 as Lg
+import           Git.Utils
 import qualified Prelude
 import           Prelude (putStrLn)
 import           Prelude hiding (FilePath, putStr, putStrLn)
 import           System.Exit
 import           Test.HUnit
+import           Test.Hspec (Spec, describe, it, hspec)
+import           Test.Hspec.Expectations
+import           Test.Hspec.HUnit ()
 
 default (Text)
-
-main :: IO ()
-main = do
-  counts' <- runTestTT tests
-  case counts' of
-    Counts _ _ errors' failures' ->
-      if errors' > 0 || failures' > 0
-      then exitFailure
-      else exitSuccess
-  stopGlobalPool
 
-withRepository :: FilePath -> Lg.LgRepository () -> IO ()
-withRepository dir action = do
+withNewRepository :: FilePath -> Lg.LgRepository () -> IO ()
+withNewRepository dir action = do
   exists <- isDirectory dir
   when exists $ removeTree dir
-
   a <- Lg.withLgRepository dir True action
   -- we want exceptions to leave the repo behind
   removeTree dir
   return a
 
-oid :: Treeish t => t -> TreeRepository Text
-oid t = do
-    oid' <- writeTree t
-    case oid' of
-        Nothing    -> return "<none>"
-        Just oid'' -> return . oidToText . unTagged $ oid''
-
-oidToText :: Repository m => Oid m -> Text
-oidToText = T.pack . show
-
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message." Nothing
+
+main :: IO ()
+main = hspec spec
 
-tests :: Test
-tests = test [
+spec :: Spec
+spec = describe "Smoke tests" $ do
+    it "create a single blob" $ do
+        withNewRepository "singleBlob.git" $ do
+          createBlobUtf8 "Hello, world!\n"
 
-  "singleBlob" ~:
+          x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+          liftIO $ x @?= "Hello, world!\n"
 
-  withRepository "singleBlob.git" $ do
-    createBlobUtf8 "Hello, world!\n"
+          x <- catBlob "af5626b"
+          liftIO $ x @?= "Hello, world!\n"
 
-    x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
-    liftIO $ x @?= "Hello, world!\n"
+    it "create a single tree" $ do
+        withNewRepository "singleTree.git" $ do
+          hello <- createBlobUtf8 "Hello, world!\n"
+          tr <- newTree
+          putBlobInTree tr "hello/world.txt" hello
+          x <- oid tr
+          liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-    x <- catBlob "af5626b"
-    liftIO $ x @?= "Hello, world!\n"
+    it "create two trees" $ do
+        withNewRepository "twoTrees.git" $ do
+          hello <- createBlobUtf8 "Hello, world!\n"
+          tr <- newTree
+          putBlobInTree tr "hello/world.txt" hello
+          x <- oid tr
+          liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  , "singleTree" ~:
+          goodbye <- createBlobUtf8 "Goodbye, world!\n"
+          putBlobInTree tr "goodbye/files/world.txt" goodbye
+          x <- oid tr
+          liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  withRepository "singleTree.git" $ do
-    hello <- createBlobUtf8 "Hello, world!\n"
-    tr <- newTree
-    putBlobInTree tr "hello/world.txt" hello
-    x <- oid tr
-    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+    it "delete an item from a tree" $ do
+        withNewRepository "deleteTree.git" $ do
+          hello <- createBlobUtf8 "Hello, world!\n"
+          tr <- newTree
+          putBlobInTree tr "hello/world.txt" hello
+          x <- oid tr
+          liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  , "twoTrees" ~:
+          putBlobInTree tr "goodbye/files/world.txt"
+              =<< createBlobUtf8 "Goodbye, world!\n"
+          x <- oid tr
+          liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  withRepository "twoTrees.git" $ do
-    hello <- createBlobUtf8 "Hello, world!\n"
-    tr <- newTree
-    putBlobInTree tr "hello/world.txt" hello
-    x <- oid tr
-    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+          -- Confirm that deleting world.txt also deletes the now-empty subtree
+          -- goodbye/files, which also deletes the then-empty subtree goodbye,
+          -- returning us back the original tree.
+          dropFromTree tr "goodbye/files/world.txt"
+          x <- oid tr
+          liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-    goodbye <- createBlobUtf8 "Goodbye, world!\n"
-    putBlobInTree tr "goodbye/files/world.txt" goodbye
-    x <- oid tr
-    liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+    it "create a single commit" $ do
+        withNewRepository "createCommit.git" $ do
+          hello <- createBlobUtf8 "Hello, world!\n"
+          tr <- newTree
+          putBlobInTree tr "hello/world.txt" hello
 
-  , "deleteTree" ~:
+          goodbye <- createBlobUtf8 "Goodbye, world!\n"
+          putBlobInTree tr "goodbye/files/world.txt" goodbye
+          x <- oid tr
+          liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+          liftIO $ putStrLn $ "step 1: " ++ show x
 
-  withRepository "deleteTree.git" $ do
-    liftIO $ putStrLn "deleteTree: step 1.."
-    hello <- createBlobUtf8 "Hello, world!\n"
-    liftIO $ putStrLn "deleteTree: step 2.."
-    tr <- newTree
-    liftIO $ putStrLn "deleteTree: step 3.."
-    putBlobInTree tr "hello/world.txt" hello
-    liftIO $ putStrLn "deleteTree: step 4.."
-    x <- oid tr
-    liftIO $ putStrLn "deleteTree: step 5.."
-    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-    liftIO $ putStrLn "deleteTree: step 6.."
+          -- The Oid has been cleared in tr, so this tests that it gets written as
+          -- needed.
+          let sig  = Signature {
+                  signatureName  = "John Wiegley"
+                , signatureEmail = "johnw@fpcomplete.com"
+                , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
-    putBlobInTree tr "goodbye/files/world.txt"
-        =<< createBlobUtf8 "Goodbye, world!\n"
-    liftIO $ putStrLn "deleteTree: step 7.."
-    x <- oid tr
-    liftIO $ putStrLn "deleteTree: step 8.."
-    liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-    liftIO $ putStrLn "deleteTree: step 9.."
+          liftIO $ putStrLn $ "step 2"
+          c <- sampleCommit tr sig
+          liftIO $ putStrLn $ "step 3"
+          x <- oid c
+          liftIO $ putStrLn $ "step 4"
+          liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
+          liftIO $ putStrLn $ "step 5: " ++ show x
 
-    -- Confirm that deleting world.txt also deletes the now-empty subtree
-    -- goodbye/files, which also deletes the then-empty subtree goodbye,
-    -- returning us back the original tree.
-    liftIO $ putStrLn "deleteTree: step 10.."
-    dropFromTree tr "goodbye/files/world.txt"
-    liftIO $ putStrLn "deleteTree: step 11.."
-    x <- oid tr
-    liftIO $ putStrLn "deleteTree: step 12.."
-    liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-    liftIO $ putStrLn "deleteTree: step 13.."
+  -- , "createTwoCommits" $ do
 
-  , "createCommit" ~:
-
-  withRepository "createCommit.git" $ do
-    hello <- createBlobUtf8 "Hello, world!\n"
-    tr <- newTree
-    putBlobInTree tr "hello/world.txt" hello
-
-    goodbye <- createBlobUtf8 "Goodbye, world!\n"
-    putBlobInTree tr "goodbye/files/world.txt" goodbye
-    x <- oid tr
-    liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-
-    -- The Oid has been cleared in tr, so this tests that it gets written as
-    -- needed.
-    let sig  = Signature {
-            signatureName  = "John Wiegley"
-          , signatureEmail = "johnw@newartisans.com"
-          , signatureWhen  = posixSecondsToUTCTime 1348980883 }
-
-    c <- sampleCommit tr sig
-    x <- oid c
-    liftIO $ x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
-
-  -- , "createTwoCommits" ~:
-
-  -- withRepository "createTwoCommits.git" $ \repo -> alloca $ \loosePtr -> do
+  -- withNewRepository "createTwoCommits.git" $ \repo -> alloca $ \loosePtr -> do
   --   withCString "createTwoCommits.git/objects" $ \objectsDir -> do
   --     r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
   --     when (r < 0) $ error "Failed to create loose objects backend"
@@ -231,9 +202,9 @@ tests = test [
   --   -- ehist4 <- commitEntryHistory (fromJust c4) "goodbye/files/world.txt"
   --   -- Prelude.putStrLn $ "ehist4: " ++ show (Prelude.head ehist4)
 
-  -- , "smallTest1" ~:
+  -- , "smallTest1" $ do
 
-  -- withRepository "smallTest1.git" $ do
+  -- withNewRepository "smallTest1.git" $ do
   --   let blob =
   --         createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
   --       masterRef = "refs/heads/master"
@@ -260,6 +231,5 @@ tests = test [
   --   True @?= True
 
   --   return ()
-  ]
 
 -- Main.hs ends here

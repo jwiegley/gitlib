@@ -12,6 +12,13 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Git
 
+oid :: Treeish t => t -> TreeRepository Text
+oid t = do
+    oid' <- writeTree t
+    case oid' of
+        Nothing -> return (T.pack "<none>")
+        Just x  -> return (renderOid x)
+
 blobToByteString :: Repository m => BlobContents m -> m ByteString
 blobToByteString (BlobString bs) = return bs
 blobToByteString (BlobStream bs) = do

@@ -119,8 +119,8 @@ lgParseOid str
   where
     len = S.length str
 
-lgRenderOid :: Oid -> Text
-lgRenderOid = T.pack . show
+lgRenderOid :: Tagged a (Git.Oid LgRepository) -> Text
+lgRenderOid = T.pack . show . unTagged
 
 instance Show (Git.Oid LgRepository) where
     show (Oid coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
@@ -218,7 +218,6 @@ lgNewTree = do
     if r < 0
         then failure Git.TreeCreateFailed
         else do
-        liftIO $ putStrLn "lgNewTree!"
         upds <- liftIO $ newIORef HashMap.empty
         return Tree { lgTreeInfo     = Base Nothing Nothing
                     -- , lgTreeSize     = size
@@ -243,7 +242,6 @@ lgLookupTree len oid =
               if r < 0
                   then failure Git.TreeCreateFailed
                   else do
-                  liftIO $ putStrLn "lgLookupTree!"
                   upds <- liftIO $ newIORef HashMap.empty
                   return Tree { lgTreeInfo =
                                      Base (Just (Oid coid)) (Just obj)
@@ -259,7 +257,6 @@ doLookupTreeEntry t (name:names) = do
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
 
-  liftIO $ Prelude.putStrLn $ "Lookup: " ++ show name
   upds <- liftIO $ readIORef (lgPendingUpdates t)
   y <- case HashMap.lookup name upds of
       Just m -> return . Just . Git.TreeEntry . Git.Known $ m
@@ -279,7 +276,6 @@ doLookupTreeEntry t (name:names) = do
                            else Just (Git.TreeEntry
                                       (Git.ByOid (Tagged (Oid oid))))
 
-  liftIO $ Prelude.putStrLn $ "Names: " ++ show names
   if null names
       then return y
       else case y of
@@ -336,7 +332,6 @@ insertEntry builder key oid attrs = do
 dropEntry :: (CStringable a, Show a)
             => ForeignPtr C'git_treebuilder -> a -> LgRepository ()
 dropEntry builder key = do
-  liftIO $ putStrLn ("dropEntry: " ++ show key)
   r2 <- liftIO $ withForeignPtr builder $ \ptr ->
       withCStringable key $ \name ->
           c'git_treebuilder_remove ptr name
@@ -346,14 +341,11 @@ dropEntry builder key = do
 doWriteTree :: Tree -> LgRepository (Maybe Oid)
 doWriteTree t = do
     repo <- lgGet
-    liftIO $ putStrLn $ "doWriteTree"
 
     let contents = lgTreeContents t
     upds <- liftIO $ readIORef (lgPendingUpdates t)
     mapM_ (\(k,v) -> do
-                liftIO $ putStrLn $ "Pending write for: " ++ show k
                 oid <- doWriteTree v
-                liftIO $ putStrLn $ "Will delete: " ++ show (isNothing oid)
                 case oid of
                     Nothing   -> dropEntry contents k
                     Just oid' -> insertEntry contents k oid' 0o040000)
@@ -361,7 +353,6 @@ doWriteTree t = do
     liftIO $ writeIORef (lgPendingUpdates t) HashMap.empty
 
     cnt <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
-    liftIO $ putStrLn $ "cnt = " ++ show cnt
     if cnt == 0
         then return Nothing
         else go contents (repoObj repo)
@@ -374,7 +365,6 @@ doWriteTree t = do
             withForeignPtr coid $ \coid' ->
                 withForeignPtr fptr $ \builder ->
                 withForeignPtr repo $ \repoPtr -> do
-                    liftIO $ putStrLn $ "doWriteTree.3"
                     r3 <- c'git_treebuilder_write coid' repoPtr builder
                     return (r3,coid)
         when (r3 < 0) $ failure Git.TreeBuilderWriteFailed
@@ -389,7 +379,6 @@ doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
     repo <- lgGet
 
-    liftIO $ putStrLn $ "doModifyTree 1: " ++ show name
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
     -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
@@ -399,10 +388,8 @@ doModifyTree t (name:names) createIfNotExist f = do
           then Just . Git.TreeEntry . Git.Known <$> Git.newTree
           else return y'
 
-    liftIO $ putStrLn "doModifyTree 2.."
     if null names
         then do
-        liftIO $ putStrLn "doModifyTree 3.."
         -- If there are no further names in the path, call the transformer
         -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there
         -- was a previous entry at this path.  It should return a 'Left' value
@@ -414,7 +401,6 @@ doModifyTree t (name:names) createIfNotExist f = do
         -- assumed to always be changed, as we have no reliable method of
         -- testing object equality that is not O(n).
         ze <- f y
-        liftIO $ putStrLn $ "doModifyTree 3: " ++ show (isJust ze)
         returnTree t name ze
 
         else
@@ -427,16 +413,8 @@ doModifyTree t (name:names) createIfNotExist f = do
               Nothing -> return Nothing
               Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
               Just (Git.TreeEntry st') -> do
-                  liftIO $ putStrLn "doModifyTree 4.."
                   st <- Git.resolveTreeRef st'
-                  liftIO $ putStrLn "doModifyTree 5.."
                   ze <- doModifyTree st names createIfNotExist f
-                  liftIO $ putStrLn $ "doModifyTree 6: " ++ show name
-                  -- stSize <- readIORef (lgTreeSize st)
-                  -- returnTree t name $ if stSize == 0
-                  --                     then Nothing
-                  --                     else ze
-                  liftIO $ putStrLn "doModifyTree 7.."
                   liftIO $ modifyIORef
                       (lgPendingUpdates t) (HashMap.insert name st)
                   return ze
@@ -444,8 +422,6 @@ doModifyTree t (name:names) createIfNotExist f = do
     returnTree t n z = do
         let contents = lgTreeContents t
         cntb <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
-        liftIO $ putStrLn $ "returnTree for "
-            ++ show n ++ ", count before = " ++ show cntb
         case z of
             Nothing -> dropEntry contents n
             Just z' -> do
@@ -454,8 +430,6 @@ doModifyTree t (name:names) createIfNotExist f = do
                     Nothing   -> dropEntry contents n
                     Just oid' -> insertEntry contents n oid' mode
         cnta <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
-        liftIO $ putStrLn $ "returnTree for "
-            ++ show n ++ ", count after = " ++ show cnta
         return z
 
     treeEntryToOid (Git.BlobEntry oid exe) =
