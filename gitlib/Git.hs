@@ -76,7 +76,7 @@ class (Applicative m, Monad m, Failure Exception m,
     lookupBlob   :: BlobOid m -> m (Blob m)
     lookupTag    :: TagOid m -> m (Tag m)
 
-    lookupObject :: Text -> Int -> m (Object m)
+    lookupObject :: Text -> m (Object m)
 
     -- Object creation
     newTree :: m (Tree m)

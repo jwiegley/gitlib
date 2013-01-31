@@ -34,7 +34,7 @@ catBlob str = do
         lookupBlob (Tagged oid) >>= blobToByteString
 
         else do
-        obj <- lookupObject str len
+        obj <- lookupObject str
         case obj of
             BlobRef (ByOid oid) -> lookupBlob oid >>= blobToByteString
             _ -> failure (ObjectLookupFailed str len)

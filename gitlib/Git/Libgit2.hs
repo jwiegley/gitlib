@@ -2,6 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Interface for opening and creating repositories.  Repository objects are
 --   immutable, and serve only to refer to the given repository.  Any data
@@ -35,7 +36,6 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as U
-import           Data.Traversable hiding (sequence, mapM)
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
@@ -79,6 +79,7 @@ instance Git.Repository LgRepository where
     renderOid    = lgRenderOid
     lookupRef    = lgLookupRef
     updateRef    = lgUpdateRef
+    resolveRef   = lgResolveRef
     allRefNames  = lgAllRefNames
     lookupCommit = lgLookupCommit 40
     lookupTree   = lgLookupTree 40
@@ -154,7 +155,7 @@ lgLookupBlob :: Git.BlobOid LgRepository -> LgRepository (Git.Blob LgRepository)
 lgLookupBlob oid =
     lookupObject' (getOid (unTagged oid)) 40
         c'git_blob_lookup c'git_blob_lookup_prefix
-        $ \coid obj _ ->
+        $ \_ obj _ ->
         withForeignPtr obj $ \ptr -> do
             size <- c'git_blob_rawsize (castPtr ptr)
             buf  <- c'git_blob_rawcontent (castPtr ptr)
@@ -255,11 +256,6 @@ doLookupTreeEntry t (name:names) = do
                                     doLookupTreeEntry t'' names
       _ -> return Nothing
 
-lookupTreeEntry :: Tree -> FilePath -> LgRepository TreeEntry
-lookupTreeEntry tr path = do
-    entry <- doLookupTreeEntry tr (splitPath path)
-    maybe (failure (Git.TreeEntryLookupFailed path)) return entry
-
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 lgWriteTree :: Tree -> LgRepository (Maybe (Git.TreeOid LgRepository))
@@ -324,8 +320,6 @@ doModifyTree :: Tree
              -> LgRepository (Maybe TreeEntry)
 doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
-    repo <- lgGet
-
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
     -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
@@ -366,9 +360,8 @@ doModifyTree t (name:names) createIfNotExist f = do
                       (lgPendingUpdates t) (HashMap.insert name st)
                   return ze
   where
-    returnTree t n z = do
-        let contents = lgTreeContents t
-        cntb <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
+    returnTree tr n z = do
+        let contents = lgTreeContents tr
         case z of
             Nothing -> dropEntry contents n
             Just z' -> do
@@ -376,7 +369,6 @@ doModifyTree t (name:names) createIfNotExist f = do
                 case oid of
                     Nothing   -> dropEntry contents n
                     Just oid' -> insertEntry contents n oid' mode
-        cnta <- liftIO $ withForeignPtr contents $ c'git_treebuilder_entrycount
         return z
 
     treeEntryToOid (Git.BlobEntry oid exe) =
@@ -447,8 +439,8 @@ lgLookupCommit len oid =
             , lgCommitEncoding  = encs
             }
 
-lgLookupObject :: Text -> Int -> LgRepository (Git.Object LgRepository)
-lgLookupObject str len
+lgLookupObject :: Text -> LgRepository (Git.Object LgRepository)
+lgLookupObject str
     | len > 40 = failure (Git.ObjectLookupFailed str len)
     | otherwise = do
         fptr <- liftIO $ do
@@ -462,15 +454,15 @@ lgLookupObject str len
 
         case fptr of
             Nothing -> failure (Git.ObjectLookupFailed str len)
-            Just x  ->
-                lookupObject' x len
+            Just x' ->
+                lookupObject' x' len
                   (\x y z -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
                   (\x y z l ->
                     c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY) go
   where
     len = T.length str
 
-    go coid x y = do
+    go coid _ y = do
         typ <- liftIO $ c'git_object_type y
         if typ == c'GIT_OBJ_BLOB
             then ret Git.BlobRef (Oid coid)
@@ -538,20 +530,8 @@ lgCreateCommit parents tree author committer logText ref = do
 withForeignPtrs :: [ForeignPtr a] -> ([Ptr a] -> IO b) -> IO b
 withForeignPtrs fos io = do
     r <- io (map FU.unsafeForeignPtrToPtr fos)
-    mapM touchForeignPtr fos
+    mapM_ touchForeignPtr fos
     return r
-
-getCommitParentPtrs :: Repository -> [Git.CommitOid LgRepository]
-                       -> IO [ForeignPtr C'git_commit]
-getCommitParentPtrs repo parents =
-    withForeignPtr (repoObj repo) $ \repoPtr ->
-    for parents $ \oid ->
-    alloca $ \ptr ->
-    withForeignPtr (getOid (unTagged oid)) $ \coid -> do
-        r <- c'git_commit_lookup ptr repoPtr coid
-        when (r < 0) $ throwIO Git.CommitLookupFailed
-        ptr' <- peek ptr
-        FC.newForeignPtr ptr' (c'git_commit_free ptr')
 
 lgLookupRef :: Text -> LgRepository (Git.Reference LgRepository Commit)
 lgLookupRef name = do
@@ -564,15 +544,16 @@ lgLookupRef name = do
             then failure (Git.ReferenceLookupFailed name)
             else do
             ref  <- peek ptr
-            fptr <- newForeignPtr p'git_reference_free ref
             typ  <- c'git_reference_type ref
-            if typ == c'GIT_REF_OID
-                then do oidPtr <- c'git_reference_oid ref
-                        Git.RefObj . Git.ByOid . Tagged . Oid
-                            <$> coidPtrToOid oidPtr
-                else do targName <- c'git_reference_target ref
-                        B.packCString targName
-                            >>= return . Git.RefSymbolic . T.decodeUtf8
+            targ <- if typ == c'GIT_REF_OID
+                    then do oidPtr <- c'git_reference_oid ref
+                            Git.RefObj . Git.ByOid . Tagged . Oid
+                                <$> coidPtrToOid oidPtr
+                    else do targName <- c'git_reference_target ref
+                            B.packCString targName
+                                >>= return . Git.RefSymbolic . T.decodeUtf8
+            c'git_reference_free ref
+            return targ
     return $ Git.Reference { Git.refName   = name
                            , Git.refTarget = targ }
 
@@ -607,7 +588,7 @@ lgUpdateRef name refTarg = do
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
 
-lgResolveRef :: Text -> LgRepository Oid
+lgResolveRef :: Text -> LgRepository (Git.ObjRef LgRepository Commit)
 lgResolveRef name = do
     repo <- lgGet
     oid <- liftIO $ alloca $ \ptr ->
@@ -618,7 +599,7 @@ lgResolveRef name = do
                 then return Nothing
                 else Just <$> coidPtrToOid ptr
     maybe (failure (Git.ReferenceLookupFailed name))
-          (return . Oid) oid
+          (return . Git.ByOid . Tagged . Oid) oid
 
 -- int git_reference_rename(git_reference *ref, const char *new_name,
 --   int force)
