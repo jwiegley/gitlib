@@ -18,15 +18,10 @@ module Git.Libgit2
 
 import           Bindings.Libgit2
 import           Control.Applicative
-import           Control.Concurrent.ParallelIO
 import           Control.Exception
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Either
-import           Control.Monad.Trans.State
-import           Data.ByteString (ByteString, packCString, useAsCString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import           Data.HashMap.Strict (HashMap)
@@ -34,7 +29,6 @@ import qualified Data.HashMap.Strict as HashMap
 import           Data.IORef
 import           Data.List as L
 import           Data.Maybe
-import           Data.Monoid
 import           Data.Stringable as S
 import           Data.Tagged
 import           Data.Text (Text)
@@ -42,8 +36,6 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as U
 import           Data.Traversable hiding (sequence, mapM)
-import           Debug.Trace
-import           Filesystem
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
@@ -55,16 +47,13 @@ import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
-import           Foreign.StablePtr
 import           Foreign.Storable
 import qualified Git as Git
 import qualified Git.Utils as Git
 import           Git.Libgit2.Internal
-import           Git.Libgit2.Reference
 import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
 import qualified System.IO.Unsafe as SU
-import qualified Unsafe.Coerce as CU
 
 instance Git.Repository LgRepository where
     data Oid LgRepository = Oid { getOid :: ForeignPtr C'git_oid }
@@ -90,7 +79,7 @@ instance Git.Repository LgRepository where
     renderOid    = lgRenderOid
     lookupRef    = lgLookupRef
     updateRef    = lgUpdateRef
-    mapRefs      = lgMapRefs
+    allRefNames  = lgAllRefNames
     lookupCommit = lgLookupCommit 40
     lookupTree   = lgLookupTree 40
     lookupBlob   = lgLookupBlob
@@ -141,7 +130,7 @@ instance Eq (Git.Oid LgRepository) where
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
---   creating one; if the give string is 'empty', it is an error.
+--   creating one; if the given string is 'empty', it is an error.
 lgCreateBlob ::
     Git.BlobContents LgRepository -> LgRepository (Git.BlobOid LgRepository)
 lgCreateBlob b = do
@@ -436,7 +425,7 @@ lgLookupCommit len oid =
                 else peekCString enc
         conv  <- U.open encs (Just False)
 
-        msg   <- c'git_commit_message c   >>= packCString
+        msg   <- c'git_commit_message c   >>= B.packCString
         auth  <- c'git_commit_author c    >>= packSignature conv
         comm  <- c'git_commit_committer c >>= packSignature conv
         toid  <- c'git_commit_tree_oid c
@@ -516,7 +505,7 @@ lgCreateCommit parents tree author committer logText ref = do
         withForeignPtr coid $ \coid' ->
             withForeignPtr toid $ \toid' ->
             withForeignPtrs (map (getOid . unTagged) pptrs) $ \pptrs' ->
-            useAsCString (U.fromUnicode conv logText) $ \message ->
+            B.useAsCString (U.fromUnicode conv logText) $ \message ->
             withRef ref $ \update_ref ->
             withSignature conv author $ \author' ->
             withSignature conv committer $ \committer' ->
@@ -541,7 +530,7 @@ lgCreateCommit parents tree author committer logText ref = do
 
   where
     withRef Nothing     = flip ($) nullPtr
-    withRef (Just name) = useAsCString (T.encodeUtf8 name)
+    withRef (Just name) = B.useAsCString (T.encodeUtf8 name)
 
     withEncStr ""  = flip ($) nullPtr
     withEncStr enc = withCString enc
@@ -582,7 +571,7 @@ lgLookupRef name = do
                         Git.RefObj . Git.ByOid . Tagged . Oid
                             <$> coidPtrToOid oidPtr
                 else do targName <- c'git_reference_target ref
-                        packCString targName
+                        B.packCString targName
                             >>= return . Git.RefSymbolic . T.decodeUtf8
     return $ Git.Reference { Git.refName   = name
                            , Git.refTarget = targ }
@@ -694,46 +683,49 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
                  + (if listFlagPacked flags   then 4 else 0)
                  + (if listFlagHasPeel flags  then 8 else 0)
 
--- listRefNames :: ListFlags -> LgRepository [Text]
--- listRefNames flags = do
---     repo <- lgGet
---     refs <- liftIO $ alloca $ \c'refs ->
---       withForeignPtr (repoObj repo) $ \repoPtr -> do
---         r <- c'git_reference_list c'refs repoPtr (flagsToInt flags)
---         if r < 0
---             then return Nothing
---             else do refs <- gitStrArray2List c'refs
---                     c'git_strarray_free c'refs
---                     return (Just refs)
---     maybe (failure Git.ReferenceListingFailed) return refs
-
-foreachRefCallback :: CString -> Ptr () -> IO CInt
-foreachRefCallback name payload = do
-  (callback,results) <- deRefStablePtr =<< peek (castPtr payload)
-  nameStr <- peekCString name
-  result <- callback (T.pack nameStr)
-  modifyIORef results (\xs -> result:xs)
-  return 0
-
-foreign export ccall "foreachRefCallback"
-  foreachRefCallback :: CString -> Ptr () -> IO CInt
-foreign import ccall "&foreachRefCallback"
-  foreachRefCallbackPtr :: FunPtr (CString -> Ptr () -> IO CInt)
-
-lgMapRefs :: (Text -> LgRepository a) -> LgRepository [a]
-lgMapRefs cb = do
+listRefNames :: ListFlags -> LgRepository [Text]
+listRefNames flags = do
     repo <- lgGet
-    liftIO $ do
-        withForeignPtr (repoObj repo) $ \repoPtr -> do
-            ioRef <- newIORef []
-            bracket
-                (newStablePtr (cb,ioRef))
-                freeStablePtr
-                (\ptr -> with ptr $ \pptr -> do
-                      _ <- c'git_reference_foreach
-                           repoPtr (flagsToInt allRefsFlag)
-                           foreachRefCallbackPtr (castPtr pptr)
-                      readIORef ioRef)
+    refs <- liftIO $ alloca $ \c'refs ->
+      withForeignPtr (repoObj repo) $ \repoPtr -> do
+        r <- c'git_reference_list c'refs repoPtr (flagsToInt flags)
+        if r < 0
+            then return Nothing
+            else do refs <- gitStrArray2List c'refs
+                    c'git_strarray_free c'refs
+                    return (Just refs)
+    maybe (failure Git.ReferenceListingFailed) return refs
+
+lgAllRefNames :: LgRepository [Text]
+lgAllRefNames = listRefNames allRefsFlag
+
+-- foreachRefCallback :: CString -> Ptr () -> IO CInt
+-- foreachRefCallback name payload = do
+--   (callback,results) <- deRefStablePtr =<< peek (castPtr payload)
+--   nameStr <- peekCString name
+--   result <- callback (T.pack nameStr)
+--   modifyIORef results (\xs -> result:xs)
+--   return 0
+
+-- foreign export ccall "foreachRefCallback"
+--   foreachRefCallback :: CString -> Ptr () -> IO CInt
+-- foreign import ccall "&foreachRefCallback"
+--   foreachRefCallbackPtr :: FunPtr (CString -> Ptr () -> IO CInt)
+
+-- lgMapRefs :: (Text -> LgRepository a) -> LgRepository [a]
+-- lgMapRefs cb = do
+--     repo <- lgGet
+--     liftIO $ do
+--         withForeignPtr (repoObj repo) $ \repoPtr -> do
+--             ioRef <- newIORef []
+--             bracket
+--                 (newStablePtr (cb,ioRef))
+--                 freeStablePtr
+--                 (\ptr -> with ptr $ \pptr -> do
+--                       _ <- c'git_reference_foreach
+--                            repoPtr (flagsToInt allRefsFlag)
+--                            foreachRefCallbackPtr (castPtr pptr)
+--                       readIORef ioRef)
 
 -- mapAllRefs :: (Text -> LgRepository a) -> LgRepository [a]
 -- mapAllRefs repo = mapRefs repo allRefsFlag

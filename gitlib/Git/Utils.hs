@@ -54,10 +54,6 @@ blobToByteString (BlobSizedStream bs _) = do
     return (B.concat strs)
 
 -- | Parse an ASCII hex string into a Git 'Oid'.
---
--- >>> let x = "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
--- >>> parseOid (T.pack x)
--- Just 2506e7fcc2dbfe4c083e2bd741871e2e14126603
 parseOidToByteString :: Text -> Maybe ByteString
 parseOidToByteString oid
     | T.length oid /= 40 = Nothing

@@ -58,7 +58,7 @@ class (Applicative m, Monad m, Failure Exception m,
     updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
     updateRef_ = void .: updateRef
 
-    mapRefs :: (Text -> m a) -> m [a]
+    allRefNames :: m [Text]
 
     resolveRef :: Text -> m (ObjRef m (Commit m))
     resolveRef name = lookupRef name >>= \ref ->
