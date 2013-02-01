@@ -1,5 +1,5 @@
 Name:                gitlib
-Version:             1.0.0
+Version:             1.0.1
 Synopsis:            API library for working with Git repositories
 License-file:        LICENSE
 License:             MIT
@@ -11,10 +11,11 @@ Category:            FFI
 Description:
   @gitlib@ is a high-level, lazy and conduit-aware set of abstractions for
   programming with Git types.  Several different backends are available,
-  including one for the libgit2 C library (<http://libgit2.github.com>).  The
-  aim is both type-safety and convenience of use for Haskell users, combined
-  with high performance and minimal memory footprint by taking advantage of
-  Haskell's laziness and the conduit library's deterministic resource cleanup.
+  including one for the libgit2 C library (<http://libgit2.github.com>) (see
+  @gitlib-lg2@).  The aim is both type-safety and convenience of use for
+  Haskell users, combined with high performance and minimal memory footprint
+  by taking advantage of Haskell's laziness and the conduit library's
+  deterministic resource cleanup.
   .
   For further information, as well as typical use cases, see "Git.Tutorial".
 
@@ -30,19 +31,18 @@ Test-suite smoke
     Build-depends: 
           base >=3
         , gitlib
-        , hlibgit2           >= 0.17.0.5
         , HUnit              >= 1.2.5
-        , bytestring         >= 0.9.2.1
-        , containers         >= 0.4.2
-        , failure            >= 0.2.0.1
+        -- , bytestring         >= 0.9.2.1
+        -- , containers         >= 0.4.2
+        -- , failure            >= 0.2.0.1
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3
-        , lens               >= 2.8
-        , parallel-io        >= 0.3.2.1
-        , stringable         >= 0.1.1
+        -- , lens               >= 2.8
+        -- , parallel-io        >= 0.3.2.1
+        -- , stringable         >= 0.1.1
         , system-fileio      >= 0.3.9
         , system-filepath    >= 0.4.7
-        , tagged             >= 0.4.4
+        -- , tagged             >= 0.4.4
         , text               >= 0.11.2
         , time               >= 1.4
         , transformers       >= 0.3
@@ -64,33 +64,14 @@ Library
     default-extensions: ForeignFunctionInterface
     build-depends:
           base                 >= 3 && < 5
-        , hlibgit2             >= 0.17.0.6
-        , attempt              >= 0.4.0
         , bytestring           >= 0.9.2.1
         , conduit              >= 0.5.5
-        , containers           >= 0.4.2
         , data-default         >= 0.5.0
-        , either               >= 3.0.3
         , failure              >= 0.2.0.1
-        , hex                  >= 0.1.2
-        , lens                 >= 3.7
-        , parallel-io          >= 0.3.2.1
-        , pointless-fun        >= 1.1.0.1
-        , stringable           >= 0.1.1
-        , system-fileio        >= 0.3.9
-        , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1
         , text                 >= 0.11.2
-        , text-icu             >= 0.6.3
         , time                 >= 1.4
-        , transformers         >= 0.3.0.0
-        , unordered-containers >= 0.2.3
     exposed-modules:
         Git
         Git.Utils
-        Git.Libgit2
-        Git.Libgit2.Backend
-        Git.Libgit2.Internal
-        Git.Libgit2.Reference
-        Git.Libgit2.Types
         -- Git.Tutorial

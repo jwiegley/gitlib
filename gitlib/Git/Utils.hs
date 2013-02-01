@@ -8,7 +8,7 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Conduit
 import qualified Data.Conduit.List as CList
-import           Data.Hex
+-- import           Data.Hex
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -53,17 +53,17 @@ blobToByteString (BlobSizedStream bs _) = do
     strs <- bs $$ CList.consume
     return (B.concat strs)
 
--- | Parse an ASCII hex string into a Git 'Oid'.
-parseOidToByteString :: Text -> Maybe ByteString
-parseOidToByteString oid
-    | T.length oid /= 40 = Nothing
-    | otherwise =
-        -- 'unsafePerformIO' is used to force 'unhex' to run in the 'IO'
-        -- monad, so we can catch the exception on failure and repackage it
-        -- using 'Maybe'.  Why does 'unhex' have to be in IO at all?
-        unsafePerformIO $
-        Exc.catch (Just <$> unhex (T.encodeUtf8 oid))
-                  (\x -> (x :: Exc.IOException) `seq` return Nothing)
+-- -- | Parse an ASCII hex string into a Git 'Oid'.
+-- parseOidToByteString :: Text -> Maybe ByteString
+-- parseOidToByteString oid
+--     | T.length oid /= 40 = Nothing
+--     | otherwise =
+--         -- 'unsafePerformIO' is used to force 'unhex' to run in the 'IO'
+--         -- monad, so we can catch the exception on failure and repackage it
+--         -- using 'Maybe'.  Why does 'unhex' have to be in IO at all?
+--         unsafePerformIO $
+--         Exc.catch (Just <$> unhex (T.encodeUtf8 oid))
+--                   (\x -> (x :: Exc.IOException) `seq` return Nothing)
 
 -- commitHistoryFirstParent :: Commit -> LgRepository [Commit]
 -- commitHistoryFirstParent c =

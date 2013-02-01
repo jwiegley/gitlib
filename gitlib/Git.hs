@@ -12,32 +12,28 @@ import           Control.Applicative
 import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
-import           Control.Monad.IO.Class
-import           Data.Attempt
+-- import           Control.Monad.IO.Class
+-- import           Data.Attempt
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as BC
-import           Data.Char (toLower)
 import           Data.Conduit
-import qualified Data.Conduit.List as CList
 import           Data.Default
-import           Data.Foldable
-import           Data.Function.Pointless
-import           Data.Hex
-import           Data.Proxy
+-- import           Data.Foldable
+-- import           Data.Hex
+-- import           Data.Proxy
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.ICU.Convert as U
+-- import qualified Data.Text.Encoding as T
+-- import qualified Data.Text.ICU.Convert as U
 import           Data.Time
-import           Data.Time.Clock.POSIX
-import           Data.Traversable
+-- import           Data.Time.Clock.POSIX
+-- import           Data.Traversable
 import           Data.Typeable
-import           Filesystem.Path.CurrentOS
-import           Prelude hiding (FilePath)
-import           System.IO.Unsafe
-import           Text.Printf
+-- import           Filesystem.Path.CurrentOS
+-- import           Prelude hiding (FilePath)
+-- import           System.IO.Unsafe
+-- import           Text.Printf
 
 {- $repositories -}
 -- | A 'Repository' is the central point of contact between user code and Git
@@ -56,7 +52,7 @@ class (Applicative m, Monad m, Failure Exception m,
     lookupRef  :: Text -> m (Reference m (Commit m))
     updateRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
     updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
-    updateRef_ = void .: updateRef
+    updateRef_ = (void .) . updateRef
 
     allRefNames :: m [Text]
 
