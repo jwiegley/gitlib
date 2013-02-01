@@ -21,8 +21,7 @@ import           Prelude hiding (FilePath)
 
 data Repository = Repository
     { repoPath :: FilePath
-    , repoObj  :: ForeignPtr C'git_repository
-    }
+    , repoObj  :: ForeignPtr C'git_repository }
 
 instance Eq Repository where
   x == y = repoPath x == repoPath y && repoObj x == repoObj y

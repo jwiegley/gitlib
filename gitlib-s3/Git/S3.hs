@@ -1,7 +1,9 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
 
-module Data.Git.Backend.S3
+module Git.S3
        ( odbS3Backend
        , createS3backend
        , readRefs, writeRefs
@@ -29,19 +31,14 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 import           Data.ByteString.Unsafe
 import           Data.Conduit
 import           Data.Conduit.Binary
-import           Data.Conduit.List hiding (mapM_, foldM, peek,
-                                           catMaybes, sequence)
+import qualified Data.Conduit.List as CList
 import           Data.Foldable (for_)
-import           Data.Git hiding (getObject)
-import           Data.Git.Backend
-import           Data.Git.Backend.Trace
-import           Data.Git.Error
-import           Data.Git.Oid
 import           Data.Int (Int64)
 import qualified Data.List as L
 import           Data.Map
 import           Data.Maybe
 import           Data.Stringable
+import           Data.Tagged
 import           Data.Text as T
 import qualified Data.Text.Encoding as E
 import qualified Data.Text.Lazy.Encoding as LE
@@ -54,11 +51,14 @@ import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.StablePtr
 import           Foreign.Storable
+import qualified Git
+import           Git.Libgit2
+import           Git.Libgit2.Backend
+import           Git.Libgit2.Internal
+import           Git.Libgit2.Types
 import           Network.HTTP.Conduit hiding (Response)
 import           Prelude hiding (mapM_, catch)
 import           System.IO.Unsafe
-
-default (Text)
 
 data OdbS3Backend =
   OdbS3Backend { odbS3Parent     :: C'git_odb_backend
@@ -148,7 +148,7 @@ putFileS3' :: Manager -> Text -> Text
               -> (Text, Source (ResourceT IO) ByteString)
               -> ResourceT IO BL.ByteString
 putFileS3' manager bucket prefix config s3config (filepath,src) = do
-  lbs <- BL.fromChunks <$> (src $$ consume)
+  lbs <- BL.fromChunks <$> (src $$ CList.consume)
   res <- aws config s3config manager
              (putObject bucket (T.append prefix filepath)
                         (RequestBodyLBS lbs))
@@ -159,16 +159,16 @@ putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
              -> ResourceT IO BL.ByteString
 putFileS3 = curry . odbS3dispatch putFileS3'
 
-type RefMap = Map Text (Either Text Oid)
+type RefMap = Map Text (Git.Reference LgRepository Commit)
 
 instance Y.FromJSON Oid where
   parseJSON (Y.String v) =
-    return . Oid . COid $ unsafePerformIO $ do
+    return . Oid $ unsafePerformIO $ do
       ptr <- mallocForeignPtr
       withCStringable v $ \cstr ->
         withForeignPtr ptr $ \ptr' -> do
           r <- c'git_oid_fromstr ptr' cstr
-          when (r < 0) $ throwIO OidCopyFailed
+          when (r < 0) $ throwIO Git.OidCopyFailed
           return ptr
 
 coidToJSON :: ForeignPtr C'git_oid -> Y.Value
@@ -176,8 +176,7 @@ coidToJSON coid = unsafePerformIO $ withForeignPtr coid $ \oid ->
                     Y.toJSON <$> oidToStr oid
 
 instance Y.ToJSON Oid where
-  toJSON (PartialOid (COid coid) _) = throw RefCannotCreateFromPartialOid
-  toJSON (Oid (COid coid))          = coidToJSON coid
+  toJSON (Oid coid) = coidToJSON coid
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe RefMap)
 readRefs be = do
@@ -203,39 +202,38 @@ writeRefs be refs = do
   void $ runResourceT $
     putFileS3 odbS3 "refs.yml" (sourceLbs (BL.fromChunks [payload]))
 
-mirrorRefsFromS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
-mirrorRefsFromS3 be repo = do
-    refs <- readRefs be
+mirrorRefsFromS3 :: Ptr C'git_odb_backend -> LgRepository ()
+mirrorRefsFromS3 be = do
+    repo <- lgGet
+    refs <- liftIO $ readRefs be
     for_ refs $ \refs' ->
         forM_ (toList refs') $ \(name, ref) ->
-            withForeignPtr (repositoryPtr repo) $ \repoPtr ->
+            liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
                 withCStringable name $ \namePtr ->
                     alloca (go repoPtr namePtr ref)
   where
     go repoPtr namePtr ref ptr = do
         r <- case ref of
-            Left target ->
+            Git.Reference { Git.refTarget = Git.RefSymbolic target } ->
               withCStringable target $ \targetPtr ->
                 c'git_reference_create_symbolic ptr repoPtr namePtr
                                                 targetPtr 1
-            Right (PartialOid {}) ->
-              throwIO RefCannotCreateFromPartialOid
-            Right (Oid (COid coid)) ->
-              withForeignPtr coid $ \coidPtr ->
+            Git.Reference {
+                Git.refTarget = (Git.RefObj x@(Git.ByOid (Tagged coid))) } ->
+              withForeignPtr (getOid coid) $ \coidPtr ->
                 c'git_reference_create_oid ptr repoPtr namePtr coidPtr 1
-        when (r < 0) $ throwIO RepositoryInvalid
+        when (r < 0) $ throwIO Git.RepositoryInvalid
 
-mirrorRefsToS3 :: Ptr C'git_odb_backend -> Repository -> IO ()
-mirrorRefsToS3 be repo = do
-    odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
-    refs  <- catMaybes <$>
-             mapAllRefs repo (\name -> do ref <- lookupRef repo name
-                                          return (go name <$> ref))
-    writeRefs be (fromList refs)
+mirrorRefsToS3 :: Ptr C'git_odb_backend -> LgRepository ()
+mirrorRefsToS3 be = do
+    odbS3 <- liftIO $ peek (castPtr be :: Ptr OdbS3Backend)
+    names <- Git.allRefNames
+    refs  <- mapM Git.lookupRef names
+    liftIO $ writeRefs be (fromList (L.zip names refs))
   where go name ref =
-          case refTarget ref of
-            RefTargetSymbolic target -> (name, Left target)
-            RefTargetId oid          -> (name, Right oid)
+          case Git.refTarget ref of
+            Git.RefSymbolic target     -> (name, Left target)
+            Git.RefObj (Git.ByOid oid) -> (name, Right oid)
 
 mapPair :: (a -> b) -> (a,a) -> (b,b)
 mapPair f (x,y) = (f x, f y)
@@ -249,7 +247,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
       oidStr <- oidToStr oid
       blocks <- runResourceT $ do
         result <- getFileS3 odbS3 (T.pack oidStr) Nothing
-        result $$+- consume
+        result $$+- CList.consume
       case blocks of
         [] -> return (-1)
         bs -> do
@@ -384,10 +382,9 @@ createS3backend :: Text -- ^ bucket
                 -> Maybe Manager
                 -> Maybe Text -- ^ mock address
                 -> LogLevel
-                -> Bool -- ^ tracing?
                 -> Repository
                 -> IO Repository
-createS3backend bucket prefix access secret mmanager mockAddr level tracing repo = do
+createS3backend bucket prefix access secret mmanager mockAddr level repo = do
     manager <- maybe (newManager def) return mmanager
     odbS3 <-
       odbS3Backend
@@ -401,16 +398,6 @@ createS3backend bucket prefix access secret mmanager mockAddr level tracing repo
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
         manager bucket prefix
-
-    if tracing
-      then do backend <- traceBackend odbS3
-              odbBackendAdd repo backend 100
-      else odbBackendAdd repo odbS3 100
-
-    -- Whenever a ref is written, update the refs in S3
-    let beforeRead = \_ _   -> mirrorRefsFromS3 odbS3 repo >> return Nothing
-        onWrite    = \_ _ _ -> mirrorRefsToS3 odbS3 repo >> return Nothing
-    return repo { repoBeforeReadRef = beforeRead : repoBeforeReadRef repo
-                , repoOnWriteRef    = onWrite : repoOnWriteRef repo }
+    return repo
 
 -- S3.hs

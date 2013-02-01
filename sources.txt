@@ -6,13 +6,9 @@ gitlib-s3/
 gitlib-github/
 vendor/aws/
 vendor/c2hsc/
-vendor/conduit/conduit/
-vendor/conduit/network-conduit/
-vendor/convertible/
 vendor/data-marshal/
 vendor/general-prelude/
 vendor/http-conduit/
 vendor/http-types/
 vendor/rest-client/
 vendor/stringable/
-vendor/svndump/

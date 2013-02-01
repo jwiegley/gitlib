@@ -10,6 +10,7 @@
 --   queried as needed.
 module Git.Libgit2
        ( LgRepository(..)
+       , Oid(..), getOid, Tree(..), Commit(..)
        , withLgRepository
        , withOpenLgRepository
        , openLgRepository
@@ -56,7 +57,8 @@ import           Prelude hiding (FilePath)
 import qualified System.IO.Unsafe as SU
 
 instance Git.RepositoryBase LgRepository where
-    data Oid LgRepository = Oid { getOid :: ForeignPtr C'git_oid }
+    data Oid LgRepository = Oid
+        { getOid :: ForeignPtr C'git_oid }
 
     data Tree LgRepository = Tree
         { lgTreeInfo       :: IORef (Base Tree C'git_tree)

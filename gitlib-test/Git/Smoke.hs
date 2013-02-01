@@ -40,9 +40,7 @@ sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message." Nothing
 
-smokeTestSpec :: (Repository m, MonadIO m,
-                  m ~ TreeRepository, m ~ CommitRepository,
-                  Treeish (Tree m), Commitish (Commit m))
+smokeTestSpec :: (Repository m, MonadIO m)
               => (FilePath -> Bool -> m () -> IO ()) -> Spec
 smokeTestSpec wr = describe "Smoke tests" $ do
   it "create a single blob" $ do

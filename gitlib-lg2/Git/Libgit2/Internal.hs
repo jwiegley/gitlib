@@ -47,11 +47,15 @@ withOpenLgRepository repo action =
 withLgRepository :: FilePath -> Bool -> LgRepository a -> IO a
 withLgRepository path bare action = do
     repo <- openOrCreateLgRepository path bare
+    withOpenLgRepository repo action
 
-    case F.toText (path </> "objects") of
-        Left p ->error $ "Object directory does not exist: " ++ T.unpack p
+addTracingBackend :: LgRepository ()
+addTracingBackend = do
+    repo <- lgGet
+    case F.toText (repoPath repo </> "objects") of
+        Left p -> error $ "Object directory does not exist: " ++ T.unpack p
         Right p ->
-            withCStringable p $ \objectsDir ->
+            liftIO $ withCStringable p $ \objectsDir ->
                 alloca $ \loosePtr -> do
                     r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
                     when (r < 0) $
@@ -60,8 +64,7 @@ withLgRepository path bare action = do
                     loosePtr' <- peek loosePtr
                     backend   <- traceBackend loosePtr'
                     odbBackendAdd repo backend 3
-
-    withOpenLgRepository repo action
+                    return ()
 
 openLgRepository :: FilePath -> IO Repository
 openLgRepository path =

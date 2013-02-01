@@ -21,7 +21,10 @@ import           Test.Hspec.HUnit ()
 main :: IO ()
 main = do
     summary <- hspecWith (defaultConfig { configVerbose = True })
-                         (Git.smokeTestSpec Lg.withLgRepository)
+                         (Git.smokeTestSpec
+                          (\path _ act ->
+                            Lg.withLgRepository path True
+                                (addTracingBackend >> act)))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 
