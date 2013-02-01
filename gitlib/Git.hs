@@ -120,10 +120,15 @@ data Reference m a = Reference
 {- $objects -}
 data ObjRef m a = ByOid (Tagged a (Oid m)) | Known a
 
-data Object m = BlobRef   (ObjRef m (Blob m))
-              | TreeRef   (ObjRef m (Tree m))
-              | CommitRef (ObjRef m (Commit m))
-              | TagRef    (ObjRef m (Tag m))
+type BlobRef m   = ObjRef m (Blob m)
+type TreeRef m   = ObjRef m (Tree m)
+type CommitRef m = ObjRef m (Commit m)
+type TagRef m    = ObjRef m (Tag m)
+
+data Object m = BlobObj   (BlobRef m)
+              | TreeObj   (TreeRef m)
+              | CommitObj (CommitRef m)
+              | TagObj    (TagRef m)
 
 {- $blobs -}
 type Blob m = BlobContents m

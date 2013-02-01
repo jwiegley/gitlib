@@ -68,11 +68,11 @@ instance Git.RepositoryBase LgRepository where
         , lgCommitCommitter :: Git.Signature
         , lgCommitLog       :: Text
         , lgCommitEncoding  :: String
-        , lgCommitTree      :: Git.ObjRef LgRepository Tree
-        , lgCommitParents   :: [Git.ObjRef LgRepository Commit] }
+        , lgCommitTree      :: TreeRef
+        , lgCommitParents   :: [CommitRef] }
 
     data Tag LgRepository = Tag
-        { tagCommit :: Git.ObjRef LgRepository Commit }
+        { tagCommit :: CommitRef }
 
     parseOid     = lgParseOid
     renderOid    = lgRenderOid
@@ -464,21 +464,21 @@ lgLookupObject str
     go coid _ y = do
         typ <- liftIO $ c'git_object_type y
         if typ == c'GIT_OBJ_BLOB
-            then ret Git.BlobRef (Oid coid)
+            then ret Git.BlobObj (Oid coid)
             else if typ == c'GIT_OBJ_TREE
-                 then ret Git.TreeRef (Oid coid)
+                 then ret Git.TreeObj (Oid coid)
                  else if typ == c'GIT_OBJ_COMMIT
-                      then ret Git.CommitRef (Oid coid)
+                      then ret Git.CommitObj (Oid coid)
                       else if typ == c'GIT_OBJ_TAG
-                           then ret Git.TagRef (Oid coid)
+                           then ret Git.TagObj (Oid coid)
                            else failure (Git.ObjectLookupFailed str len)
 
     ret f = return . f . Git.ByOid . Tagged
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-lgCreateCommit :: [Git.ObjRef LgRepository Commit]
-               -> Git.ObjRef LgRepository Tree
+lgCreateCommit :: [CommitRef]
+               -> TreeRef
                -> Git.Signature
                -> Git.Signature
                -> Text
@@ -532,7 +532,7 @@ withForeignPtrs fos io = do
     mapM_ touchForeignPtr fos
     return r
 
-lgLookupRef :: Text -> LgRepository (Git.Reference LgRepository Commit)
+lgLookupRef :: Text -> LgRepository Reference
 lgLookupRef name = do
     repo <- lgGet
     targ <- liftIO $ alloca $ \ptr -> do
@@ -557,7 +557,7 @@ lgLookupRef name = do
                            , Git.refTarget = targ }
 
 lgUpdateRef :: Text -> Git.RefTarget LgRepository Commit
-            -> LgRepository (Git.Reference LgRepository Commit)
+            -> LgRepository Reference
 lgUpdateRef name refTarg = do
     repo <- lgGet
     liftIO $ alloca $ \ptr ->
@@ -587,7 +587,7 @@ lgUpdateRef name refTarg = do
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
 
-lgResolveRef :: Text -> LgRepository (Git.ObjRef LgRepository Commit)
+lgResolveRef :: Text -> LgRepository CommitRef
 lgResolveRef name = do
     repo <- lgGet
     oid <- liftIO $ alloca $ \ptr ->

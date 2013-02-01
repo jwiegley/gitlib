@@ -32,9 +32,13 @@ instance Show Repository where
 newtype LgRepository a = LgRepository
     { runLgRepository :: ReaderT Repository IO a }
 
-type Oid    = Git.Oid LgRepository
-type Tree   = Git.Tree LgRepository
-type Commit = Git.Commit LgRepository
+type Oid       = Git.Oid LgRepository
+type Tree      = Git.Tree LgRepository
+type Commit    = Git.Commit LgRepository
+type Reference = Git.Reference LgRepository Commit
+
+type TreeRef   = Git.TreeRef LgRepository
+type CommitRef = Git.CommitRef LgRepository
 
 instance Functor LgRepository where
     fmap f (LgRepository x) = LgRepository (fmap f x)

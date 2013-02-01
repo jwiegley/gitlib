@@ -40,8 +40,8 @@ catBlob str = do
         else do
         obj <- lookupObject str
         case obj of
-            BlobRef (ByOid oid) -> lookupBlob oid >>= blobToByteString
-            BlobRef (Known x)   -> blobToByteString x
+            BlobObj (ByOid oid) -> lookupBlob oid >>= blobToByteString
+            BlobObj (Known x)   -> blobToByteString x
             _ -> failure (ObjectLookupFailed str len)
   where
     len = T.length str
