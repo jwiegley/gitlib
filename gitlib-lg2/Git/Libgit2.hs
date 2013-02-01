@@ -10,12 +10,9 @@
 --   queried as needed.
 module Git.Libgit2
        ( LgRepository(..)
-       , Oid(..), getOid, Tree(..), Commit(..)
-       , withLgRepository
-       , withOpenLgRepository
-       , openLgRepository
-       , createLgRepository
-       , openOrCreateLgRepository
+       , Git.Oid(..), Tree(..), Commit(..)
+       , withLgRepository, withOpenLgRepository
+       , openLgRepository, createLgRepository, openOrCreateLgRepository
        ) where
 
 import           Bindings.Libgit2

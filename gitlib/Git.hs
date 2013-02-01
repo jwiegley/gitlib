@@ -49,7 +49,7 @@ class (Applicative m, Monad m, Failure Exception m,
     resolveRef :: Text -> m (ObjRef m (Commit m))
     resolveRef name = lookupRef name >>= \ref ->
         case ref of
-            Reference { refTarget = (RefObj x@(ByOid (Tagged oid))) } ->
+            Reference { refTarget = RefObj x } ->
                 return x
             Reference { refTarget = RefSymbolic name' } ->
                 if name /= name'

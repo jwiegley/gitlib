@@ -5,7 +5,7 @@
 
 module Git.S3
        ( odbS3Backend
-       , createS3backend
+       , addS3Backend
        , readRefs, writeRefs
        , mirrorRefsFromS3, mirrorRefsToS3 )
        where
@@ -22,6 +22,7 @@ import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.Aeson (object, (.=), (.:))
 import           Data.Attempt
 import           Data.Binary
 import           Data.ByteString as B hiding (putStrLn)
@@ -35,7 +36,7 @@ import qualified Data.Conduit.List as CList
 import           Data.Foldable (for_)
 import           Data.Int (Int64)
 import qualified Data.List as L
-import           Data.Map
+import           Data.HashMap.Strict as M
 import           Data.Maybe
 import           Data.Stringable
 import           Data.Tagged
@@ -159,24 +160,44 @@ putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
              -> ResourceT IO BL.ByteString
 putFileS3 = curry . odbS3dispatch putFileS3'
 
-type RefMap = Map Text (Git.Reference LgRepository Commit)
+type RefMap = M.HashMap Text (Git.Reference LgRepository Commit)
 
-instance Y.FromJSON Oid where
-  parseJSON (Y.String v) =
-    return . Oid $ unsafePerformIO $ do
-      ptr <- mallocForeignPtr
-      withCStringable v $ \cstr ->
-        withForeignPtr ptr $ \ptr' -> do
-          r <- c'git_oid_fromstr ptr' cstr
-          when (r < 0) $ throwIO Git.OidCopyFailed
-          return ptr
+instance Y.FromJSON (Git.Reference LgRepository Commit) where
+    parseJSON j = do
+        o <- Y.parseJSON j
+        let lst = M.toList (o :: Y.Object)
+        if isJust (L.lookup "symbolic" lst)
+            then Git.Reference
+                 <$> o .: "symbolic"
+                 <*> (Git.RefSymbolic <$> o .: "target")
+            else Git.Reference
+                 <$> o .: "name"
+                 <*> (Git.RefObj . Git.ByOid . go <$> o .: "target")
+      where
+        go oidStr =
+            return . Oid $ unsafePerformIO $ do
+              ptr <- mallocForeignPtr
+              withCString oidStr $ \cstr ->
+                withForeignPtr ptr $ \ptr' -> do
+                  r <- c'git_oid_fromstr ptr' cstr
+                  when (r < 0) $ throwIO Git.OidCopyFailed
+                  return ptr
 
 coidToJSON :: ForeignPtr C'git_oid -> Y.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $ \oid ->
                     Y.toJSON <$> oidToStr oid
 
-instance Y.ToJSON Oid where
-  toJSON (Oid coid) = coidToJSON coid
+instance Y.ToJSON (Git.Reference LgRepository Commit) where
+  toJSON (Git.Reference name (Git.RefSymbolic target)) =
+      object [ "symbolic" .= name
+             , "target"   .= target ]
+  toJSON (Git.Reference name (Git.RefObj (Git.ByOid oid))) =
+      object [ "name"   .= name
+             , "target" .= coidToJSON (getOid (unTagged oid)) ]
+  toJSON (Git.Reference name (Git.RefObj (Git.Known commit))) =
+      object [ "name"   .= name
+             , "target" .=
+               coidToJSON (getOid (unTagged (Git.commitOid commit))) ]
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe RefMap)
 readRefs be = do
@@ -207,7 +228,7 @@ mirrorRefsFromS3 be = do
     repo <- lgGet
     refs <- liftIO $ readRefs be
     for_ refs $ \refs' ->
-        forM_ (toList refs') $ \(name, ref) ->
+        forM_ (M.toList refs') $ \(name, ref) ->
             liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
                 withCStringable name $ \namePtr ->
                     alloca (go repoPtr namePtr ref)
@@ -375,29 +396,30 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-createS3backend :: Text -- ^ bucket
-                -> Text -- ^ prefix
-                -> Text -- ^ access key
-                -> Text -- ^ secret key
-                -> Maybe Manager
-                -> Maybe Text -- ^ mock address
-                -> LogLevel
-                -> Repository
-                -> IO Repository
-createS3backend bucket prefix access secret mmanager mockAddr level repo = do
-    manager <- maybe (newManager def) return mmanager
-    odbS3 <-
-      odbS3Backend
-        (case mockAddr of
-            Nothing   -> defServiceConfig
-            Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
-                               s3Port         = 10001
-                             , s3RequestStyle = PathStyle })
-        (Configuration Timestamp Credentials {
-              accessKeyID     = E.encodeUtf8 access
-            , secretAccessKey = E.encodeUtf8 secret }
-         (defaultLog level))
-        manager bucket prefix
-    return repo
+addS3Backend :: Text -- ^ bucket
+             -> Text -- ^ prefix
+             -> Text -- ^ access key
+             -> Text -- ^ secret key
+             -> Maybe Manager
+             -> Maybe Text -- ^ mock address
+             -> LogLevel
+             -> LgRepository ()
+addS3Backend bucket prefix access secret mmanager mockAddr level = do
+    repo    <- lgGet
+    liftIO $ do
+        manager <- maybe (newManager def) return mmanager
+        odbS3   <- odbS3Backend
+            (case mockAddr of
+                Nothing   -> defServiceConfig
+                Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
+                                   s3Port         = 10001
+                                 , s3RequestStyle = PathStyle })
+            (Configuration Timestamp Credentials {
+                  accessKeyID     = E.encodeUtf8 access
+                , secretAccessKey = E.encodeUtf8 secret }
+             (defaultLog level))
+            manager bucket prefix
+        odbBackendAdd repo odbS3 100
+        return ()
 
 -- S3.hs

@@ -9,141 +9,34 @@ import           Aws
 import           Aws.Core
 import           Aws.S3 hiding (bucketName)
 import           Control.Applicative
-import           Control.Concurrent.ParallelIO
 import           Control.Monad
-import           Data.Git
-import           Data.Git.Backend
-import           Data.Git.Backend.S3
-import           Data.Git.Backend.Trace
-import           Data.Map
-import           Data.Maybe
-import           Data.Text as T hiding (map)
-import qualified Data.Text.Encoding as E
-import           Data.Time.Clock.POSIX
-import           Data.Traversable
-import           Filesystem (removeTree, isDirectory)
-import           Filesystem.Path.CurrentOS
-import           Network.HTTP.Conduit
-import qualified Prelude
-import           Prelude (putStrLn)
-import           Prelude hiding (FilePath, putStr, putStrLn)
+import           Data.Text as T
+import qualified Git.Libgit2 as Lg
+import qualified Git.S3 as Git
+import qualified Git.Smoke as Git
 import           System.Environment
 import           System.Exit
 import           Test.HUnit
-
-default (Text)
+import           Test.Hspec (Spec, describe, it, hspec)
+import           Test.Hspec.Expectations
+import           Test.Hspec.HUnit ()
+import           Test.Hspec.Runner
 
 main :: IO ()
 main = do
-  counts' <- runTestTT tests
-  case counts' of
-    Counts _ _ errors' failures' ->
-      if errors' > 0 || failures' > 0
-      then exitFailure
-      else exitSuccess
-  stopGlobalPool
+    bucket    <- T.pack <$> getEnv "S3_BUCKET"
+    accessKey <- T.pack <$> getEnv "AWS_ACCESS_KEY"
+    secretKey <- T.pack <$> getEnv "AWS_SECRET_KEY"
+    summary   <-
+        hspecWith
+        (defaultConfig { configVerbose = True })
+        (Git.smokeTestSpec
+         (\path _ act ->
+           Lg.withLgRepository path True
+           (Git.addS3Backend bucket "" accessKey secretKey
+                             Nothing (Just "127.0.0.1") Error
+            >> act)))
+    when (summaryFailures summary > 0) $ exitFailure
+    return ()
 
-catBlob :: Repository -> Text -> IO (Maybe Text)
-catBlob repo sha = do
-  hash <- parseOid sha
-  for hash $ \hash' -> do
-    obj <- lookupObject repo hash'
-    case obj of
-      Just (BlobObj b) -> do
-        (_, contents) <- getBlobContents b
-        str <- blobSourceToString contents
-        case str of
-          Nothing   -> return T.empty
-          Just str' -> return (E.decodeUtf8 str')
-
-      Just _  -> error "Found something else..."
-      Nothing -> error "Didn't find anything :("
-
-withRepository :: Text -> (Repository -> Assertion) -> Assertion
-withRepository n f = do
-  let p = fromText n
-  exists <- isDirectory p
-  when exists $ removeTree p
-
-  -- we want exceptions to leave the repo behind
-  f =<< createRepository p True
-
-  removeTree p
-
-oid :: Updatable a => a -> IO Text
-oid = objectId >=> return . oidToText
-
-oidToText :: Oid -> Text
-oidToText = T.pack . show
-
-sampleCommit :: Repository -> Tree -> Signature -> Commit
-sampleCommit repo tr sig =
-    (createCommit repo sig) { commitTree = ObjRef tr
-                            , commitLog  = "Sample log message." }
-
-tests :: Test
-tests = test [
-
-  "createTwoCommits" ~:
-
-  withRepository "createTwoCommits.git" $ \repo' -> do
-    -- Store Git objects in S3
-    s3Bucket     <- T.pack <$> getEnv "S3_BUCKET"
-    awsAccessKey <- T.pack <$> getEnv "AWS_ACCESS_KEY"
-    awsSecretKey <- T.pack <$> getEnv "AWS_SECRET_KEY"
-    repo <- createS3backend s3Bucket "" awsAccessKey awsSecretKey
-                            Nothing Nothing Error True repo'
-
-    let hello = createBlob repo (E.encodeUtf8 "Hello, world!\n")
-    tr <- updateTree (createTree repo) "hello/world.txt" (blobRef hello)
-
-    let goodbye = createBlob repo (E.encodeUtf8 "Goodbye, world!\n")
-    tr <- updateTree tr "goodbye/files/world.txt" (blobRef goodbye)
-    x  <- oid tr
-    x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-
-    -- The Oid has been cleared in tr, so this tests that it gets written as
-    -- needed.
-    let sig = Signature {
-            signatureName  = "John Wiegley"
-          , signatureEmail = "johnw@newartisans.com"
-          , signatureWhen  = posixSecondsToUTCTime 1348980883 }
-        c   = sampleCommit repo tr sig
-    x <- oid c
-    x @?= "44381a5e564d19893d783a5d5c59f9c745155b56"
-
-    let goodbye2 = createBlob repo (E.encodeUtf8 "Goodbye, world again!\n")
-    tr <- updateTree tr "goodbye/files/world.txt" (blobRef goodbye2)
-    x  <- oid tr
-    x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
-
-    let sig = Signature {
-            signatureName  = "John Wiegley"
-          , signatureEmail = "johnw@newartisans.com"
-          , signatureWhen  = posixSecondsToUTCTime 1348981883 }
-        c2  = (sampleCommit repo tr sig) {
-                  commitLog       = "Second sample log message."
-                , commitParents   = [ObjRef c] }
-    x <- oid c2
-    x @?= "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
-
-    putStrLn "Refs before creation..."
-    mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
-    putStrLn "Refs before creation...done"
-
-    cid <- objectId c2
-    writeRef $ createRef repo "refs/heads/master" (RefTargetId cid)
-    writeRef $ createRef repo "HEAD" (RefTargetSymbolic "refs/heads/master")
-
-    x <- fmap oidToText <$> resolveRef repo "refs/heads/master"
-    x @?= Just "2506e7fcc2dbfe4c083e2bd741871e2e14126603"
-
-    putStrLn "Refs after creation..."
-    mapAllRefs repo (\name -> Prelude.putStrLn $ "Ref: " ++ unpack name)
-    putStrLn "Refs after creation...done"
-
-    return()
-
-  ]
-
--- Main.hs ends here
+-- Smoke.hs ends here
