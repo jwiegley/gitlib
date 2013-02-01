@@ -1,9 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Interface for working with Git repositories.
 module Git where
@@ -12,34 +13,23 @@ import           Control.Applicative
 import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
--- import           Control.Monad.IO.Class
--- import           Data.Attempt
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Conduit
 import           Data.Default
--- import           Data.Foldable
--- import           Data.Hex
--- import           Data.Proxy
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
--- import qualified Data.Text.Encoding as T
--- import qualified Data.Text.ICU.Convert as U
 import           Data.Time
--- import           Data.Time.Clock.POSIX
--- import           Data.Traversable
 import           Data.Typeable
--- import           Filesystem.Path.CurrentOS
--- import           Prelude hiding (FilePath)
--- import           System.IO.Unsafe
--- import           Text.Printf
+import           Filesystem.Path.CurrentOS
+import           Prelude hiding (FilePath)
 
 {- $repositories -}
--- | A 'Repository' is the central point of contact between user code and Git
--- data objects.  Every object must belong to some repository.
+-- | 'RepositoryBase' is the central point of contact between user code and
+-- Git data objects.  Every object must belong to some repository.
 class (Applicative m, Monad m, Failure Exception m,
-       Eq (Oid m), Ord (Oid m), Show (Oid m)) => Repository m where
+       Eq (Oid m), Ord (Oid m), Show (Oid m)) => RepositoryBase m where
     data Oid m
     data Tree m
     data Commit m
@@ -153,10 +143,10 @@ data TreeEntry m where
     BlobEntry :: BlobOid m -> Bool -> TreeEntry m
     TreeEntry :: ObjRef m (Tree m) -> TreeEntry m
 
-blobEntry :: Repository m => BlobOid m -> Bool -> TreeEntry m
+blobEntry :: RepositoryBase m => BlobOid m -> Bool -> TreeEntry m
 blobEntry = BlobEntry
 
-treeEntry :: Repository m => Tree m -> TreeEntry m
+treeEntry :: RepositoryBase m => Tree m -> TreeEntry m
 treeEntry t = TreeEntry (treeRef t)
 
 -- | A 'Tree' is anything that is "treeish".
@@ -164,7 +154,7 @@ treeEntry t = TreeEntry (treeRef t)
 -- Minimal complete definition: 'modifyTree'.  Note that for some treeish
 -- things, like Tags, it should always be an error to attempt to modify the
 -- tree in any way.
-class Repository TreeRepository => Treeish t where
+class RepositoryBase TreeRepository => Treeish t where
     type TreeRepository :: * -> *
 
     modifyTree :: t           -- the tree to "modify"
@@ -202,13 +192,13 @@ class Repository TreeRepository => Treeish t where
 treeRef :: Tree m -> ObjRef m (Tree m)
 treeRef = Known
 
-treeRefOid :: (Repository TreeRepository, Treeish (Tree TreeRepository))
+treeRefOid :: (RepositoryBase TreeRepository, Treeish (Tree TreeRepository))
            => ObjRef TreeRepository (Tree TreeRepository)
            -> TreeRepository (Maybe (TreeOid TreeRepository))
 treeRefOid (ByOid x) = return (Just x)
 treeRefOid (Known x) = writeTree x
 
-resolveTree :: Repository m => ObjRef m (Tree m) -> m (Tree m)
+resolveTree :: RepositoryBase m => ObjRef m (Tree m) -> m (Tree m)
 resolveTree objRef = case objRef of
     ByOid oid -> lookupTree oid
     Known obj -> return obj
@@ -229,7 +219,7 @@ instance Default Signature where
                     , utctDayTime = secondsToDiffTime 0 }
         }
 
-class (Repository CommitRepository, Treeish c) => Commitish c where
+class (RepositoryBase CommitRepository, Treeish c) => Commitish c where
     type CommitRepository :: * -> *
 
     commitOid     :: c -> CommitOid CommitRepository
@@ -244,20 +234,22 @@ class (Repository CommitRepository, Treeish c) => Commitish c where
 commitRef :: Commit c -> ObjRef m (Commit c)
 commitRef = Known
 
-commitRefOid :: (Repository CommitRepository,
+commitRefOid :: (RepositoryBase CommitRepository,
                  Commitish (Commit CommitRepository))
              => ObjRef CommitRepository (Commit CommitRepository)
              -> CommitOid CommitRepository
 commitRefOid (ByOid x) = x
 commitRefOid (Known x) = commitOid x
 
-resolveCommit :: Repository m => ObjRef m (Commit m) -> m (Commit m)
+resolveCommit :: RepositoryBase m => ObjRef m (Commit m) -> m (Commit m)
 resolveCommit objRef = case objRef of
     ByOid oid -> lookupCommit oid
     Known obj -> return obj
 
 {- $tags -}
--- data Tag = Tag
---     { tagCommit :: Repository m => CommitOid m }
+
+{- $misc -}
+type Repository m = (RepositoryBase m, m ~ TreeRepository, m ~ CommitRepository,
+                     Treeish (Tree m), Commitish (Commit m))
 
 -- Repository.hs

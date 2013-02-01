@@ -1,3 +1,7 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
+
 module Git.Utils where
 
 import           Control.Applicative
@@ -37,6 +41,7 @@ catBlob str = do
         obj <- lookupObject str
         case obj of
             BlobRef (ByOid oid) -> lookupBlob oid >>= blobToByteString
+            BlobRef (Known x)   -> blobToByteString x
             _ -> failure (ObjectLookupFailed str len)
   where
     len = T.length str

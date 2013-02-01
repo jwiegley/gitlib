@@ -2,7 +2,7 @@
     section followed by a lengthy discussion of the library's design and idioms.
 -}
 
-module Git.Libgit2.Tutorial
+module Git.Tutorial
        (
          -- * Introduction
          -- $intro
