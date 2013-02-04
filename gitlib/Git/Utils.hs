@@ -21,11 +21,7 @@ import           Git
 import           System.IO.Unsafe
 
 oid :: Treeish t => t -> TreeRepository Text
-oid t = do
-    oid' <- writeTree t
-    case oid' of
-        Nothing -> return (T.pack "<none>")
-        Just x  -> return (renderOid x)
+oid t = renderOid <$> writeTree t
 
 createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
 createBlobUtf8 = createBlob . BlobString . T.encodeUtf8

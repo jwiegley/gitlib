@@ -18,26 +18,30 @@ Library
   hs-source-dirs: .
   default-language: Haskell98
   build-depends:
-      base              >= 3 && < 5
+      base >= 3 && < 5
     , gitlib
-    , aeson             >= 0.6.1.0
-    , base64-bytestring >= 1.0.0.0
-    , binary            >= 0.5.1.0
-    , bytestring        >= 0.9.2.1
-    , conduit           >= 0.5.5
-    , containers        >= 0.4.2
-    , data-default      >= 0.5.0
-    , data-marshal      >= 0.1
-    , failure           >= 0.2.0.1
-    , http-conduit      >= 1.8.5.1
-    , network           >= 2.4.0.1
-    , rest-client       >= 0.1.0.0
-    , shakespeare-text  >= 1.0.0.5
-    , stringable        >= 0.1.1
-    , tagged            >= 0.4.4
-    , text              >= 0.11.2
-    , transformers      >= 0.2.2
-    , yaml              >= 0.8.1.1
+    , aeson                >= 0.6.1.0
+    , attempt              >= 0.4.0
+    , base64-bytestring    >= 1.0.0.0
+    , binary               >= 0.5.1.0
+    , bytestring           >= 0.9.2.1
+    , conduit              >= 0.5.5
+    , containers           >= 0.4.2
+    , data-default         >= 0.5.0
+    , data-marshal         >= 0.1
+    , failure              >= 0.2.0.1
+    , hex                  >= 0.1.2
+    , http-conduit         >= 1.8.5.1
+    , network              >= 2.4.0.1
+    , rest-client          >= 0.1.0.0
+    , shakespeare-text     >= 1.0.0.5
+    , stringable           >= 0.1.1
+    , tagged               >= 0.4.4
+    , text                 >= 0.11.2
+    , transformers         >= 0.2.2
+    , transformers-base    >= 0.4.1
+    , unordered-containers >= 0.2.3.0
+    , yaml                 >= 0.8.1.1
   exposed-modules:
     Git.GitHub
 
@@ -51,15 +55,8 @@ Test-suite smoke
     , gitlib
     , gitlib-test
     , gitlib-github
-    -- , HUnit           >= 1.2.5
-    -- , bytestring      >= 0.9.2.1
-    -- , containers      >= 0.4.2
-    -- , http-conduit    >= 1.8.5.1
-    -- , lens            >= 2.8
-    -- , parallel-io     >= 0.3.2.1
-    -- , rest-client     >= 0.1.0.0
-    -- , stringable      >= 0.1.1
-    -- , system-fileio   >= 0.3.9
-    -- , system-filepath >= 0.4.7
-    -- , text            >= 0.11.2
-    -- , time            >= 1.4
+    , HUnit              >= 1.2.5
+    , hspec              >= 1.4.4
+    , hspec-expectations >= 0.3
+    , system-filepath      >= 0.4.7
+    , text               >= 0.11.2

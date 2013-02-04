@@ -131,8 +131,7 @@ instance Eq (Git.Oid LgRepository) where
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the given string is 'empty', it is an error.
-lgCreateBlob ::
-    Git.BlobContents LgRepository -> LgRepository (Git.BlobOid LgRepository)
+lgCreateBlob :: Git.BlobContents LgRepository -> LgRepository BlobOid
 lgCreateBlob b = do
     repo <- lgGet
     ptr  <- liftIO $ mallocForeignPtr
@@ -150,7 +149,7 @@ lgCreateBlob b = do
                         c'git_blob_create_frombuffer
                           coid' repoPtr (castPtr cstr) (fromIntegral len))
 
-lgLookupBlob :: Git.BlobOid LgRepository -> LgRepository (Git.Blob LgRepository)
+lgLookupBlob :: BlobOid -> LgRepository (Git.Blob LgRepository)
 lgLookupBlob oid =
     lookupObject' (getOid (unTagged oid)) 40
         c'git_blob_lookup c'git_blob_lookup_prefix
@@ -257,10 +256,13 @@ doLookupTreeEntry t (name:names) = do
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
-lgWriteTree :: Tree -> LgRepository (Maybe (Git.TreeOid LgRepository))
+lgWriteTree :: Tree -> LgRepository TreeOid
 lgWriteTree t = do
     info <- liftIO $ readIORef (lgTreeInfo t)
-    maybe (fmap Tagged <$> doWriteTree t) (return . Just) (gitId info)
+    maybe (do oid <- doWriteTree t
+              maybe (failure Git.TreeBuilderWriteFailed)
+                    (return . Tagged) oid)
+          return (gitId info)
 
 insertEntry :: CStringable a
             => ForeignPtr C'git_treebuilder -> a -> Oid -> CUInt
@@ -372,11 +374,9 @@ doModifyTree t (name:names) createIfNotExist f = do
 
     treeEntryToOid (Git.BlobEntry oid exe) =
         return (Just (unTagged oid), if exe then 0o100755 else 0o100644)
-    treeEntryToOid (Git.TreeEntry (Git.ByOid oid)) =
+    treeEntryToOid (Git.TreeEntry tr) = do
+        oid <- Git.treeRefOid tr
         return (Just (unTagged oid), 0o040000)
-    treeEntryToOid (Git.TreeEntry (Git.Known tr)) = do
-        oid <- Git.writeTree tr
-        return (unTagged <$> oid, 0o040000)
 
 lgModifyTree
   :: Tree -> FilePath -> Bool
@@ -403,7 +403,7 @@ instance Git.Treeish Commit where
         Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
     writeTree c = Git.commitTree' c >>= Git.writeTree
 
-lgLookupCommit :: Int -> Git.CommitOid LgRepository -> LgRepository Commit
+lgLookupCommit :: Int -> CommitOid -> LgRepository Commit
 lgLookupCommit len oid =
   lookupObject' (getOid (unTagged oid)) len c'git_commit_lookup
                 c'git_commit_lookup_prefix $ \coid obj _ ->
@@ -485,10 +485,8 @@ lgCreateCommit :: [CommitRef]
                -> Maybe Text
                -> LgRepository Commit
 lgCreateCommit parents tree author committer logText ref = do
-    repo  <- lgGet
-    mtoid <- Git.treeRefOid tree
-    toid  <- maybe (failure Git.CommitCreateFailed)
-                   (return . getOid . unTagged) mtoid
+    repo <- lgGet
+    toid <- getOid . unTagged <$> Git.treeRefOid tree
     let pptrs = map Git.commitRefOid parents
     coid  <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
         coid <- mallocForeignPtr

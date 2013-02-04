@@ -8,8 +8,9 @@ module Main where
 import           Control.Applicative
 import           Control.Monad
 import           Data.Text as T
-import qualified Git.Libgit2 as Lg
-import qualified Git.GitHub as Git
+import           Filesystem.Path.CurrentOS
+import qualified Git
+import qualified Git.GitHub as Gh
 import qualified Git.Smoke as Git
 import           System.Environment
 import           System.Exit
@@ -22,14 +23,14 @@ import           Test.Hspec.Runner
 main :: IO ()
 main = do
     owner <- T.pack <$> getEnv "GITHUB_OWNER"
-    repo  <- T.pack <$> getEnv "GITHUB_REPO"
     token <- T.pack <$> getEnv "GITHUB_TOKEN"
     summary <-
         hspecWith
         (defaultConfig { configVerbose = True })
         (Git.smokeTestSpec
          (\path _ act ->
-           Git.withGitHubRepository owner repo token act))
+           Gh.withGitHubRepository
+               owner (either id id (toText path)) token act))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

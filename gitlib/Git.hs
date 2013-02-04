@@ -80,6 +80,8 @@ data Exception = BackendError Text
                | RepositoryInvalid
                | BlobCreateFailed
                | BlobEmptyCreateFailed
+               | BlobLookupFailed
+               | TranslationException Text
                | TreeCreateFailed
                | TreeBuilderCreateFailed
                | TreeBuilderInsertFailed
@@ -192,15 +194,15 @@ class RepositoryBase TreeRepository => Treeish t where
     dropFromTree t path =
         void (modifyTree t path False (const (return Nothing)))
 
-    writeTree :: t -> TreeRepository (Maybe (TreeOid TreeRepository))
+    writeTree :: t -> TreeRepository (TreeOid TreeRepository)
 
 treeRef :: Tree m -> ObjRef m (Tree m)
 treeRef = Known
 
 treeRefOid :: (RepositoryBase TreeRepository, Treeish (Tree TreeRepository))
            => ObjRef TreeRepository (Tree TreeRepository)
-           -> TreeRepository (Maybe (TreeOid TreeRepository))
-treeRefOid (ByOid x) = return (Just x)
+           -> TreeRepository (TreeOid TreeRepository)
+treeRefOid (ByOid x) = return x
 treeRefOid (Known x) = writeTree x
 
 resolveTree :: RepositoryBase m => ObjRef m (Tree m) -> m (Tree m)

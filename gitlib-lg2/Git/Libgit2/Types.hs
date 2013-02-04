@@ -33,12 +33,18 @@ newtype LgRepository a = LgRepository
     { runLgRepository :: ReaderT Repository IO a }
 
 type Oid       = Git.Oid LgRepository
+
+type BlobOid   = Git.BlobOid LgRepository
+type TreeOid   = Git.TreeOid LgRepository
+type CommitOid = Git.CommitOid LgRepository
+
 type Tree      = Git.Tree LgRepository
 type Commit    = Git.Commit LgRepository
-type Reference = Git.Reference LgRepository Commit
 
 type TreeRef   = Git.TreeRef LgRepository
 type CommitRef = Git.CommitRef LgRepository
+
+type Reference = Git.Reference LgRepository Commit
 
 instance Functor LgRepository where
     fmap f (LgRepository x) = LgRepository (fmap f x)
