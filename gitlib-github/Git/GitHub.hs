@@ -16,56 +16,31 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Data.Aeson hiding (Success)
 import           Data.Attempt
-import           Data.Binary
 import           Data.ByteString as B hiding (pack, putStrLn)
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Char8 as BC
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Char8 as BLC
-import           Data.ByteString.Unsafe
 import           Data.Conduit
-import           Data.Conduit.Binary
-import           Data.Conduit.List hiding (mapM_, foldM, peek, catMaybes, sequence)
 import           Data.Default ( Default(..) )
 import           Data.Foldable (for_)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.Hex
 import           Data.IORef
-import           Data.Int (Int64)
-import qualified Data.List as L
-import           Data.Marshal
-import           Data.Marshal.JSON
+import           Data.Marshal.JSON ()
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Proxy
-import           Data.Stringable
 import           Data.Tagged
 import           Data.Text as T hiding (drop)
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TL
-import qualified Data.Yaml as Y
-import           Foreign.C.String
-import           Foreign.C.Types
-import           Foreign.ForeignPtr
-import           Foreign.Marshal.Alloc
-import           Foreign.Marshal.Utils
-import           Foreign.Ptr
-import           Foreign.StablePtr
-import           Foreign.Storable
 import qualified Git
+import qualified Github.Repos as Github
 import           Network.HTTP.Conduit hiding (Proxy, Response)
 import           Network.REST.Client
-import           Network.Socket
-import           Prelude hiding (mapM_, catch)
-import           System.Environment
 import           System.IO.Unsafe
 import           Text.Shakespeare.Text (st)
+import Control.Concurrent
 
 type Oid       = Git.Oid GitHubRepository
 
@@ -104,8 +79,9 @@ instance Git.RepositoryBase GitHubRepository where
     data Tag GitHubRepository = Tag
         { tagCommit :: CommitRef }
 
-    parseOid x = Oid <$> unhex (T.encodeUtf8 x)
+    parseOid x = Oid <$> unhex (BC.pack (T.unpack x))
     renderOid (Tagged (Oid x)) = T.pack (hex (BC.unpack x))
+
     lookupRef    = undefined -- ghLookupRef
     updateRef    = undefined -- ghUpdateRef
     resolveRef   = undefined -- ghResolveRef
@@ -135,10 +111,15 @@ instance Ord (Git.Oid GitHubRepository) where
 instance Eq (Git.Oid GitHubRepository) where
     Oid l == Oid r = l == r
 
-instance MonadBase IO GitHubRepository
-instance MonadBaseControl IO GitHubRepository
-instance MonadUnsafeIO GitHubRepository
-instance MonadThrow GitHubRepository
+instance MonadBase IO GitHubRepository where
+    liftBase = liftIO
+
+instance MonadUnsafeIO GitHubRepository where
+    unsafeLiftIO = return . unsafePerformIO
+
+instance MonadThrow GitHubRepository where
+    -- monadThrow :: Exception e => e -> m a
+    monadThrow = throw
 
 -- jww (2012-12-26): If no name mangling scheme is provided, assume it is
 -- "type name prefix"
@@ -156,30 +137,46 @@ ghRestfulEx method url arg st = undefined
 
 ghRestful :: (ToJSON a, FromJSON b) => Text -> Text -> a -> GitHubRepository b
 ghRestful method url arg = do
+    liftIO $ putStrLn "ghRestful.1"
     gh        <- ghGet
+    liftIO $ putStrLn "ghRestful.2"
     urlPrefix <- ghPrefix
-    result    <- runResourceT $ withRestfulEnvAndMgr (httpManager gh)
-                 (for_ (gitHubToken gh) $ \tok ->
-                   addHeader "Authorization" ("token " <> tok))
-                 (restfulJson arg [st|#{method} #{urlPrefix}/#{url}|])
+    liftIO $ putStrLn "ghRestful.3"
+    let tok = gitHubToken gh
+    liftIO $ putStrLn "ghRestful.4"
+    result    <- liftIO $
+                 catch (runResourceT $
+                        withRestfulEnvAndMgr (fromJust (httpManager gh))
+                        (for_ tok $ \t -> do
+                              addHeader "Authorization" ("token " <> t)
+                              addHeader "Content-type" "application/json")
+                        (restfulJson arg [st|#{method} #{urlPrefix}/#{url}|]))
+                       (\e -> do putStrLn $ "ghRestful Exception: " ++ show (e :: IOException)
+                                 throwIO e)
+    case result of
+        Failure e -> liftIO $ putStrLn $ "ghRestful.5 FAILED: " ++ show e
+        Success _ -> liftIO $ putStrLn $ "ghRestful.5 SUCCESS"
     attempt failure return result
 
 ghLookupBlob :: BlobOid -> GitHubRepository Blob
-ghLookupBlob oid@(Tagged (Oid sha)) = do
+ghLookupBlob oid = do
     -- jww (2013-01-12): Split out GET to its own argument, using StdMethod
     -- from http-types.  Also, use a type class for this argument, to be added
     -- to http-types:
     --     class IsHttpMethod a where asHttpMethod :: a -> ByteString
-    blob <- ghRestful "GET" ("git/blobs/" <> T.decodeUtf8 sha) ()
+    -- jww (2012-12-26): Do we want runtime checking of the validity of the
+    -- method?  Yes, but allow the user to declare it as OK.
+    blob <- ghRestful "GET" ("git/blobs/" <> Git.renderOid oid) ()
+    let content = ghBlobContent blob
+    case ghBlobEncoding blob of
+        "base64" ->
+            case dec content of
+                Right bs' -> return (Git.BlobString bs')
+                Left str  -> failure (Git.TranslationException (T.pack str))
+        "utf-8" -> return (Git.BlobString content)
+        enc -> failure (Git.BlobEncodingUnknown enc)
 
-    case dec (ghBlobContent blob) of
-        Right bs' -> return (Git.BlobString bs')
-        Left str  -> failure (Git.TranslationException (T.pack str))
-
-  -- jww (2012-12-26): Handle utf-8 and other encodings
   where dec = B64.decode . B.concat . B.split 10
-    -- jww (2012-12-26): Need to add support for passing in a Maybe Text token
-    -- in order to read from private repositories
 
 data Content = Content { contentContent  :: ByteString
                        , contentEncoding :: Text } deriving Show
@@ -203,9 +200,12 @@ instance ToJSON (Git.Oid GitHubRepository) where
   toJSON (Oid sha) = object ["sha" .= sha]
 
 ghCreateBlob :: Git.BlobContents GitHubRepository -> GitHubRepository BlobOid
-ghCreateBlob (Git.BlobString content) =
-    Tagged <$>
-        ghRestful "POST" "/git/blobs" (Content (B64.encode content) "base64")
+ghCreateBlob (Git.BlobString content) = do
+    liftIO $ putStrLn $ "ghCreateBlob.1: " ++ show (encode (Content (B64.encode content) "base64"))
+    r <- Tagged <$>
+        ghRestful "POST" "git/blobs" (Content (B64.encode content) "base64")
+    liftIO $ putStrLn $ "ghCreateBlob.2: " ++ show r
+    return r
 ghCreateBlob _ = error "NYI"
 
 -- instance FromJSON Tree where
@@ -243,8 +243,7 @@ instance ToJSON GitHubTreeEntry where
                         , "sha"  .= ghTreeEntrySha entry ]
 
 ghLookupTree :: TreeOid -> GitHubRepository Tree
-ghLookupTree (Tagged (Oid sha)) = undefined
-    -- ghRestful "GET" ("git/trees/" <> T.decodeUtf8 sha) ()
+ghLookupTree oid = undefined -- ghRestful "GET" ("git/trees/" <> Git.renderOid oid) ()
 
 ghWriteTree :: Tree -> GitHubRepository (Maybe TreeOid)
 ghWriteTree tree = undefined -- ghRestful "POST" "git/trees"  tree
@@ -289,10 +288,7 @@ instance ToJSON Commit where
                                        isJust (ghCommitCommitter c) ]
 
 ghReadCommit :: CommitOid -> GitHubRepository Commit
-ghReadCommit (Tagged (Oid sha)) =
-    -- jww (2012-12-26): Do we want runtime checking of the validity of the
-    -- method?  Yes, but allow the user to declare it as OK.
-    ghRestful "GET" ("git/commits/" <> T.decodeUtf8 sha) ()
+ghReadCommit oid = ghRestful "GET" ("git/commits/" <> Git.renderOid oid) ()
 
 ghWriteCommit :: Commit -> GitHubRepository Commit
 ghWriteCommit commit = ghRestful "POST" "git/commits" commit
@@ -345,19 +341,25 @@ ghUpdateRef ref sha = do
 ghDeleteRef :: Text -> GitHubRepository ()
 ghDeleteRef ref = ghRestful "DELETE" ("git/" <> ref) ref
 
+data GitHubOwner = GitHubUser Text
+                 | GitHubOrganization Text
+                 deriving (Show, Eq)
+
 data Repository = Repository
-    { httpManager :: Manager
-    , ownerName   :: Text
-    , gitHubRepo  :: Text
-    , gitHubToken :: Maybe Text }
+    { httpManager :: Maybe Manager
+    , gitHubOwner :: GitHubOwner
+    , gitHubRepo  :: Github.Repo
+    , gitHubToken :: Maybe Text
+    }
 
 ghPrefix :: GitHubRepository Text
 ghPrefix = do
     repo <- ghGet
-    let owner    = ownerName repo
-        repoName = gitHubRepo repo
-        -- token = gitHubToken repo
-    return [st|https://api.github.com/repos/#{owner}/#{repoName}|]
+    let owner = case gitHubOwner repo of
+            GitHubUser name         -> name
+            GitHubOrganization name -> name
+        name  = Github.repoName (gitHubRepo repo)
+    return [st|https://api.github.com/repos/#{owner}/#{name}|]
 
 newtype GitHubRepository a = GitHubRepository
     { runGhRepository :: ReaderT Repository IO a }
@@ -403,29 +405,95 @@ mapPair :: (a -> b) -> (a,a) -> (b,b)
 mapPair f (x,y) = (f x, f y)
 
 withOpenGhRepository :: Repository -> GitHubRepository a -> IO a
-withOpenGhRepository repo action =
-    runReaderT (runGhRepository action) repo
+withOpenGhRepository repo action = do
+    putStrLn "withOpenGhRepository.1"
+    r <- runReaderT (runGhRepository action) repo
+    putStrLn "withOpenGhRepository.2"
+    return r
 
-withGitHubRepository :: Text -> Text -> Maybe Text -> GitHubRepository a -> IO a
+withGitHubRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository a
+                     -> IO (Either Github.Error a)
 withGitHubRepository owner repoName token action = do
-    repo <- openOrCreateGhRepository owner repoName token
-    withOpenGhRepository repo action
+    putStrLn "withGitHubRepository.1"
+    bracket
+        (openOrCreateGhRepository owner repoName token)
+        (\repo -> case repo of
+              Left _ -> return ()
+              Right _ -> do
+                  putStrLn "withGitHubRepository.2"
+                  let name = case owner of
+                          GitHubUser n -> n
+                          GitHubOrganization n -> n
+                  putStrLn "withGitHubRepository.3"
+                  when (isJust token) $ do
+                      putStrLn "withGitHubRepository.4"
+                      result <- Github.deleteRepo
+                                (Github.GithubOAuth (T.unpack (fromJust token)))
+                                (T.unpack name) (T.unpack repoName)
+                      case result of
+                          Left e -> putStrLn $ "Could not delete repository: "
+                                           ++ show e
+                          Right _ -> return ())
+        (\repo -> case repo of
+              Left e -> return (Left e)
+              Right r -> Right <$> withOpenGhRepository r action)
 
-openGhRepository :: Text -> Text -> Maybe Text -> IO Repository
-openGhRepository owner repoName token = do
+openGhRepository :: GitHubOwner -> Github.Repo -> Maybe Text -> IO Repository
+openGhRepository owner repo token = do
     mgr <- newManager def
-    return $ Repository mgr owner repoName token
+    return Repository { httpManager = Just mgr
+                      , gitHubOwner = owner
+                      , gitHubRepo  = repo
+                      , gitHubToken = token }
 
-createGhRepository :: Text -> Text -> Maybe Text -> IO Repository
+createGhRepository ::
+    GitHubOwner -> Text -> Text -> IO (Either Github.Error Repository)
 createGhRepository owner repoName token = do
-    mgr <- newManager def
-    return $ Repository mgr owner repoName token
+    putStrLn "createGhRepository.1"
+    result <- case owner of
+        GitHubUser _ ->
+            Github.createRepo (Github.GithubOAuth (T.unpack token))
+                (Github.newRepo (T.unpack repoName))
+                    { Github.newRepoHasIssues = Just False
+                    , Github.newRepoAutoInit  = Just True }
+        GitHubOrganization name ->
+            Github.createOrganizationRepo
+                (Github.GithubOAuth (T.unpack token)) (T.unpack name)
+                (Github.newRepo (T.unpack repoName))
+                    { Github.newRepoHasIssues = Just False
+                    , Github.newRepoAutoInit  = Just True }
+    liftIO $ threadDelay 10000000 -- wait ten seconds
+    putStrLn "createGhRepository.2"
+    case result of
+        Left x -> do putStrLn "createGhRepository.3"
+                     return (Left x)
+        Right repo -> do
+            putStrLn "createGhRepository.4"
+            mgr <- newManager def
+            return $ Right $ Repository
+                { httpManager = Just mgr
+                , gitHubOwner = owner
+                , gitHubRepo  = repo
+                , gitHubToken = Just token }
 
-openOrCreateGhRepository :: Text -> Text -> Maybe Text -> IO Repository
+openOrCreateGhRepository ::
+    GitHubOwner -> Text -> Maybe Text -> IO (Either Github.Error Repository)
 openOrCreateGhRepository owner repoName token = do
-  p <- liftIO $ return undefined
-  if p
-    then openGhRepository owner repoName token
-    else createGhRepository owner repoName token
+    putStrLn "openOrCreateGhRepository.1"
+    result <- case owner of
+        GitHubUser name ->
+            Github.userRepo (T.unpack name) (T.unpack repoName)
+        GitHubOrganization name ->
+            Github.organizationRepo (T.unpack name) (T.unpack repoName)
+    putStrLn "openOrCreateGhRepository.2"
+    case result of
+        Left _   -> case token of
+            Just tok -> do putStrLn "openOrCreateGhRepository.3"
+                           createGhRepository owner repoName tok
+            Nothing -> do putStrLn "openOrCreateGhRepository.4"
+                          return (Left (Github.UserError
+                                     "Authentication token not provided"))
+        Right r' -> do putStrLn "openOrCreateGhRepository.5"
+                       Right <$> openGhRepository owner r' token
 
 -- GitHub.hs

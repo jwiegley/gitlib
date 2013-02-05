@@ -80,6 +80,7 @@ data Exception = BackendError Text
                | RepositoryInvalid
                | BlobCreateFailed
                | BlobEmptyCreateFailed
+               | BlobEncodingUnknown Text
                | BlobLookupFailed
                | TranslationException Text
                | TreeCreateFailed

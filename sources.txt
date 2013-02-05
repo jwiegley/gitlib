@@ -3,10 +3,12 @@ gitlib-test/
 hlibgit2/
 gitlib-lg2/
 gitlib-s3/
+gitlib-github/
 vendor/aws/
 vendor/c2hsc/
 vendor/data-marshal/
 vendor/general-prelude/
+vendor/github/
 vendor/http-conduit/
 vendor/http-types/
 vendor/rest-client/
