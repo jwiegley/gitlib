@@ -24,7 +24,7 @@ main = do
                          (Git.smokeTestSpec
                           (\path _ act ->
                             Lg.withLgRepository path True
-                                (addTracingBackend >> act)))
+                                (Lg.addTracingBackend >> act)))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

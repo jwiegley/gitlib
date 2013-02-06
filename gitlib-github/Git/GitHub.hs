@@ -11,6 +11,7 @@
 module Git.GitHub where
 
 import           Control.Applicative
+import           Control.Concurrent
 import           Control.Exception
 import           Control.Failure
 import           Control.Monad
@@ -19,7 +20,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Reader
 import           Data.Aeson hiding (Success)
 import           Data.Attempt
-import           Data.ByteString as B hiding (pack, putStrLn)
+import           Data.ByteString as B hiding (pack, putStrLn, map, null)
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Char8 as BC
 import           Data.Conduit
@@ -33,14 +34,18 @@ import           Data.Marshal.JSON ()
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text as T hiding (drop)
+import           Data.Text as T hiding (drop, map, null)
+import qualified Data.Text.Encoding as T
+import           Debug.Trace
+import           Filesystem.Path.CurrentOS (FilePath)
+import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
 import qualified Github.Repos as Github
 import           Network.HTTP.Conduit hiding (Proxy, Response)
 import           Network.REST.Client
+import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 import           Text.Shakespeare.Text (st)
-import Control.Concurrent
 
 type Oid       = Git.Oid GitHubRepository
 
@@ -59,10 +64,10 @@ type CommitRef = Git.CommitRef GitHubRepository
 type Reference = Git.Reference GitHubRepository Commit
 
 instance Git.RepositoryBase GitHubRepository where
-    data Oid GitHubRepository = Oid ByteString
+    data Oid GitHubRepository = Oid { getOid :: ByteString }
 
     data Tree GitHubRepository = GitHubTree
-        { ghTreeOid      :: IORef TreeOid
+        { ghTreeOid      :: IORef (Maybe TreeOid)
         , ghTreeContents :: IORef (HashMap Text TreeEntry)
         }
 
@@ -79,8 +84,8 @@ instance Git.RepositoryBase GitHubRepository where
     data Tag GitHubRepository = Tag
         { tagCommit :: CommitRef }
 
-    parseOid x = Oid <$> unhex (BC.pack (T.unpack x))
-    renderOid (Tagged (Oid x)) = T.pack (hex (BC.unpack x))
+    parseOid x = Oid <$> unhex (T.encodeUtf8 x)
+    renderOid (Tagged (Oid x)) = T.toLower (T.decodeUtf8 (hex x))
 
     lookupRef    = undefined -- ghLookupRef
     updateRef    = undefined -- ghUpdateRef
@@ -91,7 +96,7 @@ instance Git.RepositoryBase GitHubRepository where
     lookupBlob   = ghLookupBlob
     lookupTag    = undefined
     lookupObject = undefined -- ghLookupObject
-    newTree      = undefined -- ghNewTree
+    newTree      = ghNewTree
     createBlob   = ghCreateBlob
     createCommit = undefined -- ghCreateCommit
     createTag    = undefined
@@ -137,25 +142,15 @@ ghRestfulEx method url arg st = undefined
 
 ghRestful :: (ToJSON a, FromJSON b) => Text -> Text -> a -> GitHubRepository b
 ghRestful method url arg = do
-    liftIO $ putStrLn "ghRestful.1"
     gh        <- ghGet
-    liftIO $ putStrLn "ghRestful.2"
     urlPrefix <- ghPrefix
-    liftIO $ putStrLn "ghRestful.3"
     let tok = gitHubToken gh
-    liftIO $ putStrLn "ghRestful.4"
-    result    <- liftIO $
-                 catch (runResourceT $
-                        withRestfulEnvAndMgr (fromJust (httpManager gh))
-                        (for_ tok $ \t -> do
-                              addHeader "Authorization" ("token " <> t)
-                              addHeader "Content-type" "application/json")
-                        (restfulJson arg [st|#{method} #{urlPrefix}/#{url}|]))
-                       (\e -> do putStrLn $ "ghRestful Exception: " ++ show (e :: IOException)
-                                 throwIO e)
-    case result of
-        Failure e -> liftIO $ putStrLn $ "ghRestful.5 FAILED: " ++ show e
-        Success _ -> liftIO $ putStrLn $ "ghRestful.5 SUCCESS"
+    result <- liftIO $ runResourceT $
+              withRestfulEnvAndMgr (fromJust (httpManager gh))
+              (for_ tok $ \t -> do
+                    addHeader "Authorization" ("token " <> t)
+                    addHeader "Content-type" "application/json")
+              (restfulJson arg [st|#{method} #{urlPrefix}/#{url}|])
     attempt failure return result
 
 ghLookupBlob :: BlobOid -> GitHubRepository Blob
@@ -193,60 +188,223 @@ instance Default Content where
   def = Content B.empty "utf-8"
 
 instance FromJSON (Git.Oid GitHubRepository) where
-  parseJSON (Object v) = Oid <$> v .: "sha"
+  parseJSON (Object v) =
+      Oid <$> (unsafePerformIO . unhex . T.encodeUtf8 <$> v .: "sha")
   parseJSON _ = mzero
 
 instance ToJSON (Git.Oid GitHubRepository) where
-  toJSON (Oid sha) = object ["sha" .= sha]
+  toJSON (Oid sha) = object ["sha" .= show sha]
 
 ghCreateBlob :: Git.BlobContents GitHubRepository -> GitHubRepository BlobOid
-ghCreateBlob (Git.BlobString content) = do
-    liftIO $ putStrLn $ "ghCreateBlob.1: " ++ show (encode (Content (B64.encode content) "base64"))
-    r <- Tagged <$>
-        ghRestful "POST" "git/blobs" (Content (B64.encode content) "base64")
-    liftIO $ putStrLn $ "ghCreateBlob.2: " ++ show r
-    return r
-ghCreateBlob _ = error "NYI"
+ghCreateBlob (Git.BlobString content) =
+    Tagged <$> ghRestful "POST" "git/blobs"
+                         (Content (B64.encode content) "base64")
+ghCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
 
--- instance FromJSON Tree where
---   parseJSON (Object v) = GitHubTree <$> v .: "sha"
---                                     <*> v .: "tree"
---   parseJSON _ = mzero
+data GitHubTreeProxy = GitHubTreeProxy
+    { ghpTreeOid      :: Maybe Text
+    , ghpTreeContents :: [GitHubTreeEntryProxy]
+    } deriving Show
 
--- instance ToJSON Tree where
---   toJSON (GitHubTree oid contents) = unsafePerformIO $ do
---       Tagged oid@(Oid sha) <- readIORef oid
---       entries <- readIORef contents
---       if B.null sha
---           then return $ object ["tree" .= entries]
---           else return $ object ["sha"  .= Git.renderOid oid, "tree" .= entries]
-
-data GitHubTreeEntry = GitHubTreeEntry
-    { ghTreeEntryType :: Text
-    , ghTreeEntryPath :: Text
-    , ghTreeEntryMode :: Text
-    , ghTreeEntrySize :: Int
-    , ghTreeEntrySha  :: Text } deriving Show
-
-instance FromJSON GitHubTreeEntry where
-  parseJSON (Object v) = GitHubTreeEntry <$> v .: "type"
-                                         <*> v .: "path"
-                                         <*> v .: "mode"
-                                         <*> v .:? "size" .!= (-1)
-                                         <*> v .: "sha"
+instance FromJSON GitHubTreeProxy where
+  parseJSON (Object v) =
+      -- jww (2013-02-06): The GitHub API supports using the "base_tree"
+      -- parameter for doing incremental updates based on existing trees.
+      -- This could be a huge efficiency gain, although it would only be an
+      -- optimization, as we always know the full contents of every tree.
+      GitHubTreeProxy <$> v .: "sha"
+                      <*> v .: "tree"
   parseJSON _ = mzero
 
-instance ToJSON GitHubTreeEntry where
-  toJSON entry = object [ "type" .= ghTreeEntryType entry
-                        , "path" .= ghTreeEntryPath entry
-                        , "mode" .= ghTreeEntryMode entry
-                        , "sha"  .= ghTreeEntrySha entry ]
+instance ToJSON GitHubTreeProxy where
+  toJSON (GitHubTreeProxy _ contents) = object [ "tree" .= contents ]
+
+data GitHubTreeEntryProxy = GitHubTreeEntryProxy
+    { ghpTreeEntryType    :: Text
+    , ghpTreeEntryPath    :: Text
+    , ghpTreeEntryMode    :: Text
+    , ghpTreeEntrySize    :: Int
+    , ghpTreeEntrySha     :: Text
+    , ghpTreeEntrySubtree :: Maybe TreeRef
+    }
+
+instance Show GitHubTreeEntryProxy where
+    show x = Prelude.unlines
+        [ "GitHubTreeEntryProxy {"
+        , "  ghpTreeEntryType    = " ++ show (ghpTreeEntryType x)
+        , "  ghpTreeEntryPath    = " ++ show (ghpTreeEntryPath x)
+        , "  ghpTreeEntryMode    = " ++ show (ghpTreeEntryMode x)
+        , "  ghpTreeEntrySize    = " ++ show (ghpTreeEntrySize x)
+        , "  ghpTreeEntrySha     = " ++ show (ghpTreeEntrySha x)
+        , "}"
+        ]
+
+treeEntryToProxy :: Text -> TreeEntry -> GitHubRepository GitHubTreeEntryProxy
+treeEntryToProxy name (Git.BlobEntry oid exe) =
+    return GitHubTreeEntryProxy
+        { ghpTreeEntryType    = "blob"
+        , ghpTreeEntryPath    = name
+        , ghpTreeEntryMode    = if exe then "100755" else "100644"
+        , ghpTreeEntrySize    = (-1)
+        , ghpTreeEntrySha     = Git.renderOid oid
+        , ghpTreeEntrySubtree = Nothing
+        }
+treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
+    return GitHubTreeEntryProxy
+        { ghpTreeEntryType    = "tree"
+        , ghpTreeEntryPath    = name
+        , ghpTreeEntryMode    = "040000"
+        , ghpTreeEntrySize    = (-1)
+        , ghpTreeEntrySha     = Git.renderOid oid
+        , ghpTreeEntrySubtree = Just ref
+        }
+treeEntryToProxy name (Git.TreeEntry ref@(Git.Known tree)) = do
+    oid <- Git.writeTree tree
+    return GitHubTreeEntryProxy
+        { ghpTreeEntryType    = "tree"
+        , ghpTreeEntryPath    = name
+        , ghpTreeEntryMode    = "040000"
+        , ghpTreeEntrySize    = (-1)
+        , ghpTreeEntrySha     = Git.renderOid oid
+        , ghpTreeEntrySubtree = Just ref
+        }
+
+proxyToTreeEntry :: GitHubTreeEntryProxy -> GitHubRepository TreeEntry
+proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "blob" }) = do
+    oid <- Git.parseOid (ghpTreeEntrySha entry)
+    return $ Git.BlobEntry (Tagged oid) (ghpTreeEntryMode entry == "100755")
+
+proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "tree" }) = do
+    oid <- Git.parseOid (ghpTreeEntrySha entry)
+    return $ Git.TreeEntry (Git.ByOid (Tagged oid))
+
+proxyToTreeEntry _ = error "Unexpected tree entry type from GitHub"
+
+instance FromJSON GitHubTreeEntryProxy where
+  parseJSON (Object v) =
+      GitHubTreeEntryProxy <$> v .: "type"
+                           <*> v .: "path"
+                           <*> v .: "mode"
+                           <*> v .:? "size" .!= (-1)
+                           <*> v .: "sha"
+                           <*> pure Nothing
+  parseJSON _ = mzero
+
+instance ToJSON GitHubTreeEntryProxy where
+  toJSON entry = object [ "type" .= ghpTreeEntryType entry
+                        , "path" .= ghpTreeEntryPath entry
+                        , "mode" .= ghpTreeEntryMode entry
+                        , "sha"  .= ghpTreeEntrySha entry ]
+
+ghNewTree :: GitHubRepository Tree
+ghNewTree = do liftIO $ putStrLn "ghNewTree.1"
+               GitHubTree <$> (liftIO $ newIORef Nothing)
+                          <*> (liftIO $ newIORef HashMap.empty)
 
 ghLookupTree :: TreeOid -> GitHubRepository Tree
-ghLookupTree oid = undefined -- ghRestful "GET" ("git/trees/" <> Git.renderOid oid) ()
+ghLookupTree oid = do
+    liftIO $ putStrLn "ghLookupTree.1"
+    treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderOid oid) ()
+    oid' <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
+    subtree' <- subtree treeProxy
+    GitHubTree <$> (liftIO $ newIORef (Just (Tagged oid')))
+               <*> (liftIO $ newIORef subtree')
+  where
+    subtree tp =
+        HashMap.fromList <$>
+        mapM (\entry -> (,) <$> pure (ghpTreeEntryPath entry)
+                           <*> proxyToTreeEntry entry)
+             (ghpTreeContents tp)
 
-ghWriteTree :: Tree -> GitHubRepository (Maybe TreeOid)
-ghWriteTree tree = undefined -- ghRestful "POST" "git/trees"  tree
+doLookupTreeEntry :: Tree -> [Text] -> GitHubRepository (Maybe TreeEntry)
+doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
+doLookupTreeEntry t (name:names) = do
+  -- Lookup the current name in this tree.  If it doesn't exist, and there are
+  -- more names in the path and 'createIfNotExist' is True, create a new Tree
+  -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
+  -- {})@, and if not we'll have Nothing.
+
+  y <- liftIO $ HashMap.lookup name <$> readIORef (ghTreeContents t)
+  if null names
+      then return y
+      else case y of
+      Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
+      Just (Git.TreeEntry t') -> do t'' <- Git.resolveTree t'
+                                    doLookupTreeEntry t'' names
+      _ -> return Nothing
+
+doModifyTree :: Tree
+             -> [Text]
+             -> Bool
+             -> (Maybe TreeEntry -> GitHubRepository (Maybe TreeEntry))
+             -> GitHubRepository (Maybe TreeEntry)
+doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
+doModifyTree t (name:names) createIfNotExist f = do
+    -- Lookup the current name in this tree.  If it doesn't exist, and there
+    -- are more names in the path and 'createIfNotExist' is True, create a new
+    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
+    -- (TreeEntry {})@, and if not we'll have Nothing.
+    y' <- doLookupTreeEntry t [name]
+    y  <- if isNothing y' && createIfNotExist && not (null names)
+          then Just . Git.TreeEntry . Git.Known <$> Git.newTree
+          else return y'
+
+    if null names
+        then do
+        -- If there are no further names in the path, call the transformer
+        -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there
+        -- was a previous entry at this path.  It should return a 'Left' value
+        -- to propagate out a user-defined error, or a @Maybe TreeEntry@ to
+        -- indicate whether the entry at this path should be deleted or
+        -- replaced with something new.
+        --
+        -- NOTE: There is no provision for leaving the entry unchanged!  It is
+        -- assumed to always be changed, as we have no reliable method of
+        -- testing object equality that is not O(n).
+        ze <- f y
+        let contents = ghTreeContents t
+        case ze of
+            Nothing -> liftIO $ modifyIORef contents (HashMap.delete name)
+            Just z' -> liftIO $ modifyIORef contents (HashMap.insert name z')
+        return ze
+
+        else
+        -- If there are further names in the path, descend them now.  If
+        -- 'createIfNotExist' was False and there is no 'Tree' under the
+        -- current name, or if we encountered a 'Blob' when a 'Tree' was
+        -- required, throw an exception to avoid colliding with user-defined
+        -- 'Left' values.
+        case y of
+            Nothing -> return Nothing
+            Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
+            Just (Git.TreeEntry st') -> do
+                st <- Git.resolveTree st'
+                ze <- doModifyTree st names createIfNotExist f
+                liftIO $ modifyIORef (ghTreeOid t) (const Nothing)
+                liftIO $ modifyIORef (ghTreeContents t)
+                                     (HashMap.insert name
+                                      (Git.TreeEntry (Git.Known st)))
+                return ze
+
+ghModifyTree :: Tree -> FilePath -> Bool
+             -> (Maybe TreeEntry -> GitHubRepository (Maybe TreeEntry))
+             -> GitHubRepository (Maybe TreeEntry)
+ghModifyTree tree = doModifyTree tree . splitPath
+
+splitPath :: FilePath -> [Text]
+splitPath path = T.splitOn "/" text
+  where text = case F.toText path of
+                 Left x  -> error $ "Invalid path: " ++ T.unpack x
+                 Right y -> y
+
+ghWriteTree :: Tree -> GitHubRepository TreeOid
+ghWriteTree tree = do
+    contents   <- liftIO $ readIORef (ghTreeContents tree)
+    contents'  <- HashMap.traverseWithKey treeEntryToProxy contents
+    treeProxy' <- ghRestful "POST" "git/trees"
+                           (GitHubTreeProxy Nothing (HashMap.elems contents'))
+    oid <- Git.parseOid (fromJust (ghpTreeOid treeProxy'))
+    return (Tagged oid)
 
 data GitHubSignature = GitHubSignature
     { ghSignatureDate  :: Text
@@ -386,8 +544,8 @@ ghGet = GitHubRepository ask
 
 instance Git.Treeish Tree where
     type TreeRepository = GitHubRepository
-    modifyTree = undefined -- ghModifyTree
-    writeTree  = undefined -- ghWriteTree
+    modifyTree = ghModifyTree
+    writeTree  = ghWriteTree
 
 instance Git.Commitish Commit where
     type CommitRepository = GitHubRepository
@@ -413,30 +571,25 @@ withOpenGhRepository repo action = do
 
 withGitHubRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository a
                      -> IO (Either Github.Error a)
-withGitHubRepository owner repoName token action = do
-    putStrLn "withGitHubRepository.1"
-    bracket
-        (openOrCreateGhRepository owner repoName token)
-        (\repo -> case repo of
-              Left _ -> return ()
-              Right _ -> do
-                  putStrLn "withGitHubRepository.2"
-                  let name = case owner of
-                          GitHubUser n -> n
-                          GitHubOrganization n -> n
-                  putStrLn "withGitHubRepository.3"
-                  when (isJust token) $ do
-                      putStrLn "withGitHubRepository.4"
-                      result <- Github.deleteRepo
-                                (Github.GithubOAuth (T.unpack (fromJust token)))
-                                (T.unpack name) (T.unpack repoName)
-                      case result of
-                          Left e -> putStrLn $ "Could not delete repository: "
-                                           ++ show e
-                          Right _ -> return ())
-        (\repo -> case repo of
-              Left e -> return (Left e)
-              Right r -> Right <$> withOpenGhRepository r action)
+withGitHubRepository owner repoName token action =
+    let repoName' = if ".git" `T.isSuffixOf` repoName
+                    then T.take (T.length repoName - 4) repoName
+                    else repoName
+    in bracket
+       (openOrCreateGhRepository owner repoName' token)
+       (\repo -> case repo of
+             Left _ -> return ()
+             Right _ -> when (isJust token) $ do
+             let name = case owner of
+                     GitHubUser n -> n
+                     GitHubOrganization n -> n
+             _ <- Github.deleteRepo
+                  (Github.GithubOAuth (T.unpack (fromJust token)))
+                  (T.unpack name) (T.unpack repoName')
+             return ())
+       (\repo -> case repo of
+             Left e -> return (Left e)
+             Right r -> Right <$> withOpenGhRepository r action)
 
 openGhRepository :: GitHubOwner -> Github.Repo -> Maybe Text -> IO Repository
 openGhRepository owner repo token = do
@@ -462,7 +615,9 @@ createGhRepository owner repoName token = do
                 (Github.newRepo (T.unpack repoName))
                     { Github.newRepoHasIssues = Just False
                     , Github.newRepoAutoInit  = Just True }
-    liftIO $ threadDelay 10000000 -- wait ten seconds
+    -- jww (2013-02-05): I need a polling loop here, until the repository is
+    -- ready
+    liftIO $ threadDelay 30000000 -- wait thirty seconds
     putStrLn "createGhRepository.2"
     case result of
         Left x -> do putStrLn "createGhRepository.3"
@@ -481,9 +636,9 @@ openOrCreateGhRepository ::
 openOrCreateGhRepository owner repoName token = do
     putStrLn "openOrCreateGhRepository.1"
     result <- case owner of
-        GitHubUser name ->
+        GitHubUser name -> do
             Github.userRepo (T.unpack name) (T.unpack repoName)
-        GitHubOrganization name ->
+        GitHubOrganization name -> do
             Github.organizationRepo (T.unpack name) (T.unpack repoName)
     putStrLn "openOrCreateGhRepository.2"
     case result of

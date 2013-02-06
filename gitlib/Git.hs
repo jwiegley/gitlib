@@ -155,7 +155,7 @@ blobEntry :: RepositoryBase m => BlobOid m -> Bool -> TreeEntry m
 blobEntry = BlobEntry
 
 treeEntry :: RepositoryBase m => Tree m -> TreeEntry m
-treeEntry t = TreeEntry (treeRef t)
+treeEntry = TreeEntry . treeRef
 
 -- | A 'Tree' is anything that is "treeish".
 --

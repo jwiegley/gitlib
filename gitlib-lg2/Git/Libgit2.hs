@@ -13,6 +13,7 @@ module Git.Libgit2
        , Git.Oid(..), Tree(..), Commit(..)
        , withLgRepository, withOpenLgRepository
        , openLgRepository, createLgRepository, openOrCreateLgRepository
+       , addTracingBackend
        ) where
 
 import           Bindings.Libgit2

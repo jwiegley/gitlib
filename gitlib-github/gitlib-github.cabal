@@ -30,13 +30,14 @@ Library
     , data-default         >= 0.5.0
     , data-marshal         >= 0.1
     , failure              >= 0.2.0.1
-    , github               >= 0.4.1
+    , github               >= 0.5.0
     , hex                  >= 0.1.2
     , http-conduit         >= 1.8.5.1
     , network              >= 2.4.0.1
     , rest-client          >= 0.1.0.0
     , shakespeare-text     >= 1.0.0.5
     , stringable           >= 0.1.1
+    , system-filepath      >= 0.4.7
     , tagged               >= 0.4.4
     , time                 >= 1.4.0.1
     , text                 >= 0.11.2
