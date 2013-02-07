@@ -187,7 +187,7 @@ lgNewTree = do
         return (r,fptr)
 
     if r < 0
-        then failure Git.TreeCreateFailed
+        then failure (Git.TreeCreateFailed "Failed to create new tree builder")
         else do
         upds <- liftIO $ newIORef HashMap.empty
         info <- liftIO $ newIORef (Base Nothing Nothing)
@@ -211,7 +211,8 @@ lgLookupTree len oid =
                               (c'git_treebuilder_free builder)
                   return (r,fptr)
               if r < 0
-                  then failure Git.TreeCreateFailed
+                  then failure
+                       (Git.TreeCreateFailed "Failed to create tree builder")
                   else do
                   upds <- liftIO $ newIORef HashMap.empty
                   info <- liftIO $ newIORef (Base (Just (Tagged (Oid coid)))

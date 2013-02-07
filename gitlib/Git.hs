@@ -83,7 +83,7 @@ data Exception = BackendError Text
                | BlobEncodingUnknown Text
                | BlobLookupFailed
                | TranslationException Text
-               | TreeCreateFailed
+               | TreeCreateFailed Text
                | TreeBuilderCreateFailed
                | TreeBuilderInsertFailed
                | TreeBuilderRemoveFailed

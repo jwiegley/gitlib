@@ -365,10 +365,10 @@ doModifyTree t (name:names) createIfNotExist f = do
         -- assumed to always be changed, as we have no reliable method of
         -- testing object equality that is not O(n).
         ze <- f y
-        let contents = ghTreeContents t
-        case ze of
-            Nothing -> liftIO $ modifyIORef contents (HashMap.delete name)
-            Just z' -> liftIO $ modifyIORef contents (HashMap.insert name z')
+        liftIO $ modifyIORef (ghTreeContents t) $
+            case ze of
+                Nothing -> HashMap.delete name
+                Just z' -> HashMap.insert name z'
         return ze
 
         else
@@ -383,10 +383,13 @@ doModifyTree t (name:names) createIfNotExist f = do
             Just (Git.TreeEntry st') -> do
                 st <- Git.resolveTree st'
                 ze <- doModifyTree st names createIfNotExist f
-                liftIO $ modifyIORef (ghTreeOid t) (const Nothing)
-                liftIO $ modifyIORef (ghTreeContents t)
-                                     (HashMap.insert name
-                                      (Git.TreeEntry (Git.Known st)))
+                liftIO $ do
+                    modifyIORef (ghTreeOid t) (const Nothing)
+                    stc <- readIORef (ghTreeContents st)
+                    modifyIORef (ghTreeContents t) $
+                        if HashMap.null stc
+                        then HashMap.delete name
+                        else HashMap.insert name (Git.treeEntry st)
                 return ze
 
 ghModifyTree :: Tree -> FilePath -> Bool
@@ -402,12 +405,16 @@ splitPath path = T.splitOn "/" text
 
 ghWriteTree :: Tree -> GitHubRepository TreeOid
 ghWriteTree tree = do
-    contents   <- liftIO $ readIORef (ghTreeContents tree)
-    contents'  <- HashMap.traverseWithKey treeEntryToProxy contents
-    treeProxy' <- ghRestful "POST" "git/trees"
-                           (GitHubTreeProxy Nothing (HashMap.elems contents'))
-    oid <- Git.parseOid (fromJust (ghpTreeOid treeProxy'))
-    return (Tagged oid)
+    contents <- liftIO $ readIORef (ghTreeContents tree)
+    if HashMap.size contents > 0
+        then do
+        contents'  <- HashMap.traverseWithKey treeEntryToProxy contents
+        treeProxy' <- ghRestful "POST" "git/trees"
+                      (GitHubTreeProxy Nothing (HashMap.elems contents'))
+        oid <- Git.parseOid (fromJust (ghpTreeOid treeProxy'))
+        return (Tagged oid)
+
+        else failure (Git.TreeCreateFailed "Attempt to create an empty tree")
 
 data GitHubSignature = GitHubSignature
     { ghSignatureDate  :: Text
@@ -566,11 +573,7 @@ mapPair :: (a -> b) -> (a,a) -> (b,b)
 mapPair f (x,y) = (f x, f y)
 
 withOpenGhRepository :: Repository -> GitHubRepository a -> IO a
-withOpenGhRepository repo action = do
-    putStrLn "withOpenGhRepository.1"
-    r <- runReaderT (runGhRepository action) repo
-    putStrLn "withOpenGhRepository.2"
-    return r
+withOpenGhRepository repo action = runReaderT (runGhRepository action) repo
 
 withGitHubRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository a
                      -> IO (Either Github.Error a)
