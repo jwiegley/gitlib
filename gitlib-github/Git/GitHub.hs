@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Git.GitHub where
 
@@ -32,12 +33,15 @@ import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.Hex
 import           Data.IORef
+import           Data.List as L
 import           Data.Marshal.JSON ()
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
 import           Data.Text as T hiding (drop, map, null)
 import qualified Data.Text.Encoding as T
+import           Data.Time.Clock (UTCTime)
+import           Data.Time.Format (formatTime, parseTime)
 import           Data.Traversable (for)
 import           Debug.Trace
 import           Filesystem.Path.CurrentOS (FilePath)
@@ -48,6 +52,7 @@ import           Network.HTTP.Conduit hiding (Proxy, Response)
 import           Network.REST.Client
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
+import           System.Locale (defaultTimeLocale)
 import           Text.Shakespeare.Text (st)
 
 type Oid       = Git.Oid GitHubRepository
@@ -75,11 +80,10 @@ instance Git.RepositoryBase GitHubRepository where
         }
 
     data Commit GitHubRepository = GitHubCommit
-        { ghCommitSha       :: Oid
-        , ghCommitAuthor    :: GitHubSignature
-        , ghCommitCommitter :: Maybe GitHubSignature
+        { ghCommitOid       :: Maybe CommitOid
+        , ghCommitAuthor    :: Git.Signature
+        , ghCommitCommitter :: Maybe Git.Signature
         , ghCommitMessage   :: Text
-        , ghCommitEncoding  :: String
         , ghCommitTree      :: TreeRef
         , ghCommitParents   :: [CommitRef]
         }
@@ -94,14 +98,14 @@ instance Git.RepositoryBase GitHubRepository where
     updateRef    = undefined -- ghUpdateRef
     resolveRef   = undefined -- ghResolveRef
     allRefNames  = undefined -- ghAllRefNames
-    lookupCommit = undefined -- ghLookupCommit 40
-    lookupTree   = undefined -- ghLookupTree 40
+    lookupCommit = ghLookupCommit
+    lookupTree   = ghLookupTree
     lookupBlob   = ghLookupBlob
     lookupTag    = undefined
     lookupObject = undefined -- ghLookupObject
     newTree      = ghNewTree
     createBlob   = ghCreateBlob
-    createCommit = undefined -- ghCreateCommit
+    createCommit = ghCreateCommit
     createTag    = undefined
 
 data GitHubBlob = GitHubBlob
@@ -190,18 +194,25 @@ instance ToJSON Content where
 instance Default Content where
   def = Content B.empty "utf-8"
 
-instance FromJSON (Git.Oid GitHubRepository) where
-  parseJSON (Object v) =
-      Oid <$> (unsafePerformIO . unhex . T.encodeUtf8 <$> v .: "sha")
-  parseJSON _ = mzero
+-- instance FromJSON (Git.Oid GitHubRepository) where
+--   parseJSON (Object v) =
+--       Oid <$> (unsafePerformIO . unhex . T.encodeUtf8 <$> parseJSON v)
+--   parseJSON _ = mzero
 
-instance ToJSON (Git.Oid GitHubRepository) where
-  toJSON (Oid sha) = object ["sha" .= show sha]
+-- instance ToJSON (Git.Oid GitHubRepository) where
+--   toJSON (Oid sha) = toJSON (show sha)
+
+textToOid :: Text -> Oid
+textToOid = Oid . unsafePerformIO . unhex . T.encodeUtf8
+
+oidToText :: Oid -> Text
+oidToText = T.pack . show
 
 ghCreateBlob :: Git.BlobContents GitHubRepository -> GitHubRepository BlobOid
 ghCreateBlob (Git.BlobString content) =
-    Tagged <$> ghRestful "POST" "git/blobs"
-                         (Content (B64.encode content) "base64")
+    Tagged . textToOid
+        <$> ghRestful "POST" "git/blobs"
+                      (Content (B64.encode content) "base64")
 ghCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
 
 data GitHubTreeProxy = GitHubTreeProxy
@@ -416,50 +427,96 @@ ghWriteTree tree = do
 
         else failure (Git.TreeCreateFailed "Attempt to create an empty tree")
 
-data GitHubSignature = GitHubSignature
-    { ghSignatureDate  :: Text
-    , ghSignatureName  :: Text
-    , ghSignatureEmail :: Text } deriving Show
+-- data GitHubSignature = GitHubSignature
+--     { ghSignatureDate  :: Text
+--     , ghSignatureName  :: Text
+--     , ghSignatureEmail :: Text } deriving Show
 
-instance FromJSON GitHubSignature where
-  parseJSON (Object v) = GitHubSignature <$> v .: "date"
-                                         <*> v .: "name"
-                                         <*> v .: "email"
+parseGhTime :: Text -> UTCTime
+parseGhTime = fromJust . parseTime defaultTimeLocale "%Y-%m-%dT%H%M%S%z"
+              . T.unpack . T.filter (/= ':')
+
+formatGhTime :: UTCTime -> Text
+formatGhTime t =
+    let fmt   = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" t
+        (b,a) = L.splitAt (L.length fmt - 2) fmt
+    in T.pack (b ++ ":" ++ a)
+
+instance FromJSON Git.Signature where
+  parseJSON (Object v) = Git.Signature <$> v .: "name"
+                                       <*> v .: "email"
+                                       <*> (parseGhTime <$> v .: "date")
   parseJSON _ = mzero
 
-instance ToJSON GitHubSignature where
-  toJSON (GitHubSignature date name email) =
-      object [ "date"  .= date
-             , "name"  .= name
-             , "email" .= email ]
+instance ToJSON Git.Signature where
+  toJSON (Git.Signature name email date) =
+      object [ "name"  .= name
+             , "email" .= email
+             , "date"  .= formatGhTime date ]
 
-instance FromJSON Commit where
+data GitHubCommitProxy = GitHubCommitProxy
+    { ghpCommitOid       :: Text
+    , ghpCommitAuthor    :: Git.Signature
+    , ghpCommitCommitter :: Maybe Git.Signature
+    , ghpCommitMessage   :: Text
+    , ghpCommitTree      :: Oid
+    , ghpCommitParents   :: [Oid]
+    } deriving Show
+
+instance FromJSON GitHubCommitProxy where
   parseJSON (Object v) =
-      GitHubCommit <$> v .: "sha"
-                   <*> v .: "author"
-                   <*> v .:? "committer"
-                   <*> v .: "message"
-                   <*> v .: "encoding"
-                   <*> (Git.ByOid . Tagged <$> v .: "tree")
-                   <*> (fmap (Git.ByOid . Tagged) <$> v .: "parents")
+      GitHubCommitProxy <$> v .: "sha"
+                        <*> v .: "author"
+                        <*> v .:? "committer"
+                        <*> v .: "message"
+                        <*> (textToOid <$> v .: "tree")
+                        <*> (fmap textToOid <$> v .: "parents")
   parseJSON _ = mzero
 
-instance ToJSON Commit where
-  toJSON c = object $ [ "sha"       .= ghCommitSha c
-                      , "author"    .= ghCommitAuthor c
-                      , "message"   .= ghCommitMessage c
-                      , "encoding"  .= ghCommitEncoding c
-                      , "tree"      .= ("tree" :: Text) -- ghCommitTree c
-                      , "parents"   .= ("parents" :: Text) -- ghCommitParents c
+instance ToJSON GitHubCommitProxy where
+  toJSON c = object $ [ "author"    .= ghpCommitAuthor c
+                      , "message"   .= ghpCommitMessage c
+                      , "tree"      .= oidToText (ghpCommitTree c)
+                      , "parents"   .= map oidToText (ghpCommitParents c)
                       ] <>
-                      [ "committer" .= fromJust (ghCommitCommitter c) |
-                                       isJust (ghCommitCommitter c) ]
+                      [ "committer" .= fromJust (ghpCommitCommitter c) |
+                                       isJust (ghpCommitCommitter c) ]
 
-ghReadCommit :: CommitOid -> GitHubRepository Commit
-ghReadCommit oid = ghRestful "GET" ("git/commits/" <> Git.renderOid oid) ()
+proxyToCommit :: GitHubCommitProxy -> Commit
+proxyToCommit cp = GitHubCommit
+    { ghCommitOid       = Just (Tagged (textToOid (ghpCommitOid cp)))
+    , ghCommitAuthor    = ghpCommitAuthor cp
+    , ghCommitCommitter = ghpCommitCommitter cp
+    , ghCommitMessage   = ghpCommitMessage cp
+    , ghCommitTree      = Git.ByOid (Tagged (ghpCommitTree cp))
+    , ghCommitParents   = map (Git.ByOid . Tagged) (ghpCommitParents cp)
+    }
 
-ghWriteCommit :: Commit -> GitHubRepository Commit
-ghWriteCommit commit = ghRestful "POST" "git/commits" commit
+ghLookupCommit :: CommitOid -> GitHubRepository Commit
+ghLookupCommit oid = do
+    cp <- ghRestful "GET" ("git/commits/" <> Git.renderOid oid) ()
+    return (proxyToCommit cp)
+
+ghCreateCommit :: [CommitRef] -> TreeRef
+               -> Git.Signature -> Git.Signature -> Text -> Maybe Text
+               -> GitHubRepository Commit
+ghCreateCommit parents tree author committer message ref = do
+    treeOid <- Git.treeRefOid tree
+    commit' <- ghRestful "POST" "git/commits" $ GitHubCommitProxy
+                { ghpCommitOid       = ""
+                , ghpCommitAuthor    = author
+                , ghpCommitCommitter = Just committer
+                , ghpCommitMessage   = message
+                , ghpCommitTree      = unTagged treeOid
+                , ghpCommitParents   = map (unTagged . Git.commitRefOid) parents
+                }
+
+    let commit = proxyToCommit commit'
+    when (isJust ref) $ do
+        ghUpdateRef (fromJust ref) (fromJust (ghCommitOid commit))
+        return ()
+
+    return commit
 
 data GitHubObjectRef = GitHubObjectRef
     { objectRefType :: Text

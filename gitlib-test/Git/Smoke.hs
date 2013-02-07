@@ -43,79 +43,79 @@ sampleCommit tr sig =
 smokeTestSpec :: (Repository m, MonadIO m)
               => (FilePath -> Bool -> m () -> IO ()) -> Spec
 smokeTestSpec wr = describe "Smoke tests" $ do
-  it "create a single blob" $ do
-    withNewRepository wr "singleBlob.git" $ do
-      createBlobUtf8 "Hello, world!\n"
+  -- it "create a single blob" $ do
+  --   withNewRepository wr "singleBlob.git" $ do
+  --     createBlobUtf8 "Hello, world!\n"
 
-      x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
-      liftIO $ x @?= "Hello, world!\n"
+  --     x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+  --     liftIO $ x @?= "Hello, world!\n"
 
-      -- jww (2013-02-01): Restore when S3 support prefix lookups
-      -- x <- catBlob "af5626b"
-      -- liftIO $ x @?= "Hello, world!\n"
+  --     -- jww (2013-02-01): Restore when S3 support prefix lookups
+  --     -- x <- catBlob "af5626b"
+  --     -- liftIO $ x @?= "Hello, world!\n"
 
-  it "create a single tree" $ do
-    withNewRepository wr "singleTree.git" $ do
-      hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
-      x <- oid tr
-      liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
-  it "create two trees" $ do
-    withNewRepository wr "twoTrees.git" $ do
-      hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
-      x <- oid tr
-      liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
-      goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlob tr "goodbye/files/world.txt" goodbye
-      x <- oid tr
-      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-
-  it "delete an item from a tree" $ do
-    withNewRepository wr "deleteTree.git" $ do
-      hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
-      x <- oid tr
-      liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
-      putBlob tr "goodbye/files/world.txt"
-          =<< createBlobUtf8 "Goodbye, world!\n"
-      x <- oid tr
-      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
-
-      -- Confirm that deleting world.txt also deletes the now-empty
-      -- subtree goodbye/files, which also deletes the then-empty subtree
-      -- goodbye, returning us back the original tree.
-      dropFromTree tr "goodbye/files/world.txt"
-      x <- oid tr
-      liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
-
-  -- it "create a single commit" $ do
-  --   withNewRepository wr "createCommit.git" $ do
+  -- it "create a single tree" $ do
+  --   withNewRepository wr "singleTree.git" $ do
   --     hello <- createBlobUtf8 "Hello, world!\n"
   --     tr <- newTree
   --     putBlob tr "hello/world.txt" hello
+  --     x <- oid tr
+  --     liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
+  -- it "create two trees" $ do
+  --   withNewRepository wr "twoTrees.git" $ do
+  --     hello <- createBlobUtf8 "Hello, world!\n"
+  --     tr <- newTree
+  --     putBlob tr "hello/world.txt" hello
+  --     x <- oid tr
+  --     liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   --     goodbye <- createBlobUtf8 "Goodbye, world!\n"
   --     putBlob tr "goodbye/files/world.txt" goodbye
   --     x <- oid tr
   --     liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  --     -- The Oid has been cleared in tr, so this tests that it gets
-  --     -- written as needed.
-  --     let sig  = Signature {
-  --             signatureName  = "John Wiegley"
-  --           , signatureEmail = "johnw@fpcomplete.com"
-  --           , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+  -- it "delete an item from a tree" $ do
+  --   withNewRepository wr "deleteTree.git" $ do
+  --     hello <- createBlobUtf8 "Hello, world!\n"
+  --     tr <- newTree
+  --     putBlob tr "hello/world.txt" hello
+  --     x <- oid tr
+  --     liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  --     c <- sampleCommit tr sig
-  --     let x = renderOid (commitOid c)
-  --     liftIO $ x @?= "df1b2a6bfc78e57ac336de9ca6ed3ae8c850104d"
+  --     putBlob tr "goodbye/files/world.txt"
+  --         =<< createBlobUtf8 "Goodbye, world!\n"
+  --     x <- oid tr
+  --     liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+
+  --     -- Confirm that deleting world.txt also deletes the now-empty
+  --     -- subtree goodbye/files, which also deletes the then-empty subtree
+  --     -- goodbye, returning us back the original tree.
+  --     dropFromTree tr "goodbye/files/world.txt"
+  --     x <- oid tr
+  --     liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
+  it "create a single commit" $ do
+    withNewRepository wr "createCommit.git" $ do
+      hello <- createBlobUtf8 "Hello, world!\n"
+      tr <- newTree
+      putBlob tr "hello/world.txt" hello
+
+      goodbye <- createBlobUtf8 "Goodbye, world!\n"
+      putBlob tr "goodbye/files/world.txt" goodbye
+      x <- oid tr
+      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+
+      -- The Oid has been cleared in tr, so this tests that it gets
+      -- written as needed.
+      let sig  = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+
+      c <- sampleCommit tr sig
+      let x = renderOid (commitOid c)
+      liftIO $ x @?= "df1b2a6bfc78e57ac336de9ca6ed3ae8c850104d"
 
   -- it "create two commits" $ do
   --   withNewRepository wr "createTwoCommits.git" $ do
