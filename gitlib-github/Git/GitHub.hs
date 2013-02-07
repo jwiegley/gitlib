@@ -17,6 +17,7 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Cont
 import           Control.Monad.Trans.Reader
 import           Data.Aeson hiding (Success)
 import           Data.Attempt
@@ -26,6 +27,7 @@ import qualified Data.ByteString.Char8 as BC
 import           Data.Conduit
 import           Data.Default ( Default(..) )
 import           Data.Foldable (for_)
+import           Data.Function
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.Hex
@@ -36,6 +38,7 @@ import           Data.Monoid
 import           Data.Tagged
 import           Data.Text as T hiding (drop, map, null)
 import qualified Data.Text.Encoding as T
+import           Data.Traversable (for)
 import           Debug.Trace
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
@@ -601,54 +604,56 @@ openGhRepository owner repo token = do
 
 createGhRepository ::
     GitHubOwner -> Text -> Text -> IO (Either Github.Error Repository)
-createGhRepository owner repoName token = do
-    putStrLn "createGhRepository.1"
-    result <- case owner of
-        GitHubUser _ ->
-            Github.createRepo (Github.GithubOAuth (T.unpack token))
-                (Github.newRepo (T.unpack repoName))
-                    { Github.newRepoHasIssues = Just False
-                    , Github.newRepoAutoInit  = Just True }
-        GitHubOrganization name ->
-            Github.createOrganizationRepo
-                (Github.GithubOAuth (T.unpack token)) (T.unpack name)
-                (Github.newRepo (T.unpack repoName))
-                    { Github.newRepoHasIssues = Just False
-                    , Github.newRepoAutoInit  = Just True }
-    -- jww (2013-02-05): I need a polling loop here, until the repository is
-    -- ready
-    liftIO $ threadDelay 30000000 -- wait thirty seconds
-    putStrLn "createGhRepository.2"
-    case result of
-        Left x -> do putStrLn "createGhRepository.3"
-                     return (Left x)
-        Right repo -> do
-            putStrLn "createGhRepository.4"
+createGhRepository owner repoName token =
+    let auth = Github.GithubOAuth (T.unpack token)
+        newr = (Github.newRepo (T.unpack repoName))
+                   { Github.newRepoHasIssues = Just False
+                   , Github.newRepoAutoInit  = Just True }
+    in either (return . Left) confirmCreation =<<
+       case owner of
+           GitHubUser _ -> Github.createRepo auth newr
+           GitHubOrganization name ->
+               Github.createOrganizationRepo auth (T.unpack name) newr
+  where
+    confirmCreation _ = do
+        repo <- query (20 :: Int)
+        for repo $ \r -> do
             mgr <- newManager def
-            return $ Right $ Repository
+            return Repository
                 { httpManager = Just mgr
                 , gitHubOwner = owner
-                , gitHubRepo  = repo
+                , gitHubRepo  = r
                 , gitHubToken = Just token }
 
-openOrCreateGhRepository ::
-    GitHubOwner -> Text -> Maybe Text -> IO (Either Github.Error Repository)
-openOrCreateGhRepository owner repoName token = do
-    putStrLn "openOrCreateGhRepository.1"
-    result <- case owner of
+    query count = do
+        -- Poll every five seconds for 100 seconds, waiting for the repository
+        -- to be created, since this happens asynchronously on the GitHub
+        -- servers.
+        repo <- liftIO $ threadDelay 5000000
+                >> doesRepoExist owner repoName
+        case repo of
+            Left l
+                | count < 0 -> return (Left l)
+                | otherwise -> query (count - 1)
+            Right r -> return (Right r)
+
+doesRepoExist :: GitHubOwner -> Text -> IO (Either Github.Error Github.Repo)
+doesRepoExist owner repoName =
+    case owner of
         GitHubUser name -> do
             Github.userRepo (T.unpack name) (T.unpack repoName)
         GitHubOrganization name -> do
             Github.organizationRepo (T.unpack name) (T.unpack repoName)
-    putStrLn "openOrCreateGhRepository.2"
-    case result of
-        Left _   -> case token of
-            Just tok -> do putStrLn "openOrCreateGhRepository.3"
-                           createGhRepository owner repoName tok
-            Nothing -> do putStrLn "openOrCreateGhRepository.4"
-                          return (Left (Github.UserError
-                                     "Authentication token not provided"))
-        Right r' -> do putStrLn "openOrCreateGhRepository.5"
-                       Right <$> openGhRepository owner r' token
+
+openOrCreateGhRepository ::
+    GitHubOwner -> Text -> Maybe Text -> IO (Either Github.Error Repository)
+openOrCreateGhRepository owner repoName token = do
+    exists <- doesRepoExist owner repoName
+    case exists of
+        Left _ -> case token of
+            Just tok -> createGhRepository owner repoName tok
+            Nothing  -> return (Left (Github.UserError
+                                      "Authentication token not provided"))
+        Right r -> Right <$> openGhRepository owner r token
 
 -- GitHub.hs
