@@ -649,9 +649,6 @@ instance Git.Treeish Commit where
         Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
     writeTree c = Git.commitTree' c >>= Git.writeTree
 
-mapPair :: (a -> b) -> (a,a) -> (b,b)
-mapPair f (x,y) = (f x, f y)
-
 withOpenGhRepository :: Repository -> GitHubRepository a -> IO a
 withOpenGhRepository repo action = runReaderT (runGhRepository action) repo
 
@@ -669,9 +666,9 @@ withGitHubRepository owner repoName token action =
              let name = case owner of
                      GitHubUser n -> n
                      GitHubOrganization n -> n
-             -- _ <- Github.deleteRepo
-             --      (Github.GithubOAuth (T.unpack (fromJust token)))
-             --      (T.unpack name) (T.unpack repoName')
+             _ <- Github.deleteRepo
+                  (Github.GithubOAuth (T.unpack (fromJust token)))
+                  (T.unpack name) (T.unpack repoName')
              return ())
        (\repo -> case repo of
              Left e -> return (Left e)

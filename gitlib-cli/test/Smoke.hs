@@ -29,7 +29,7 @@ main = do
         (defaultConfig { configVerbose = True })
         (Git.smokeTestSpec
          (\path _ act -> do
-               result <- Cli.withCliRepository path act
+               result <- Cli.withCmdLineRepository path True act
                either (\e -> do putStrLn $ "Failed: " ++ show e
                                 exitFailure)
                       (const (return ()))
