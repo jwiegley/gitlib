@@ -10,6 +10,7 @@ import           Aws.Core
 import           Aws.S3 hiding (bucketName)
 import           Control.Applicative
 import           Control.Monad
+import           Data.Maybe (fromMaybe, isNothing)
 import           Data.Text as T
 import qualified Git.Libgit2 as Lg
 import qualified Git.S3 as Git
@@ -24,17 +25,22 @@ import           Test.Hspec.Runner
 
 main :: IO ()
 main = do
-    bucket    <- T.pack <$> getEnv "S3_BUCKET"
-    accessKey <- T.pack <$> getEnv "AWS_ACCESS_KEY"
-    secretKey <- T.pack <$> getEnv "AWS_SECRET_KEY"
+    bucket    <- fmap T.pack <$> lookupEnv "S3_BUCKET"
+    accessKey <- fmap T.pack <$> lookupEnv "AWS_ACCESS_KEY"
+    secretKey <- fmap T.pack <$> lookupEnv "AWS_SECRET_KEY"
     summary   <-
         hspecWith
         (defaultConfig { configVerbose = True })
         (Git.smokeTestSpec
          (\path _ act ->
            Lg.withLgRepository path True
-           (Git.addS3Backend bucket "" accessKey secretKey
-                             Nothing (Just "127.0.0.1") Error
+           (Git.addS3Backend (fromMaybe "test-bucket" bucket)
+                             ""
+                             (fromMaybe "" accessKey)
+                             (fromMaybe "" secretKey)
+                             Nothing (if isNothing bucket
+                                      then Just "127.0.0.1"
+                                      else Nothing) Error
             >> act)))
     when (summaryFailures summary > 0) $ exitFailure
     return ()

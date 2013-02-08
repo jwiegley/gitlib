@@ -1,13 +1,10 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Git.CmdLine where
 
@@ -18,8 +15,6 @@ import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Reader
--- import           Data.Attempt
-import           Data.ByteString as B hiding (pack, putStrLn, map, null)
 import           Data.Conduit
 import           Data.Function
 import           Data.HashMap.Strict (HashMap)
@@ -34,7 +29,6 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
-import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -52,11 +46,13 @@ type Oid       = Git.Oid CmdLineRepository
 type BlobOid   = Git.BlobOid CmdLineRepository
 type TreeOid   = Git.TreeOid CmdLineRepository
 type CommitOid = Git.CommitOid CmdLineRepository
+type TagOid    = Git.TagOid CmdLineRepository
 
 type Blob      = Git.Blob CmdLineRepository
 type Tree      = Git.Tree CmdLineRepository
 type TreeEntry = Git.TreeEntry CmdLineRepository
 type Commit    = Git.Commit CmdLineRepository
+type Tag       = Git.Tag CmdLineRepository
 
 type TreeRef   = Git.TreeRef CmdLineRepository
 type CommitRef = Git.CommitRef CmdLineRepository
@@ -80,33 +76,29 @@ instance Git.RepositoryBase CmdLineRepository where
         , cliCommitParents   :: [CommitRef]
         }
 
-    data Tag CmdLineRepository = Tag { tagCommit :: CommitRef }
+    data Tag CmdLineRepository = CmdLineTag
+        { cliTagCommit :: CommitRef }
 
     parseOid = return . Oid . TL.fromStrict
     renderOid (Tagged (Oid x)) = TL.toStrict x
 
-    lookupRef    = undefined -- cliLookupRef
-    updateRef    = undefined -- cliUpdateRef
-    resolveRef   = undefined -- cliResolveRef
-    allRefNames  = undefined -- cliAllRefNames
+    lookupRef    = cliLookupRef
+    updateRef    = cliUpdateRef
+    deleteRef    = cliDeleteRef
+    resolveRef   = cliResolveRef
+    allRefs      = cliAllRefs
     lookupCommit = cliLookupCommit
     lookupTree   = cliLookupTree
     lookupBlob   = cliLookupBlob
-    lookupTag    = undefined
+    lookupTag    = undefined -- cliLookupTag
     lookupObject = undefined -- cliLookupObject
     newTree      = cliNewTree
     createBlob   = cliCreateBlob
     createCommit = cliCreateCommit
-    createTag    = undefined
-
-data CliBlob = CliBlob
-    { cliBlobContent  :: ByteString
-    , cliBlobEncoding :: Text
-    , cliBlobSha      :: Text
-    , cliBlobSize     :: Int } deriving Show
+    createTag    = cliCreateTag
 
 instance Show (Git.Oid CmdLineRepository) where
-    show = T.unpack . Git.renderOid . Tagged
+    show (Oid x) = show x
 
 instance Ord (Git.Oid CmdLineRepository) where
     compare (Oid l) (Oid r) = compare l r
@@ -121,22 +113,31 @@ instance MonadUnsafeIO CmdLineRepository where
     unsafeLiftIO = return . unsafePerformIO
 
 instance MonadThrow CmdLineRepository where
-    -- monadThrow :: Exception e => e -> m a
     monadThrow = throw
 
-cliLookupBlob :: BlobOid -> CmdLineRepository Blob
-cliLookupBlob (Tagged (Oid sha)) = do
+doRunGit :: (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
+         -> CmdLineRepository a
+doRunGit f args act = do
     repo <- cliGet
-    out  <- shelly $ silently $
-            run "git" [ "--git-dir", repoPath repo, "cat-file", "-p", sha ]
-    return (Git.BlobString (T.encodeUtf8 (TL.toStrict out)))
+    shelly $ silently $ do
+        act
+        f "git" $ ["--git-dir", repoPath repo] <> args
+
+runGit :: [TL.Text] -> CmdLineRepository TL.Text
+runGit = flip (doRunGit run) (return ())
+
+runGit_ :: [TL.Text] -> CmdLineRepository ()
+runGit_ = flip (doRunGit run_) (return ())
+
+cliLookupBlob :: BlobOid -> CmdLineRepository Blob
+cliLookupBlob (Tagged (Oid sha)) =
+    runGit ["cat-file", "-p", sha]
+        >>= return . Git.BlobString . T.encodeUtf8 . TL.toStrict
 
 cliCreateBlob :: Git.BlobContents CmdLineRepository -> CmdLineRepository BlobOid
 cliCreateBlob (Git.BlobString content) = do
-    repo <- cliGet
-    oid  <- shelly $ silently $ do
-        setStdin (TL.fromStrict (T.decodeUtf8 content))
-        run "git" ["--git-dir", repoPath repo, "hash-object", "-w", "--stdin"]
+    oid  <- doRunGit run ["hash-object", "-w", "--stdin"]
+            $ setStdin (TL.fromStrict (T.decodeUtf8 content))
     return (Tagged (Oid (TL.init oid)))
 
 cliCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
@@ -147,10 +148,8 @@ cliNewTree = CmdLineTree <$> (liftIO $ newIORef Nothing)
 
 cliLookupTree :: TreeOid -> CmdLineRepository Tree
 cliLookupTree oid@(Tagged (Oid sha)) = do
-    repo        <- cliGet
-    contents    <- shelly $ silently $ do
-        run "git" ["--git-dir", repoPath repo, "ls-tree", "-z", sha]
-    oidRef      <- liftIO $ newIORef (Just oid)
+    contents <- runGit ["ls-tree", "-z", sha]
+    oidRef   <- liftIO $ newIORef (Just oid)
     -- Even though the tree entries are separated by \NUL, for whatever reason
     -- @git ls-tree@ also outputs a newline at the end.
     contentsRef <- liftIO $ newIORef $ HashMap.fromList $
@@ -252,12 +251,10 @@ splitPath path = T.splitOn "/" text
 
 cliWriteTree :: Tree -> CmdLineRepository TreeOid
 cliWriteTree tree = do
-    repo     <- cliGet
     contents <- liftIO $ readIORef (cliTreeContents tree)
     rendered <- mapM renderLine (HashMap.toList contents)
-    oid      <- shelly $ silently $ do
-        setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
-        run "git" ["--git-dir", repoPath repo, "mktree", "-z", "--missing"]
+    oid      <- doRunGit run ["mktree", "-z", "--missing"]
+                $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
     return (Tagged (Oid (TL.init oid)))
   where
     renderLine (path, Git.BlobEntry (Tagged (Oid sha)) exe) =
@@ -278,9 +275,7 @@ formatCliTime = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
 
 cliLookupCommit :: CommitOid -> CmdLineRepository Commit
 cliLookupCommit oid@(Tagged (Oid sha)) = do
-    repo <- cliGet
-    output <- shelly $ silently $ do
-        run "git" $ ["--git-dir", repoPath repo, "cat-file", "-p", sha]
+    output <- runGit ["cat-file", "-p", sha]
     case parse parseOutput "" output of
         Left e -> do liftIO $ putStrLn $ "Commit parse failed: " ++ show e
                      failure Git.CommitLookupFailed
@@ -313,27 +308,25 @@ cliCreateCommit :: [CommitRef] -> TreeRef
                -> Git.Signature -> Git.Signature -> Text -> Maybe Text
                -> CmdLineRepository Commit
 cliCreateCommit parents tree author committer message ref = do
-    repo    <- cliGet
     treeOid <- Git.treeRefOid tree
     let parentOids = map Git.commitRefOid parents
 
-    oid <- shelly $ silently $ do
-        setenv "GIT_AUTHOR_NAME"  (TL.fromStrict (Git.signatureName author))
-        setenv "GIT_AUTHOR_EMAIL" (TL.fromStrict (Git.signatureEmail author))
-        setenv "GIT_AUTHOR_DATE"
-            (TL.fromStrict (formatCliTime (Git.signatureWhen author)))
-        setenv "GIT_COMMITTER_NAME"
-            (TL.fromStrict (Git.signatureName committer))
-        setenv "GIT_COMMITTER_EMAIL"
-            (TL.fromStrict (Git.signatureEmail committer))
-        setenv "GIT_COMMITTER_DATE"
-            (TL.fromStrict (formatCliTime (Git.signatureWhen committer)))
-
-        setStdin $ TL.fromStrict message
-        run "git" $ ["--git-dir", repoPath repo, "commit-tree"]
-                 <> L.concat [["-p", TL.fromStrict (Git.renderOid poid)] |
-                              poid <- parentOids]
-                 <> [TL.fromStrict (Git.renderOid treeOid)]
+    oid <- doRunGit run
+           (["commit-tree"]
+            <> L.concat [["-p", TL.fromStrict (Git.renderOid poid)] |
+                         poid <- parentOids]
+            <> [TL.fromStrict (Git.renderOid treeOid)])
+           $ do mapM_ (\(var,f,val) -> setenv var (TL.fromStrict (f val)))
+                      [ ("GIT_AUTHOR_NAME",  Git.signatureName,  author)
+                      , ("GIT_AUTHOR_EMAIL", Git.signatureEmail, author)
+                      , ("GIT_AUTHOR_DATE",
+                         formatCliTime . Git.signatureWhen, author)
+                      , ("GIT_COMMITTER_NAME",  Git.signatureName,  committer)
+                      , ("GIT_COMMITTER_EMAIL", Git.signatureEmail, committer)
+                      , ("GIT_COMMITTER_DATE",
+                         formatCliTime . Git.signatureWhen, committer)
+                      ]
+                setStdin $ TL.fromStrict message
 
     let commit = CmdLineCommit
             { cliCommitOid       = Just (Tagged (Oid (TL.init oid)))
@@ -344,7 +337,8 @@ cliCreateCommit parents tree author committer message ref = do
             , cliCommitParents   = map Git.ByOid parentOids
             }
     when (isJust ref) $
-        void (cliUpdateRef (fromJust ref) (fromJust (cliCommitOid commit)))
+        void (cliUpdateRef (fromJust ref)
+              (Git.RefObj (Git.ByOid (fromJust (cliCommitOid commit)))))
 
     return commit
 
@@ -356,27 +350,53 @@ data CliReference = CliReference
     { referenceRef    :: Text
     , referenceObject :: CliObjectRef } deriving Show
 
-cliGetRef :: Text -> CmdLineRepository Reference
-cliGetRef ref = undefined -- cliRestful "GET" ("git/" <> ref) ()
+makeRef :: [TL.Text] -> Reference
+makeRef [sha,name] =
+    Git.Reference (TL.toStrict name)
+                  (Git.RefObj (Git.ByOid (Tagged (Oid sha))))
+makeRef _ = error "Impossible"
 
-cliGetAllRefs :: Text -> CmdLineRepository [Reference]
-cliGetAllRefs namespace = undefined -- cliRestful "GET" ("git/" <> namespace) ()
+cliLookupRef :: Text -> CmdLineRepository Reference
+cliLookupRef refName = makeRef . TL.words
+                       <$> runGit ["show-ref", TL.fromStrict refName]
 
-cliCreateRef :: Reference -> CmdLineRepository Reference
-cliCreateRef ref = undefined -- cliRestful "POST" "git/refs" ref
+cliUpdateRef :: Text -> Git.RefTarget CmdLineRepository Commit
+             -> CmdLineRepository Reference
+cliUpdateRef refName refObj@(Git.RefObj commitRef) = do
+    let Tagged (Oid sha) = Git.commitRefOid commitRef
+    runGit_ ["update-ref", TL.fromStrict refName, sha]
+    return (Git.Reference refName refObj)
 
-cliUpdateRef :: Text -> CommitOid -> CmdLineRepository Reference
-cliUpdateRef ref sha = do
-    -- jww (2013-01-12): restfulEx with a state argument is awkward.  Maybe
-    -- have addQueryParam take a third parameter that modifies a RESTfulM's
-    -- internal state value, and then do restful ... & addQueryParam, where &
-    -- = flip ($)
-    -- cliRestfulEx "PATCH" ("git/" <> ref) sha
-    --     $ addQueryParam "force" "true"
-    return undefined
+cliUpdateRef refName refObj@(Git.RefSymbolic targetName) = do
+    runGit_ ["symbolic-ref", TL.fromStrict refName, TL.fromStrict targetName]
+    return (Git.Reference refName refObj)
 
 cliDeleteRef :: Text -> CmdLineRepository ()
-cliDeleteRef ref = undefined
+cliDeleteRef refName = runGit_ ["update-ref", "-d", TL.fromStrict refName]
+
+cliAllRefs :: CmdLineRepository [Reference]
+cliAllRefs = map (makeRef . TL.words) . TL.lines <$> runGit ["show-ref"]
+
+cliResolveRef :: Text -> CmdLineRepository CommitRef
+cliResolveRef refName = Git.ByOid . Tagged . Oid . TL.init
+                        <$> runGit ["rev-parse", TL.fromStrict refName]
+
+-- cliLookupTag :: TagOid -> CmdLineRepository Tag
+-- cliLookupTag oid = undefined
+
+cliCreateTag :: CommitOid -> Git.Signature -> Text -> Text
+             -> CmdLineRepository Tag
+cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
+    doRunGit run_ ["mktag"] $ setStdin $ TL.unlines $
+        [ "object " <> sha
+        , "type commit"
+        , "tag " <> TL.fromStrict name
+        , "tagger " <> TL.fromStrict (Git.signatureName tagger)
+          <> " <" <> TL.fromStrict (Git.signatureEmail tagger) <> "> "
+          <> TL.pack (formatTime defaultTimeLocale "%s %z"
+                      (Git.signatureWhen tagger))
+        , ""] <> TL.lines (TL.fromStrict msg)
+    return $ CmdLineTag (Git.ByOid oid)
 
 data Repository = Repository { repoPath :: TL.Text } deriving Show
 
@@ -392,7 +412,8 @@ instance Applicative CmdLineRepository where
 
 instance Monad CmdLineRepository where
     return = CmdLineRepository . return
-    CmdLineRepository m >>= f = CmdLineRepository (m >>= runCmdLineRepository . f)
+    CmdLineRepository m >>= f =
+        CmdLineRepository (m >>= runCmdLineRepository . f)
 
 instance MonadIO CmdLineRepository where
     liftIO m = CmdLineRepository (liftIO m)
@@ -416,9 +437,8 @@ instance Git.Commitish Commit where
 
 instance Git.Treeish Commit where
     type TreeRepository = CmdLineRepository
-    modifyTree c path createIfNotExist f =
-        Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
-    writeTree c = Git.commitTree' c >>= Git.writeTree
+    modifyTree = Git.defaultCommitModifyTree
+    writeTree  = Git.defaultCommitWriteTree
 
 withOpenCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
 withOpenCmdLineRepository repo action =

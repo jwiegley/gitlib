@@ -79,6 +79,7 @@ instance Git.RepositoryBase LgRepository where
     renderOid    = lgRenderOid
     lookupRef    = lgLookupRef
     updateRef    = lgUpdateRef
+    deleteRef    = lgDeleteRef
     resolveRef   = lgResolveRef
     allRefNames  = lgAllRefNames
     lookupCommit = lgLookupCommit 40
@@ -504,7 +505,7 @@ lgCreateCommit parents tree author committer logText ref = do
                 parents' <- newArray pptrs'
                 r <- c'git_commit_create_oid coid' repoPtr
                      update_ref author' committer'
-                     message_encoding message toid'
+                     nullPtr message toid'
                      (fromIntegral (L.length parents)) parents'
                 when (r < 0) $ throwIO Git.CommitCreateFailed
                 return coid
@@ -605,9 +606,19 @@ lgResolveRef name = do
 
 --renameRef = c'git_reference_rename
 
--- int git_reference_delete(git_reference *ref)
-
---deleteRef = c'git_reference_delete
+lgDeleteRef :: Text -> LgRepository ()
+lgDeleteRef name = do
+    repo <- lgGet
+    r <- liftIO $ alloca $ \ptr ->
+        withCStringable name $ \namePtr ->
+        withForeignPtr (repoObj repo) $ \repoPtr -> do
+            r <- c'git_reference_lookup ptr repoPtr namePtr
+            if r < 0
+                then return r
+                else do
+                ref <- peek ptr
+                c'git_reference_delete ref
+    when (r < 0) $ failure (Git.ReferenceDeleteFailed name)
 
 -- int git_reference_packall(git_repository *repo)
 

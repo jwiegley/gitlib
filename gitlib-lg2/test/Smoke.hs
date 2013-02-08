@@ -23,8 +23,9 @@ main = do
     summary <- hspecWith (defaultConfig { configVerbose = True })
                          (Git.smokeTestSpec
                           (\path _ act ->
-                            Lg.withLgRepository path True
-                                (Lg.addTracingBackend >> act)))
+                            Lg.withLgRepository path True act
+                                -- (Lg.addTracingBackend >> act)
+                          ))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

@@ -88,6 +88,9 @@ instance Git.RepositoryBase MockRepository where
     updateRef name commit = do
         liftIO $ Prelude.putStrLn $ "updateRef.."
         return undefined
+    deleteRef name = do
+        liftIO $ Prelude.putStrLn $ "deleteRef.."
+        return undefined
     resolveRef name = do
         liftIO $ Prelude.putStrLn $ "resolveRef.."
         return undefined
@@ -109,7 +112,7 @@ instance Git.RepositoryBase MockRepository where
 
     lookupObject oidText = do
         if oidText == "af5626b"
-            then return (Git.BlobRef
+            then return (Git.BlobObj
                          (Git.Known (Git.BlobString "Hello, world!\n")))
             else undefined
 
@@ -146,8 +149,8 @@ instance Git.Commitish Commit where
 
 instance Git.Treeish Commit where
     type TreeRepository = MockRepository
-    modifyTree = undefined
-    writeTree  = undefined
+    modifyTree = Git.defaultCommitModifyTree
+    writeTree  = Git.defaultCommitWriteTree
 
 withOpenMockRepository :: Repository -> MockRepository a -> IO a
 withOpenMockRepository repo action =

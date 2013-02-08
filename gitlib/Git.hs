@@ -43,8 +43,13 @@ class (Applicative m, Monad m, Failure Exception m,
     updateRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
     updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
     updateRef_ = (void .) . updateRef
+    deleteRef  :: Text -> m ()
+
+    allRefs :: m [Reference m (Commit m)]
+    allRefs = mapM lookupRef =<< allRefNames
 
     allRefNames :: m [Text]
+    allRefNames = map refName <$> allRefs
 
     resolveRef :: Text -> m (ObjRef m (Commit m))
     resolveRef name = lookupRef name >>= \ref ->
@@ -67,10 +72,10 @@ class (Applicative m, Monad m, Failure Exception m,
     -- Object creation
     newTree :: m (Tree m)
     createBlob :: BlobContents m -> m (BlobOid m)
-    createCommit :: [ObjRef m (Commit m)] -> ObjRef m (Tree m)
-                    -> Signature -> Signature -> Text -> Maybe Text
-                    -> m (Commit m)
-    createTag :: CommitOid m -> Signature -> Signature -> Text -> m (Tag m)
+    createCommit ::
+        [ObjRef m (Commit m)] -> ObjRef m (Tree m)
+        -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
+    createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
@@ -96,6 +101,7 @@ data Exception = BackendError Text
                | CommitCreateFailed
                | CommitLookupFailed
                | ReferenceCreateFailed
+               | ReferenceDeleteFailed Text
                | RefCannotCreateFromPartialOid
                | ReferenceListingFailed
                | ReferenceLookupFailed Text
@@ -211,6 +217,23 @@ resolveTree objRef = case objRef of
     ByOid oid -> lookupTree oid
     Known obj -> return obj
 
+defaultCommitModifyTree ::
+    (Repository m, Commitish t, Treeish t)
+    => t
+    -> FilePath
+    -> Bool
+    -> (Maybe (TreeEntry m)
+        -> m (Maybe (TreeEntry m)))
+    -> m (Maybe (TreeEntry m))
+defaultCommitModifyTree c path createIfNotExist f =
+    Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
+
+defaultCommitWriteTree ::
+    (Repository m, Commitish t, Treeish t)
+    => t
+    -> m (TreeOid m)
+defaultCommitWriteTree = commitTree' >=> writeTree
+
 {- $commits -}
 data Signature = Signature
     { signatureName  :: Text
@@ -241,6 +264,9 @@ class (RepositoryBase CommitRepository, Treeish c) => Commitish c where
 
 commitRef :: Commit c -> ObjRef m (Commit c)
 commitRef = Known
+
+commitRefTarget :: Commit c -> RefTarget m (Commit c)
+commitRefTarget = RefObj . Known
 
 commitRefOid :: (RepositoryBase CommitRepository,
                  Commitish (Commit CommitRepository))

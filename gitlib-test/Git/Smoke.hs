@@ -159,9 +159,9 @@ smokeTestSpec wr = describe "Smoke tests" $ do
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = posixSecondsToUTCTime 1348981883 }
       c2 <- createCommit [commitRef c] (treeRef tr) sig sig
-                        "Second sample log message." Nothing
+                        "Second sample log message.\n" Nothing
       let x = renderOid (commitOid c2)
-      liftIO $ x @?= "57e386d1bd16c5ebf1cce696f29d73932578e9cc"
+      liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       updateRef_ "refs/heads/master" (RefObj (commitRef c2))
       updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
@@ -169,7 +169,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       c3 <- resolveRef "refs/heads/master"
       c3 <- resolveCommit c3
       let x = renderOid (commitOid c3)
-      liftIO $ x @?= "57e386d1bd16c5ebf1cce696f29d73932578e9cc"
+      liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       refs <- allRefNames
       liftIO $ show refs @?= "[\"refs/heads/master\"]"
