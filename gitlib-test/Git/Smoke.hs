@@ -38,7 +38,7 @@ withNewRepository wrapper dir action = do
 
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
-    createCommit [] (treeRef tr) sig sig "Sample log message." Nothing
+    createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
 smokeTestSpec :: (Repository m, MonadIO m)
               => (FilePath -> Bool -> m () -> IO ()) -> Spec

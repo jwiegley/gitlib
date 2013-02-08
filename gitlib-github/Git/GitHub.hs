@@ -88,8 +88,7 @@ instance Git.RepositoryBase GitHubRepository where
         , ghCommitParents   :: [CommitRef]
         }
 
-    data Tag GitHubRepository = Tag
-        { tagCommit :: CommitRef }
+    data Tag GitHubRepository = Tag { tagCommit :: CommitRef }
 
     parseOid x = Oid <$> unhex (T.encodeUtf8 x)
     renderOid (Tagged (Oid x)) = T.toLower (T.decodeUtf8 (hex x))
@@ -194,13 +193,16 @@ instance ToJSON Content where
 instance Default Content where
   def = Content B.empty "utf-8"
 
--- instance FromJSON (Git.Oid GitHubRepository) where
---   parseJSON (Object v) =
---       Oid <$> (unsafePerformIO . unhex . T.encodeUtf8 <$> parseJSON v)
---   parseJSON _ = mzero
+data GitHubOidProxy = GitHubOidProxy { runGhpOid :: Oid } deriving Show
 
--- instance ToJSON (Git.Oid GitHubRepository) where
---   toJSON (Oid sha) = toJSON (show sha)
+instance FromJSON GitHubOidProxy where
+  parseJSON (Object v) =
+      GitHubOidProxy . Oid <$>
+      (unsafePerformIO . unhex . T.encodeUtf8 <$> v .: "sha")
+  parseJSON _ = mzero
+
+instance ToJSON GitHubOidProxy where
+  toJSON (GitHubOidProxy (Oid sha)) = object ["sha" .= show sha]
 
 textToOid :: Text -> Oid
 textToOid = Oid . unsafePerformIO . unhex . T.encodeUtf8
@@ -210,7 +212,7 @@ oidToText = T.pack . show
 
 ghCreateBlob :: Git.BlobContents GitHubRepository -> GitHubRepository BlobOid
 ghCreateBlob (Git.BlobString content) =
-    Tagged . textToOid
+    Tagged . runGhpOid
         <$> ghRestful "POST" "git/blobs"
                       (Content (B64.encode content) "base64")
 ghCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
@@ -432,15 +434,21 @@ ghWriteTree tree = do
 --     , ghSignatureName  :: Text
 --     , ghSignatureEmail :: Text } deriving Show
 
+-- parseGhTime :: Text -> UTCTime
+-- parseGhTime = fromJust . parseTime defaultTimeLocale "%Y-%m-%dT%H%M%S%z"
+--               . T.unpack . T.filter (/= ':')
+
+-- formatGhTime :: UTCTime -> Text
+-- formatGhTime t =
+--     let fmt   = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" t
+--         (b,a) = L.splitAt (L.length fmt - 2) fmt
+--     in T.pack (b ++ ":" ++ a)
 parseGhTime :: Text -> UTCTime
-parseGhTime = fromJust . parseTime defaultTimeLocale "%Y-%m-%dT%H%M%S%z"
-              . T.unpack . T.filter (/= ':')
+parseGhTime =
+    fromJust . parseTime defaultTimeLocale "%Y-%m-%dT%H%M%SZ" . T.unpack
 
 formatGhTime :: UTCTime -> Text
-formatGhTime t =
-    let fmt   = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" t
-        (b,a) = L.splitAt (L.length fmt - 2) fmt
-    in T.pack (b ++ ":" ++ a)
+formatGhTime = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
 
 instance FromJSON Git.Signature where
   parseJSON (Object v) = Git.Signature <$> v .: "name"
@@ -459,25 +467,38 @@ data GitHubCommitProxy = GitHubCommitProxy
     , ghpCommitAuthor    :: Git.Signature
     , ghpCommitCommitter :: Maybe Git.Signature
     , ghpCommitMessage   :: Text
-    , ghpCommitTree      :: Oid
-    , ghpCommitParents   :: [Oid]
+    , ghpCommitTree      :: GitHubOidProxy
+    , ghpCommitParents   :: [GitHubOidProxy]
     } deriving Show
 
+-- The strange thing about commits is that converting them to JSON does not use
+-- the "sha" key for the trees and parents:
+--
+--   { "parents": ["7d1b31e74ee336d15cbd21741bc88a537ed063a0"],
+--      "tree": "827efc6d56897b048c772eb4087f854f46256132" }
+--
+-- But when converting from JSON, it does:
+--
+-- { "tree": { "sha": "827efc6d56897b048c772eb4087f854f46256132" },
+--   "parents": [
+--     { "sha": "7d1b31e74ee336d15cbd21741bc88a537ed063a0" }
+--   ] }
 instance FromJSON GitHubCommitProxy where
   parseJSON (Object v) =
       GitHubCommitProxy <$> v .: "sha"
                         <*> v .: "author"
                         <*> v .:? "committer"
                         <*> v .: "message"
-                        <*> (textToOid <$> v .: "tree")
-                        <*> (fmap textToOid <$> v .: "parents")
+                        <*> v .: "tree"
+                        <*> v .: "parents"
   parseJSON _ = mzero
 
 instance ToJSON GitHubCommitProxy where
   toJSON c = object $ [ "author"    .= ghpCommitAuthor c
                       , "message"   .= ghpCommitMessage c
-                      , "tree"      .= oidToText (ghpCommitTree c)
-                      , "parents"   .= map oidToText (ghpCommitParents c)
+                      , "tree"      .= oidToText (runGhpOid (ghpCommitTree c))
+                      , "parents"   .= map (oidToText . runGhpOid)
+                                           (ghpCommitParents c)
                       ] <>
                       [ "committer" .= fromJust (ghpCommitCommitter c) |
                                        isJust (ghpCommitCommitter c) ]
@@ -488,8 +509,9 @@ proxyToCommit cp = GitHubCommit
     , ghCommitAuthor    = ghpCommitAuthor cp
     , ghCommitCommitter = ghpCommitCommitter cp
     , ghCommitMessage   = ghpCommitMessage cp
-    , ghCommitTree      = Git.ByOid (Tagged (ghpCommitTree cp))
-    , ghCommitParents   = map (Git.ByOid . Tagged) (ghpCommitParents cp)
+    , ghCommitTree      = Git.ByOid (Tagged (runGhpOid (ghpCommitTree cp)))
+    , ghCommitParents   = map (Git.ByOid . Tagged . runGhpOid)
+                              (ghpCommitParents cp)
     }
 
 ghLookupCommit :: CommitOid -> GitHubRepository Commit
@@ -507,8 +529,9 @@ ghCreateCommit parents tree author committer message ref = do
                 , ghpCommitAuthor    = author
                 , ghpCommitCommitter = Just committer
                 , ghpCommitMessage   = message
-                , ghpCommitTree      = unTagged treeOid
-                , ghpCommitParents   = map (unTagged . Git.commitRefOid) parents
+                , ghpCommitTree      = GitHubOidProxy (unTagged treeOid)
+                , ghpCommitParents   =
+                    map (GitHubOidProxy . unTagged . Git.commitRefOid) parents
                 }
 
     let commit = proxyToCommit commit'
@@ -616,9 +639,9 @@ instance Git.Treeish Tree where
 
 instance Git.Commitish Commit where
     type CommitRepository = GitHubRepository
-    commitOid     = undefined -- fromJust . gitId . ghCommitInfo
-    commitParents = undefined -- ghCommitParents
-    commitTree    = undefined -- ghCommitTree
+    commitOid     = fromJust . ghCommitOid
+    commitParents = ghCommitParents
+    commitTree    = ghCommitTree
 
 instance Git.Treeish Commit where
     type TreeRepository = GitHubRepository
@@ -646,9 +669,9 @@ withGitHubRepository owner repoName token action =
              let name = case owner of
                      GitHubUser n -> n
                      GitHubOrganization n -> n
-             _ <- Github.deleteRepo
-                  (Github.GithubOAuth (T.unpack (fromJust token)))
-                  (T.unpack name) (T.unpack repoName')
+             -- _ <- Github.deleteRepo
+             --      (Github.GithubOAuth (T.unpack (fromJust token)))
+             --      (T.unpack name) (T.unpack repoName')
              return ())
        (\repo -> case repo of
              Left e -> return (Left e)
