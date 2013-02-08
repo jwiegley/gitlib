@@ -10,6 +10,7 @@ module Git.Smoke where
 
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.Tagged
 import           Data.Time.Clock.POSIX
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS
@@ -59,6 +60,11 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
+      x <- oid tr
+      liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
+      toid <- Git.parseOid "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+      tr <- lookupTree (Tagged toid)
       x <- oid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
@@ -117,6 +123,11 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       let x = renderOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
+      coid <- Git.parseOid "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
+      c <- lookupCommit (Tagged coid)
+      let x = renderOid (commitOid c)
+      liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
+
   it "create two commits" $ do
     withNewRepository wr "createTwoCommits.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
@@ -136,7 +147,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
             , signatureWhen  = posixSecondsToUTCTime 1348980883 }
       c <- sampleCommit tr sig
       let x = renderOid (commitOid c)
-      liftIO $ x @?= "df1b2a6bfc78e57ac336de9ca6ed3ae8c850104d"
+      liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
       goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
       putBlob tr "goodbye/files/world.txt" goodbye2
@@ -150,7 +161,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       c2 <- createCommit [commitRef c] (treeRef tr) sig sig
                         "Second sample log message." Nothing
       let x = renderOid (commitOid c2)
-      liftIO $ x @?= "02727e0666c0092cb6dac62d70876ae99097a74a"
+      liftIO $ x @?= "57e386d1bd16c5ebf1cce696f29d73932578e9cc"
 
       updateRef_ "refs/heads/master" (RefObj (commitRef c2))
       updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
@@ -158,7 +169,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       c3 <- resolveRef "refs/heads/master"
       c3 <- resolveCommit c3
       let x = renderOid (commitOid c3)
-      liftIO $ x @?= "02727e0666c0092cb6dac62d70876ae99097a74a"
+      liftIO $ x @?= "57e386d1bd16c5ebf1cce696f29d73932578e9cc"
 
       refs <- allRefNames
       liftIO $ show refs @?= "[\"refs/heads/master\"]"

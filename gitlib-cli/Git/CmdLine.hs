@@ -34,18 +34,18 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
--- import           Debug.Trace
+import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
 import           Prelude hiding (FilePath)
-import           Shelly
+import           Shelly hiding (trace)
 import           System.IO.Unsafe
 import           System.Locale (defaultTimeLocale)
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
 import           Text.Parsec.Prim
-import           Text.Parsec.Text.Lazy
+import           Text.Parsec.Text.Lazy ()
 
 type Oid       = Git.Oid CmdLineRepository
 
@@ -151,8 +151,10 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
     contents    <- shelly $ silently $ do
         run "git" ["--git-dir", repoPath repo, "ls-tree", "-z", sha]
     oidRef      <- liftIO $ newIORef (Just oid)
+    -- Even though the tree entries are separated by \NUL, for whatever reason
+    -- @git ls-tree@ also outputs a newline at the end.
     contentsRef <- liftIO $ newIORef $ HashMap.fromList $
-                   map parseLine (TL.splitOn "\NUL" contents)
+                   map parseLine (L.init (TL.splitOn "\NUL" contents))
     return (CmdLineTree oidRef contentsRef)
   where
     parseLine line =
@@ -278,9 +280,10 @@ cliLookupCommit :: CommitOid -> CmdLineRepository Commit
 cliLookupCommit oid@(Tagged (Oid sha)) = do
     repo <- cliGet
     output <- shelly $ silently $ do
-        run "git" $ ["--git-dir", repoPath repo, "cat-file", "p", sha]
+        run "git" $ ["--git-dir", repoPath repo, "cat-file", "-p", sha]
     case parse parseOutput "" output of
-        Left e -> failure Git.CommitLookupFailed
+        Left e -> do liftIO $ putStrLn $ "Commit parse failed: " ++ show e
+                     failure Git.CommitLookupFailed
         Right c -> return c
   where
     parseOutput = do
@@ -293,7 +296,7 @@ cliLookupCommit oid@(Tagged (Oid sha)) = do
         CmdLineCommit
             <$> pure (Just oid)
             <*> parseSignature "author"
-            <*> (Just <$> parseSignature "committer ")
+            <*> (Just <$> parseSignature "committer")
             <*> (T.pack <$> many anyChar)
             <*> pure tree
             <*> pure parents
@@ -304,13 +307,13 @@ cliLookupCommit oid@(Tagged (Oid sha)) = do
                  *> (T.pack <$> manyTill anyChar (try (string " <"))))
             <*> (T.pack <$> manyTill anyChar (try (string "> ")))
             <*> (fromJust . parseTime defaultTimeLocale "%s %z"
-                 <$> manyTill anyChar (try (string "> ")))
+                 <$> manyTill anyChar newline)
 
 cliCreateCommit :: [CommitRef] -> TreeRef
                -> Git.Signature -> Git.Signature -> Text -> Maybe Text
                -> CmdLineRepository Commit
 cliCreateCommit parents tree author committer message ref = do
-    repo <- cliGet
+    repo    <- cliGet
     treeOid <- Git.treeRefOid tree
     let parentOids = map Git.commitRefOid parents
 
@@ -332,14 +335,18 @@ cliCreateCommit parents tree author committer message ref = do
                               poid <- parentOids]
                  <> [TL.fromStrict (Git.renderOid treeOid)]
 
-    return CmdLineCommit
-        { cliCommitOid       = Just (Tagged (Oid (TL.init oid)))
-        , cliCommitAuthor    = author
-        , cliCommitCommitter = Just committer
-        , cliCommitMessage   = message
-        , cliCommitTree      = Git.ByOid treeOid
-        , cliCommitParents   = map Git.ByOid parentOids
-        }
+    let commit = CmdLineCommit
+            { cliCommitOid       = Just (Tagged (Oid (TL.init oid)))
+            , cliCommitAuthor    = author
+            , cliCommitCommitter = Just committer
+            , cliCommitMessage   = message
+            , cliCommitTree      = Git.ByOid treeOid
+            , cliCommitParents   = map Git.ByOid parentOids
+            }
+    when (isJust ref) $
+        void (cliUpdateRef (fromJust ref) (fromJust (cliCommitOid commit)))
+
+    return commit
 
 data CliObjectRef = CliObjectRef
     { objectRefType :: Text
