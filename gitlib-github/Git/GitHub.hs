@@ -18,13 +18,11 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Cont
 import           Control.Monad.Trans.Reader
 import           Data.Aeson hiding (Success)
 import           Data.Attempt
 import           Data.ByteString as B hiding (pack, putStrLn, map, null)
 import qualified Data.ByteString.Base64 as B64
-import qualified Data.ByteString.Char8 as BC
 import           Data.Conduit
 import           Data.Default ( Default(..) )
 import           Data.Foldable (for_)
@@ -43,7 +41,6 @@ import qualified Data.Text.Encoding as T
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
 import           Data.Traversable (for)
-import           Debug.Trace
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -90,17 +87,21 @@ instance Git.RepositoryBase GitHubRepository where
 
     data Tag GitHubRepository = Tag { tagCommit :: CommitRef }
 
+    facts = return Git.RepositoryFacts
+        { Git.hasSymbolicReferences = False }
+
     parseOid x = Oid <$> unhex (T.encodeUtf8 x)
     renderOid (Tagged (Oid x)) = T.toLower (T.decodeUtf8 (hex x))
 
-    lookupRef    = undefined -- ghLookupRef
-    updateRef    = undefined -- ghUpdateRef
-    resolveRef   = undefined -- ghResolveRef
-    allRefNames  = undefined -- ghAllRefNames
+    createRef    = ghCreateRef
+    lookupRef    = ghLookupRef
+    updateRef    = ghUpdateRef
+    deleteRef    = ghDeleteRef
+    allRefs      = ghAllRefs
     lookupCommit = ghLookupCommit
     lookupTree   = ghLookupTree
     lookupBlob   = ghLookupBlob
-    lookupTag    = undefined
+    lookupTag    = undefined -- ghLookupTag
     lookupObject = undefined -- ghLookupObject
     newTree      = ghNewTree
     createBlob   = ghCreateBlob
@@ -143,8 +144,19 @@ instance FromJSON GitHubBlob where
                                     <*> v .: "size"
   parseJSON _ = mzero
 
-ghRestfulEx :: (ToJSON a, FromJSON b) => Text -> Text -> a -> RESTful () -> GitHubRepository b
-ghRestfulEx method url arg st = undefined
+ghRestfulEx :: (ToJSON a, FromJSON b) => Text -> Text -> a -> RESTful ()
+            -> GitHubRepository b
+ghRestfulEx method url arg act = do
+    gh        <- ghGet
+    urlPrefix <- ghPrefix
+    let tok = gitHubToken gh
+    result <- liftIO $ runResourceT $
+              withRestfulEnvAndMgr (fromJust (httpManager gh))
+              (for_ tok $ \t -> do
+                    addHeader "Authorization" ("token " <> t)
+                    addHeader "Content-type" "application/json")
+              (restfulJsonEx arg [st|#{method} #{urlPrefix}/#{url}|] act)
+    attempt failure return result
 
 ghRestful :: (ToJSON a, FromJSON b) => Text -> Text -> a -> GitHubRepository b
 ghRestful method url arg = do
@@ -313,13 +325,11 @@ instance ToJSON GitHubTreeEntryProxy where
                         , "sha"  .= ghpTreeEntrySha entry ]
 
 ghNewTree :: GitHubRepository Tree
-ghNewTree = do liftIO $ putStrLn "ghNewTree.1"
-               GitHubTree <$> (liftIO $ newIORef Nothing)
-                          <*> (liftIO $ newIORef HashMap.empty)
+ghNewTree = GitHubTree <$> (liftIO $ newIORef Nothing)
+                       <*> (liftIO $ newIORef HashMap.empty)
 
 ghLookupTree :: TreeOid -> GitHubRepository Tree
 ghLookupTree oid = do
-    liftIO $ putStrLn "ghLookupTree.1"
     treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderOid oid) ()
     oid' <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
     subtree' <- subtree treeProxy
@@ -535,9 +545,9 @@ ghCreateCommit parents tree author committer message ref = do
                 }
 
     let commit = proxyToCommit commit'
-    when (isJust ref) $ do
-        ghUpdateRef (fromJust ref) (fromJust (ghCommitOid commit))
-        return ()
+    when (isJust ref) $
+        void (ghUpdateRef (fromJust ref)
+              (Git.RefObj (Git.ByOid (fromJust (ghCommitOid commit)))))
 
     return commit
 
@@ -555,7 +565,7 @@ instance ToJSON GitHubObjectRef where
                       , "sha"  .= objectRefSha c ]
 
 data GitHubReference = GitHubReference
-    { referenceRef    :: Text
+    { referenceName   :: Text
     , referenceObject :: GitHubObjectRef } deriving Show
 
 instance FromJSON GitHubReference where
@@ -564,27 +574,62 @@ instance FromJSON GitHubReference where
   parseJSON _ = mzero
 
 instance ToJSON GitHubReference where
-  toJSON c = object $ [ "ref"    .= referenceRef c
+  toJSON c = object $ [ "ref"    .= referenceName c
                       , "object" .= referenceObject c ]
 
-ghGetRef :: Text -> GitHubRepository Reference
-ghGetRef ref = undefined -- ghRestful "GET" ("git/" <> ref) ()
+data GitHubDirectRef = GitHubDirectRef
+    { directRefName  :: Maybe Text
+    , directRefSha   :: Text
+    , directRefForce :: Maybe Bool
+    } deriving Show
 
-ghGetAllRefs :: Text -> GitHubRepository [Reference]
-ghGetAllRefs namespace = undefined -- ghRestful "GET" ("git/" <> namespace) ()
+instance FromJSON GitHubDirectRef where
+  parseJSON (Object v) = GitHubDirectRef <$> v .:? "ref"
+                                         <*> v .: "sha"
+                                         <*> v .:? "force"
+  parseJSON _ = mzero
 
-ghCreateRef :: Reference -> GitHubRepository Reference
-ghCreateRef ref = undefined -- ghRestful "POST" "git/refs" ref
+instance ToJSON GitHubDirectRef where
+  toJSON c = object $ [ "ref"   .= directRefName c
+                      , "sha"   .= directRefSha c
+                      , "force" .= directRefForce c ]
 
-ghUpdateRef :: Text -> CommitOid -> GitHubRepository Reference
-ghUpdateRef ref sha = do
-    -- jww (2013-01-12): restfulEx with a state argument is awkward.  Maybe
-    -- have addQueryParam take a third parameter that modifies a RESTfulM's
-    -- internal state value, and then do restful ... & addQueryParam, where &
-    -- = flip ($)
-    -- ghRestfulEx "PATCH" ("git/" <> ref) sha
-    --     $ addQueryParam "force" "true"
-    return undefined
+ghRefToReference :: GitHubReference -> GitHubRepository Reference
+ghRefToReference ref = do
+    oid <- Git.parseOid (objectRefSha (referenceObject ref))
+    return (Git.Reference (referenceName ref)
+                          (Git.RefObj (Git.ByOid (Tagged oid))))
+
+ghLookupRef :: Text -> GitHubRepository Reference
+ghLookupRef refName =
+    ghRefToReference =<< ghRestful "GET" ("git/" <> refName) ()
+
+ghAllRefs :: GitHubRepository [Reference]
+ghAllRefs =
+    mapM ghRefToReference =<< ghRestful "GET" "git/refs" ()
+
+ghCreateRef :: Text -> Git.RefTarget GitHubRepository Commit
+            -> GitHubRepository Reference
+ghCreateRef refName (Git.RefObj commitRef) = do
+    let oid = Git.commitRefOid commitRef
+    ghRefToReference
+        =<< ghRestful "POST" "git/refs"
+                     (GitHubDirectRef (Just refName) (Git.renderOid oid)
+                                      Nothing)
+
+ghCreateRef _ (Git.RefSymbolic _) =
+    error "Not supported"
+
+ghUpdateRef :: Text -> Git.RefTarget GitHubRepository Commit
+            -> GitHubRepository Reference
+ghUpdateRef refName (Git.RefObj commitRef) = do
+    let oid = Git.commitRefOid commitRef
+    ghRefToReference =<<
+        (ghRestful "PATCH" ("git/" <> refName)
+                   (GitHubDirectRef Nothing (Git.renderOid oid) (Just True)))
+
+ghUpdateRef _ (Git.RefSymbolic _) =
+    error "Not supported"
 
 ghDeleteRef :: Text -> GitHubRepository ()
 ghDeleteRef ref = ghRestful "DELETE" ("git/" <> ref) ref

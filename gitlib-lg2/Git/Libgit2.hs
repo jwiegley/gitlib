@@ -75,9 +75,13 @@ instance Git.RepositoryBase LgRepository where
     data Tag LgRepository = Tag
         { tagCommit :: CommitRef }
 
+    facts = return Git.RepositoryFacts
+        { Git.hasSymbolicReferences = True }
+
     parseOid     = lgParseOid
     renderOid    = lgRenderOid
     lookupRef    = lgLookupRef
+    createRef    = lgUpdateRef
     updateRef    = lgUpdateRef
     deleteRef    = lgDeleteRef
     resolveRef   = lgResolveRef

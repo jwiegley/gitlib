@@ -26,6 +26,10 @@ import           Filesystem.Path.CurrentOS
 import           Prelude hiding (FilePath)
 
 {- $repositories -}
+data RepositoryFacts = RepositoryFacts
+    { hasSymbolicReferences :: Bool
+    } deriving Show
+
 -- | 'RepositoryBase' is the central point of contact between user code and
 -- Git data objects.  Every object must belong to some repository.
 class (Applicative m, Monad m, Failure Exception m,
@@ -35,10 +39,15 @@ class (Applicative m, Monad m, Failure Exception m,
     data Commit m
     data Tag m
 
+    facts :: m RepositoryFacts
+
     parseOid  :: Text -> m (Oid m)
     renderOid :: Tagged a (Oid m) -> Text
 
     -- References
+    createRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
+    createRef_ :: Text -> RefTarget m (Commit m) -> m ()
+    createRef_ = (void .) . createRef
     lookupRef  :: Text -> m (Reference m (Commit m))
     updateRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
     updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
@@ -111,6 +120,9 @@ data Exception = BackendError Text
                | OidParseFailed Text
                deriving (Show, Typeable)
 
+-- jww (2013-02-11): Create a BackendException data constructor of forall
+-- e. Exception e => BackendException e, so that each can throw a derived
+-- exception.
 instance Exc.Exception Exception
 
 {- $oids -}

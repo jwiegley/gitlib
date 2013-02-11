@@ -79,10 +79,14 @@ instance Git.RepositoryBase CmdLineRepository where
     data Tag CmdLineRepository = CmdLineTag
         { cliTagCommit :: CommitRef }
 
+    facts = return Git.RepositoryFacts
+        { Git.hasSymbolicReferences = True }
+
     parseOid = return . Oid . TL.fromStrict
     renderOid (Tagged (Oid x)) = TL.toStrict x
 
     lookupRef    = cliLookupRef
+    createRef    = cliUpdateRef
     updateRef    = cliUpdateRef
     deleteRef    = cliDeleteRef
     resolveRef   = cliResolveRef

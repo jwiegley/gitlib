@@ -8,6 +8,7 @@
 
 module Git.Smoke where
 
+import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Tagged
@@ -164,7 +165,9 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       updateRef_ "refs/heads/master" (RefObj (commitRef c2))
-      updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
+      hasSymRefs <- hasSymbolicReferences <$> facts
+      when hasSymRefs $
+          updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
 
       c3 <- resolveRef "refs/heads/master"
       c3 <- resolveCommit c3
