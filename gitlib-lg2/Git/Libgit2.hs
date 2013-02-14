@@ -48,9 +48,9 @@ import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git as Git
-import qualified Git.Utils as Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
+import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import qualified System.IO.Unsafe as SU
 
@@ -537,7 +537,7 @@ withForeignPtrs fos io = do
     mapM_ touchForeignPtr fos
     return r
 
-lgLookupRef :: Text -> LgRepository Reference
+lgLookupRef :: Text -> LgRepository (Maybe Reference)
 lgLookupRef name = do
     repo <- lgGet
     targ <- liftIO $ alloca $ \ptr -> do
@@ -545,7 +545,7 @@ lgLookupRef name = do
               withCStringable name $ \namePtr ->
                 c'git_reference_lookup ptr repoPtr namePtr
         if r < 0
-            then failure (Git.ReferenceLookupFailed name)
+            then return Nothing
             else do
             ref  <- peek ptr
             typ  <- c'git_reference_type ref
@@ -557,9 +557,11 @@ lgLookupRef name = do
                             B.packCString targName
                                 >>= return . Git.RefSymbolic . T.decodeUtf8
             c'git_reference_free ref
-            return targ
-    return $ Git.Reference { Git.refName   = name
-                           , Git.refTarget = targ }
+            return (Just targ)
+    for targ $ \targ' ->
+        return $ Git.Reference
+            { Git.refName   = name
+            , Git.refTarget = targ' }
 
 lgUpdateRef :: Text -> Git.RefTarget LgRepository Commit
             -> LgRepository Reference
@@ -592,7 +594,7 @@ lgUpdateRef name refTarg = do
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
 
-lgResolveRef :: Text -> LgRepository CommitRef
+lgResolveRef :: Text -> LgRepository (Maybe CommitRef)
 lgResolveRef name = do
     repo <- lgGet
     oid <- liftIO $ alloca $ \ptr ->
@@ -602,8 +604,7 @@ lgResolveRef name = do
             if r < 0
                 then return Nothing
                 else Just <$> coidPtrToOid ptr
-    maybe (failure (Git.ReferenceLookupFailed name))
-          (return . Git.ByOid . Tagged . Oid) oid
+    return (Git.ByOid . Tagged . Oid <$> oid)
 
 -- int git_reference_rename(git_reference *ref, const char *new_name,
 --   int force)

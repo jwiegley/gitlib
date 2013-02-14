@@ -17,6 +17,7 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Conduit
 import           Data.Default
+import           Data.Maybe
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -48,24 +49,25 @@ class (Applicative m, Monad m, Failure Exception m,
     createRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
     createRef_ :: Text -> RefTarget m (Commit m) -> m ()
     createRef_ = (void .) . createRef
-    lookupRef  :: Text -> m (Reference m (Commit m))
+    lookupRef  :: Text -> m (Maybe (Reference m (Commit m)))
     updateRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
     updateRef_ :: Text -> RefTarget m (Commit m) -> m ()
     updateRef_ = (void .) . updateRef
     deleteRef  :: Text -> m ()
 
     allRefs :: m [Reference m (Commit m)]
-    allRefs = mapM lookupRef =<< allRefNames
+    allRefs = catMaybes <$> (mapM lookupRef =<< allRefNames)
 
     allRefNames :: m [Text]
     allRefNames = map refName <$> allRefs
 
-    resolveRef :: Text -> m (ObjRef m (Commit m))
+    resolveRef :: Text -> m (Maybe (ObjRef m (Commit m)))
     resolveRef name = lookupRef name >>= \ref ->
         case ref of
-            Reference { refTarget = RefObj x } ->
-                return x
-            Reference { refTarget = RefSymbolic name' } ->
+            Nothing -> return Nothing
+            Just (Reference { refTarget = RefObj x }) ->
+                return (Just x)
+            Just (Reference { refTarget = RefSymbolic name' }) ->
                 if name /= name'
                 then resolveRef name'
                 else failure (ReferenceLookupFailed name)

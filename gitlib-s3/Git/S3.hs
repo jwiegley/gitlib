@@ -160,7 +160,7 @@ putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
              -> ResourceT IO BL.ByteString
 putFileS3 = curry . odbS3dispatch putFileS3'
 
-type RefMap = M.HashMap Text (Git.Reference LgRepository Commit)
+type RefMap = M.HashMap Text (Maybe (Git.Reference LgRepository Commit))
 
 instance Y.FromJSON (Git.Reference LgRepository Commit) where
     parseJSON j = do
@@ -235,14 +235,15 @@ mirrorRefsFromS3 be = do
   where
     go repoPtr namePtr ref ptr = do
         r <- case ref of
-            Git.Reference { Git.refTarget = Git.RefSymbolic target } ->
+            Just (Git.Reference { Git.refTarget = Git.RefSymbolic target }) ->
               withCStringable target $ \targetPtr ->
                 c'git_reference_create_symbolic ptr repoPtr namePtr
                                                 targetPtr 1
-            Git.Reference {
-                Git.refTarget = (Git.RefObj x@(Git.ByOid (Tagged coid))) } ->
+            Just (Git.Reference {
+                Git.refTarget = (Git.RefObj x@(Git.ByOid (Tagged coid))) }) ->
               withForeignPtr (getOid coid) $ \coidPtr ->
                 c'git_reference_create_oid ptr repoPtr namePtr coidPtr 1
+            Nothing -> return 0
         when (r < 0) $ throwIO Git.RepositoryInvalid
 
 mirrorRefsToS3 :: Ptr C'git_odb_backend -> LgRepository ()

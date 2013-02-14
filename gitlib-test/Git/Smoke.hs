@@ -169,7 +169,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       when hasSymRefs $
           updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
 
-      c3 <- resolveRef "refs/heads/master"
+      Just c3 <- resolveRef "refs/heads/master"
       c3 <- resolveCommit c3
       let x = renderOid (commitOid c3)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"

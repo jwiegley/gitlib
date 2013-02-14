@@ -600,9 +600,10 @@ ghRefToReference ref = do
     return (Git.Reference (referenceName ref)
                           (Git.RefObj (Git.ByOid (Tagged oid))))
 
-ghLookupRef :: Text -> GitHubRepository Reference
+ghLookupRef :: Text -> GitHubRepository (Maybe Reference)
 ghLookupRef refName =
-    ghRefToReference =<< ghRestful "GET" ("git/" <> refName) ()
+    -- jww (2013-02-14): Need to test whether or not the ref exists
+    Just <$> (ghRefToReference =<< ghRestful "GET" ("git/" <> refName) ())
 
 ghAllRefs :: GitHubRepository [Reference]
 ghAllRefs =
