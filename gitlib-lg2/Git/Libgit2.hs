@@ -9,11 +9,13 @@
 --   associated with the repository — such as the list of branches — is
 --   queried as needed.
 module Git.Libgit2
-       ( LgRepository(..)
-       , Git.Oid(..), Tree(..), Commit(..)
+       ( LgRepository(..), Repository(..)
+       , Git.Oid(..), BlobOid(..), TreeOid(..), CommitOid(..)
+       , Tree(..), Commit(..)
+       , TreeRef(..), CommitRef(..), Reference(..)
        , withLgRepository, withOpenLgRepository
        , openLgRepository, createLgRepository, openOrCreateLgRepository
-       , addTracingBackend
+       , addTracingBackend, lgGet
        ) where
 
 import           Bindings.Libgit2
@@ -174,7 +176,7 @@ lgLookupBlob oid =
 type TreeEntry = Git.TreeEntry LgRepository
 
 instance Git.Treeish Tree where
-    type TreeRepository = LgRepository
+    type TreeRepository Tree = LgRepository
     modifyTree = lgModifyTree
     writeTree  = lgWriteTree
 
@@ -400,13 +402,17 @@ splitPath path = T.splitOn "/" text
                  Right y -> y
 
 instance Git.Commitish Commit where
-    type CommitRepository = LgRepository
-    commitOid     = fromJust . gitId . lgCommitInfo
-    commitParents = lgCommitParents
-    commitTree    = lgCommitTree
+    type CommitRepository Commit = LgRepository
+    commitOid       = fromJust . gitId . lgCommitInfo
+    commitParents   = lgCommitParents
+    commitTree      = lgCommitTree
+    commitAuthor    = lgCommitAuthor
+    commitCommitter = lgCommitCommitter
+    commitLog       = lgCommitLog
+    commitEncoding  = T.pack . lgCommitEncoding
 
 instance Git.Treeish Commit where
-    type TreeRepository = LgRepository
+    type TreeRepository Commit = LgRepository
     modifyTree c path createIfNotExist f =
         Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
     writeTree c = Git.commitTree' c >>= Git.writeTree

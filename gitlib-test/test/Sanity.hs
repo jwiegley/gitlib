@@ -69,7 +69,7 @@ instance Monad MockRepository where
 instance MonadIO MockRepository where
     liftIO m = MockRepository (liftIO m)
 
-instance Failure Git.Exception MockRepository where
+instance Failure Git.GitException MockRepository where
     failure e = liftIO $ throwIO e
 
 instance Git.RepositoryBase MockRepository where

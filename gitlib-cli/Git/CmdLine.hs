@@ -443,18 +443,22 @@ cliGet :: CmdLineRepository Repository
 cliGet = CmdLineRepository ask
 
 instance Git.Treeish Tree where
-    type TreeRepository = CmdLineRepository
+    type TreeRepository Tree = CmdLineRepository
     modifyTree = cliModifyTree
     writeTree  = cliWriteTree
 
 instance Git.Commitish Commit where
-    type CommitRepository = CmdLineRepository
-    commitOid     = fromJust . cliCommitOid
-    commitParents = cliCommitParents
-    commitTree    = cliCommitTree
+    type CommitRepository Commit = CmdLineRepository
+    commitOid       = fromJust . cliCommitOid
+    commitParents   = cliCommitParents
+    commitTree      = cliCommitTree
+    commitAuthor    = cliCommitAuthor
+    commitCommitter = \c -> fromMaybe (cliCommitAuthor c) (cliCommitCommitter c)
+    commitLog       = cliCommitMessage
+    commitEncoding  = const "utf-8"
 
 instance Git.Treeish Commit where
-    type TreeRepository = CmdLineRepository
+    type TreeRepository Commit = CmdLineRepository
     modifyTree = Git.defaultCommitModifyTree
     writeTree  = Git.defaultCommitWriteTree
 

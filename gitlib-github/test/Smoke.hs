@@ -25,14 +25,14 @@ import           Test.Hspec.Runner
 main :: IO ()
 main = do
     owner <- T.pack <$> getEnv "GITHUB_OWNER"
-    token <- fmap T.pack <$> lookupEnv "GITHUB_TOKEN"
+    token <- T.pack <$> getEnv "GITHUB_TOKEN"
     summary <-
         hspecWith
         (defaultConfig { configVerbose = True })
         (Git.smokeTestSpec
          (\path _ act -> do
                result <- Gh.withGitHubRepository (Gh.GitHubUser owner)
-                         (either id id (toText path)) token act
+                         (either id id (toText path)) (Just token) act
                either (\e -> do putStrLn $ "Failed: " ++ show e
                                 exitFailure)
                       (const (return ()))

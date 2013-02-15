@@ -4,6 +4,7 @@
 ./gitlib-lg2
 ./gitlib-s3
 ./gitlib-github
+./vendor/aws
 ./vendor/c2hsc
 ./vendor/data-marshal
 ./vendor/general-prelude

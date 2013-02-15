@@ -397,30 +397,29 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-addS3Backend :: Text -- ^ bucket
+addS3Backend :: Repository
+             -> Text -- ^ bucket
              -> Text -- ^ prefix
              -> Text -- ^ access key
              -> Text -- ^ secret key
              -> Maybe Manager
              -> Maybe Text -- ^ mock address
              -> LogLevel
-             -> LgRepository ()
-addS3Backend bucket prefix access secret mmanager mockAddr level = do
-    repo    <- lgGet
-    liftIO $ do
-        manager <- maybe (newManager def) return mmanager
-        odbS3   <- odbS3Backend
-            (case mockAddr of
-                Nothing   -> defServiceConfig
-                Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
-                                   s3Port         = 10001
-                                 , s3RequestStyle = PathStyle })
-            (Configuration Timestamp Credentials {
-                  accessKeyID     = E.encodeUtf8 access
-                , secretAccessKey = E.encodeUtf8 secret }
-             (defaultLog level))
-            manager bucket prefix
-        odbBackendAdd repo odbS3 100
-        return ()
+             -> IO Repository
+addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
+    manager <- maybe (newManager def) return mmanager
+    odbS3   <- odbS3Backend
+        (case mockAddr of
+            Nothing   -> defServiceConfig
+            Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
+                               s3Port         = 10001
+                             , s3RequestStyle = PathStyle })
+        (Configuration Timestamp Credentials {
+              accessKeyID     = E.encodeUtf8 access
+            , secretAccessKey = E.encodeUtf8 secret }
+         (defaultLog level))
+        manager bucket prefix
+    odbBackendAdd repo odbS3 100
+    return repo
 
 -- S3.hs

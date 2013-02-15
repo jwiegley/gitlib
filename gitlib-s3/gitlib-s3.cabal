@@ -30,6 +30,7 @@ Test-suite smoke
     , hspec              >= 1.4.4
     , hspec-expectations >= 0.3
     , text               >= 0.11.2
+    , transformers       >= 0.2.2
 
 Library
   hs-source-dirs: .

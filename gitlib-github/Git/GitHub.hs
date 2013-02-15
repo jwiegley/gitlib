@@ -40,7 +40,6 @@ import           Data.Text as T hiding (drop, map, null)
 import qualified Data.Text.Encoding as T
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
-import           Data.Traversable (for)
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -679,18 +678,22 @@ ghGet :: GitHubRepository Repository
 ghGet = GitHubRepository ask
 
 instance Git.Treeish Tree where
-    type TreeRepository = GitHubRepository
+    type TreeRepository Tree = GitHubRepository
     modifyTree = ghModifyTree
     writeTree  = ghWriteTree
 
 instance Git.Commitish Commit where
-    type CommitRepository = GitHubRepository
-    commitOid     = fromJust . ghCommitOid
-    commitParents = ghCommitParents
-    commitTree    = ghCommitTree
+    type CommitRepository Commit = GitHubRepository
+    commitOid       = fromJust . ghCommitOid
+    commitParents   = ghCommitParents
+    commitTree      = ghCommitTree
+    commitAuthor    = ghCommitAuthor
+    commitCommitter = \c -> fromMaybe (ghCommitAuthor c) (ghCommitCommitter c)
+    commitLog       = ghCommitMessage
+    commitEncoding  = const "utf-8"
 
 instance Git.Treeish Commit where
-    type TreeRepository = GitHubRepository
+    type TreeRepository Commit = GitHubRepository
     modifyTree c path createIfNotExist f =
         Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
     writeTree c = Git.commitTree' c >>= Git.writeTree
@@ -743,9 +746,9 @@ createGhRepository owner repoName token =
   where
     confirmCreation _ = do
         repo <- query (20 :: Int)
-        for repo $ \r -> do
+        flip (either (return . Left)) repo $ \r -> do
             mgr <- newManager def
-            return Repository
+            return $ Right $ Repository
                 { httpManager = Just mgr
                 , gitHubOwner = owner
                 , gitHubRepo  = r

@@ -60,7 +60,7 @@ instance Monad LgRepository where
 instance MonadIO LgRepository where
     liftIO m = LgRepository (liftIO m)
 
-instance Failure Git.Exception LgRepository where
+instance Failure Git.GitException LgRepository where
     failure = liftIO . throwIO
 
 lgGet = LgRepository ask
