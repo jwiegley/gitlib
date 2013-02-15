@@ -123,7 +123,7 @@ doRunGit :: (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
          -> CmdLineRepository a
 doRunGit f args act = do
     repo <- cliGet
-    shelly $ silently $ do
+    shellyNoDir $ silently $ do
         act
         f "git" $ ["--git-dir", repoPath repo] <> args
 
@@ -360,9 +360,16 @@ makeRef [sha,name] =
                   (Git.RefObj (Git.ByOid (Tagged (Oid sha))))
 makeRef _ = error "Impossible"
 
-cliLookupRef :: Text -> CmdLineRepository Reference
-cliLookupRef refName = makeRef . TL.words
-                       <$> runGit ["show-ref", TL.fromStrict refName]
+cliLookupRef :: Text -> CmdLineRepository (Maybe Reference)
+cliLookupRef refName = do
+    repo <- cliGet
+    shellyNoDir $ silently $ errExit False $ do
+        rev <- run "git" $ [ "--git-dir", repoPath repo
+                           , "show-ref", TL.fromStrict refName ]
+        ec  <- lastExitCode
+        return $ if ec == 0
+            then Just (makeRef (TL.words rev))
+            else Nothing
 
 cliUpdateRef :: Text -> Git.RefTarget CmdLineRepository Commit
              -> CmdLineRepository Reference
@@ -381,9 +388,16 @@ cliDeleteRef refName = runGit_ ["update-ref", "-d", TL.fromStrict refName]
 cliAllRefs :: CmdLineRepository [Reference]
 cliAllRefs = map (makeRef . TL.words) . TL.lines <$> runGit ["show-ref"]
 
-cliResolveRef :: Text -> CmdLineRepository CommitRef
-cliResolveRef refName = Git.ByOid . Tagged . Oid . TL.init
-                        <$> runGit ["rev-parse", TL.fromStrict refName]
+cliResolveRef :: Text -> CmdLineRepository (Maybe CommitRef)
+cliResolveRef refName = do
+    repo <- cliGet
+    shellyNoDir $ silently $ errExit False $ do
+        rev <- run "git" $ [ "--git-dir", repoPath repo
+                           , "rev-parse", TL.fromStrict refName ]
+        ec  <- lastExitCode
+        return $ if ec == 0
+            then Just (Git.ByOid (Tagged (Oid (TL.init rev))))
+            else Nothing
 
 -- cliLookupTag :: TagOid -> CmdLineRepository Tag
 -- cliLookupTag oid = undefined
@@ -471,7 +485,7 @@ createCmdLineRepository path bare = do
     case F.toText path of
         Left e -> return (Left e)
         Right p -> do
-            shelly $ silently $
+            shellyNoDir $ silently $
                 run_ "git" $ ["--git-dir", TL.fromStrict p]
                           <> ["--bare" | bare] <> ["init"]
             return (Right (Repository (TL.fromStrict p)))
