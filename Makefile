@@ -7,3 +7,22 @@ rebuild:
 	cabal-delete hlibgit2
 	cabal-delete aws
 	cabal-meta install -j1
+
+AGENTS = $(HOME)/Library/LaunchAgents
+
+tests:
+	if ! ps ax | grep -q '[b]in/redis-server'; then			\
+	    launchctl load -w $(AGENTS)/homebrew.mxcl.redis.plist ;	\
+	fi
+	if ! ps ax | grep -q '[m]ock_s3\.py'; then			\
+	    python vendor/mock-s3/mock_s3.py ;				\
+	fi
+	for i in cli github lg2 s3 ; do					\
+	    (cd gitlib-$$i ;						\
+	     cabal clean > /dev/null ;					\
+	     cabal configure --enable-tests > /dev/null ;		\
+	     cabal build > /dev/null &&					\
+	     echo === $$i === &&					\
+	     GITHUB_OWNER=$(GITHUB_OWNER) GITHUB_TOKEN=$(GITHUB_TOKEN)	\
+	     dist/build/smoke/smoke) ;					\
+	done
