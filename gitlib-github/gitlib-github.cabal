@@ -34,7 +34,7 @@ Library
     , hex                  >= 0.1.2
     , http-conduit         >= 1.8.5.1
     , network              >= 2.4.0.1
-    , old-locale           >= 1.0.0.5
+    , old-locale           >= 1.0.0.4
     , rest-client          >= 0.1.0.0
     , shakespeare-text     >= 1.0.0.5
     , stringable           >= 0.1.1
