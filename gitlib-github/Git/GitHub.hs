@@ -183,9 +183,9 @@ ghLookupBlob oid = do
     case ghBlobEncoding blob of
         "base64" ->
             case dec content of
-                Right bs' -> return (Git.BlobString bs')
+                Right bs' -> return (Git.Blob oid (Git.BlobString bs'))
                 Left str  -> failure (Git.TranslationException (T.pack str))
-        "utf-8" -> return (Git.BlobString content)
+        "utf-8" -> return (Git.Blob oid (Git.BlobString content))
         enc -> failure (Git.BlobEncodingUnknown enc)
 
   where dec = B64.decode . B.concat . B.split 10

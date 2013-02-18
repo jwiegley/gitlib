@@ -144,7 +144,7 @@ lgCreateBlob :: Git.BlobContents LgRepository -> LgRepository BlobOid
 lgCreateBlob b = do
     repo <- lgGet
     ptr  <- liftIO $ mallocForeignPtr
-    r    <- Git.blobToByteString b
+    r    <- Git.blobContentsToByteString b
             >>= \bs -> liftIO $ createBlobFromByteString repo ptr bs
     when (r < 0) $ failure Git.BlobCreateFailed
     return (Tagged (Oid ptr))
@@ -171,7 +171,7 @@ lgLookupBlob oid =
             -- unsafePackCStringLen to refer to its bytes.
             bstr <- curry BU.unsafePackCStringLen (castPtr buf)
                           (fromIntegral size)
-            return (Git.BlobString bstr)
+            return (Git.Blob oid (Git.BlobString bstr))
 
 type TreeEntry = Git.TreeEntry LgRepository
 

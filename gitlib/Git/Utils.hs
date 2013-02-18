@@ -49,14 +49,17 @@ catBlob str = do
 catBlobUtf8 :: Repository m => Text -> m Text
 catBlobUtf8 = catBlob >=> return . T.decodeUtf8
 
-blobToByteString :: Repository m => BlobContents m -> m ByteString
-blobToByteString (BlobString bs) = return bs
-blobToByteString (BlobStream bs) = do
+blobContentsToByteString :: Repository m => BlobContents m -> m ByteString
+blobContentsToByteString (BlobString bs) = return bs
+blobContentsToByteString (BlobStream bs) = do
     strs <- bs $$ CList.consume
     return (B.concat strs)
-blobToByteString (BlobSizedStream bs _) = do
+blobContentsToByteString (BlobSizedStream bs _) = do
     strs <- bs $$ CList.consume
     return (B.concat strs)
+
+blobToByteString :: Repository m => Blob m -> m ByteString
+blobToByteString (Blob _ contents) = blobContentsToByteString contents
 
 commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =

@@ -14,7 +14,6 @@ import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString as B
 import           Data.Conduit
 import           Data.Default
 import           Data.Maybe
@@ -154,7 +153,8 @@ data Object m = BlobObj   (BlobRef m)
               | TagObj    (TagRef m)
 
 {- $blobs -}
-type Blob m = BlobContents m
+data Blob m = Blob { blobOid      :: BlobOid m
+                   , blobContents :: BlobContents m }
 
 type ByteSource m = GSource m ByteString
 
@@ -167,9 +167,9 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
-data TreeEntry m where
-    BlobEntry :: BlobOid m -> Bool -> TreeEntry m
-    TreeEntry :: ObjRef m (Tree m) -> TreeEntry m
+data TreeEntry m = BlobEntry { blobEntryOid :: BlobOid m
+                             , blobEntryExe :: Bool }
+                 | TreeEntry { treeEntryRef :: ObjRef m (Tree m) }
 
 blobEntry :: RepositoryBase m => BlobOid m -> Bool -> TreeEntry m
 blobEntry = BlobEntry
