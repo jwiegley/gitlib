@@ -104,7 +104,7 @@ instance Git.RepositoryBase MockRepository where
     lookupBlob oid = do
         oid' <- Git.parseOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
         if unTagged oid == oid'
-            then return (Git.BlobString "Hello, world!\n")
+            then return (Git.Blob oid (Git.BlobString "Hello, world!\n"))
             else undefined
     lookupTag oid = do
         liftIO $ Prelude.putStrLn $ "lookupTag.."
@@ -112,8 +112,11 @@ instance Git.RepositoryBase MockRepository where
 
     lookupObject oidText = do
         if oidText == "af5626b"
-            then return (Git.BlobObj
-                         (Git.Known (Git.BlobString "Hello, world!\n")))
+            then do
+            oid <- Git.parseOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+            return (Git.BlobObj
+                    (Git.Known (Git.Blob (Tagged oid)
+                                         (Git.BlobString "Hello, world!\n"))))
             else undefined
 
     newTree = return (Tree HashMap.empty)
@@ -137,18 +140,18 @@ instance Eq (Git.Oid MockRepository) where
     Oid x == Oid y = x == y
 
 instance Git.Treeish Tree where
-    type TreeRepository = MockRepository
+    type TreeRepository Tree = MockRepository
     modifyTree = undefined
     writeTree  = undefined
 
 instance Git.Commitish Commit where
-    type CommitRepository = MockRepository
+    type CommitRepository Commit = MockRepository
     commitOid     = undefined
     commitParents = undefined
     commitTree    = undefined
 
 instance Git.Treeish Commit where
-    type TreeRepository = MockRepository
+    type TreeRepository Commit = MockRepository
     modifyTree = Git.defaultCommitModifyTree
     writeTree  = Git.defaultCommitWriteTree
 
