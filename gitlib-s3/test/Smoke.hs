@@ -26,9 +26,10 @@ import           Test.Hspec.Runner
 
 main :: IO ()
 main = do
-    bucket    <- return Nothing -- fmap T.pack <$> lookupEnv "S3_BUCKET"
-    accessKey <- return Nothing -- fmap T.pack <$> lookupEnv "AWS_ACCESS_KEY"
-    secretKey <- return Nothing -- fmap T.pack <$> lookupEnv "AWS_SECRET_KEY"
+    env <- getEnvironment
+    let bucket    = T.pack <$> lookup "S3_BUCKET" env
+        accessKey = T.pack <$> lookup "AWS_ACCESS_KEY" env
+        secretKey = T.pack <$> lookup "AWS_SECRET_KEY" env
     summary   <-
         hspecWith
         (defaultConfig { configVerbose = True })
