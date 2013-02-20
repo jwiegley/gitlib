@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP #-}
 
 -- | Interface for working with Git repositories.
 module Git where
@@ -156,7 +157,11 @@ data Object m = BlobObj   (BlobRef m)
 data Blob m = Blob { blobOid      :: BlobOid m
                    , blobContents :: BlobContents m }
 
+#if MIN_VERSION_conduit(1, 0, 0)
+type ByteSource m = Producer m ByteString
+#else
 type ByteSource m = GSource m ByteString
+#endif
 
 data BlobContents m = BlobString ByteString
                     | BlobStream (ByteSource m)
