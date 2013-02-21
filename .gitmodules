@@ -39,4 +39,4 @@
 	url = git://github.com/jwiegley/svndump.git
 [submodule "vendor/github"]
 	path = vendor/github
-	url = git://github.com/mike-burns/github.git
+	url = git@github.com:fpco/github.git
