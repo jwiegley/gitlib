@@ -8,5 +8,6 @@
 ./vendor/c2hsc
 ./vendor/data-marshal
 ./vendor/general-prelude
+./vendor/github
 ./vendor/rest-client
 ./vendor/stringable
