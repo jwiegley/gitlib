@@ -203,13 +203,17 @@ readRefs :: Ptr C'git_odb_backend -> IO (Maybe RefMap)
 readRefs be = do
   odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
   exists <- catch (runResourceT $ testFileS3 odbS3 "refs.yml")
-                  (\e -> print (e :: SomeException) >> throwIO e)
+                  (\e -> do putStrLn "Failed to check whether 'refs.yml' exists"
+                            print (e :: SomeException)
+                            throwIO e)
   if exists
     then do
     bytes  <- catch (runResourceT $ do
                         result <- getFileS3 odbS3 "refs.yml" Nothing
                         result $$+- await)
-                    (\e -> print (e :: SomeException) >> throwIO e)
+                    (\e -> do putStrLn "Failed to read 'refs.yml'"
+                              print (e :: SomeException)
+                              throwIO e)
     case bytes of
       Nothing     -> return Nothing
       Just bytes' -> return (Y.decode bytes' :: Maybe RefMap)
@@ -262,7 +266,9 @@ mapPair f (x,y) = (f x, f y)
 
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid =
-  catch go (\e -> print (e :: SomeException) >> return (-1))
+  catch go (\e -> do putStrLn "odbS3BackendReadCallback failed"
+                     print (e :: SomeException)
+                     return (-1))
   where
     go = do
       odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
@@ -296,7 +302,9 @@ odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len =
 
 odbS3BackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
 odbS3BackendReadHeaderCallback len_p type_p be oid =
-  catch go (\e -> print (e :: SomeException) >> return (-1))
+  catch go (\e -> do putStrLn "odbS3BackendReadHeaderCallback failed"
+                     print (e :: SomeException)
+                     return (-1))
   where
     go = do
       let hdrLen = sizeOf (undefined :: Int64) * 2
@@ -326,7 +334,9 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
                     (castPtr obj_data) (fromIntegral len)
       let payload = BL.append hdr (BL.fromChunks [bytes])
       catch (go odbS3 oidStr payload >> return 0)
-            (\e -> print (e :: SomeException) >> return (-1))
+            (\e -> do putStrLn "odbS3BackendWriteCallback failed"
+                      print (e :: SomeException)
+                      return (-1))
     n -> return n
   where
     go odbS3 oidStr payload =
@@ -337,7 +347,9 @@ odbS3BackendExistsCallback be oid = do
   oidStr <- oidToStr oid
   odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
   exists <- catch (runResourceT $ testFileS3 odbS3 (T.pack oidStr))
-                 (\e -> print (e :: SomeException) >> return False)
+                 (\e -> do putStrLn "odbS3BackendExistsCallback failed"
+                           print (e :: SomeException)
+                           return False)
   return $ if exists then 1 else 0
 
 odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
