@@ -90,7 +90,7 @@ instance Git.RepositoryBase GitHubRepository where
         { Git.hasSymbolicReferences = False }
 
     parseOid x = Oid <$> unhex (T.encodeUtf8 x)
-    renderOid (Tagged (Oid x)) = T.toLower (T.decodeUtf8 (hex x))
+    renderOid (Oid x) = T.toLower (T.decodeUtf8 (hex x))
 
     createRef    = ghCreateRef
     lookupRef    = ghLookupRef
@@ -102,6 +102,7 @@ instance Git.RepositoryBase GitHubRepository where
     lookupBlob   = ghLookupBlob
     lookupTag    = undefined -- ghLookupTag
     lookupObject = undefined -- ghLookupObject
+    existsObject = undefined -- ghExistsObject
     newTree      = ghNewTree
     createBlob   = ghCreateBlob
     createCommit = ghCreateCommit
@@ -114,7 +115,7 @@ data GitHubBlob = GitHubBlob
     , ghBlobSize     :: Int } deriving Show
 
 instance Show (Git.Oid GitHubRepository) where
-    show = T.unpack . Git.renderOid . Tagged
+    show = T.unpack . Git.renderOid
 
 instance Ord (Git.Oid GitHubRepository) where
     compare (Oid l) (Oid r) = compare l r
@@ -178,7 +179,7 @@ ghLookupBlob oid = do
     --     class IsHttpMethod a where asHttpMethod :: a -> ByteString
     -- jww (2012-12-26): Do we want runtime checking of the validity of the
     -- method?  Yes, but allow the user to declare it as OK.
-    blob <- ghRestful "GET" ("git/blobs/" <> Git.renderOid oid) ()
+    blob <- ghRestful "GET" ("git/blobs/" <> Git.renderObjOid oid) ()
     let content = ghBlobContent blob
     case ghBlobEncoding blob of
         "base64" ->
@@ -273,7 +274,7 @@ treeEntryToProxy name (Git.BlobEntry oid exe) =
         , ghpTreeEntryPath    = name
         , ghpTreeEntryMode    = if exe then "100755" else "100644"
         , ghpTreeEntrySize    = (-1)
-        , ghpTreeEntrySha     = Git.renderOid oid
+        , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
         }
 treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
@@ -282,7 +283,7 @@ treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
         , ghpTreeEntryPath    = name
         , ghpTreeEntryMode    = "040000"
         , ghpTreeEntrySize    = (-1)
-        , ghpTreeEntrySha     = Git.renderOid oid
+        , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Just ref
         }
 treeEntryToProxy name (Git.TreeEntry ref@(Git.Known tree)) = do
@@ -292,7 +293,7 @@ treeEntryToProxy name (Git.TreeEntry ref@(Git.Known tree)) = do
         , ghpTreeEntryPath    = name
         , ghpTreeEntryMode    = "040000"
         , ghpTreeEntrySize    = (-1)
-        , ghpTreeEntrySha     = Git.renderOid oid
+        , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Just ref
         }
 
@@ -329,7 +330,7 @@ ghNewTree = GitHubTree <$> (liftIO $ newIORef Nothing)
 
 ghLookupTree :: TreeOid -> GitHubRepository Tree
 ghLookupTree oid = do
-    treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderOid oid) ()
+    treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderObjOid oid) ()
     oid' <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
     subtree' <- subtree treeProxy
     GitHubTree <$> (liftIO $ newIORef (Just (Tagged oid')))
@@ -525,7 +526,7 @@ proxyToCommit cp = GitHubCommit
 
 ghLookupCommit :: CommitOid -> GitHubRepository Commit
 ghLookupCommit oid = do
-    cp <- ghRestful "GET" ("git/commits/" <> Git.renderOid oid) ()
+    cp <- ghRestful "GET" ("git/commits/" <> Git.renderObjOid oid) ()
     return (proxyToCommit cp)
 
 ghCreateCommit :: [CommitRef] -> TreeRef
@@ -614,7 +615,7 @@ ghCreateRef refName (Git.RefObj commitRef) = do
     let oid = Git.commitRefOid commitRef
     ghRefToReference
         =<< ghRestful "POST" "git/refs"
-                     (GitHubDirectRef (Just refName) (Git.renderOid oid)
+                     (GitHubDirectRef (Just refName) (Git.renderObjOid oid)
                                       Nothing)
 
 ghCreateRef _ (Git.RefSymbolic _) =
@@ -626,7 +627,7 @@ ghUpdateRef refName (Git.RefObj commitRef) = do
     let oid = Git.commitRefOid commitRef
     ghRefToReference =<<
         (ghRestful "PATCH" ("git/" <> refName)
-                   (GitHubDirectRef Nothing (Git.renderOid oid) (Just True)))
+                   (GitHubDirectRef Nothing (Git.renderObjOid oid) (Just True)))
 
 ghUpdateRef _ (Git.RefSymbolic _) =
     error "Not supported"

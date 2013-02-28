@@ -1,11 +1,12 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE CPP #-}
 
 -- | Interface for working with Git repositories.
 module Git where
@@ -43,7 +44,10 @@ class (Applicative m, Monad m, Failure GitException m,
     facts :: m RepositoryFacts
 
     parseOid  :: Text -> m (Oid m)
-    renderOid :: Tagged a (Oid m) -> Text
+    renderOid :: Oid m -> Text
+    renderOid = renderObjOid . Tagged
+    renderObjOid :: Tagged a (Oid m) -> Text
+    renderObjOid = renderOid . unTagged
 
     -- References
     createRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
@@ -61,7 +65,7 @@ class (Applicative m, Monad m, Failure GitException m,
     allRefNames :: m [Text]
     allRefNames = map refName <$> allRefs
 
-    resolveRef :: Text -> m (Maybe (ObjRef m (Commit m)))
+    resolveRef :: Text -> m (Maybe (CommitRef m))
     resolveRef name = lookupRef name >>= \ref ->
         case ref of
             Nothing -> return Nothing
@@ -79,13 +83,13 @@ class (Applicative m, Monad m, Failure GitException m,
     lookupTag    :: TagOid m -> m (Tag m)
 
     lookupObject :: Text -> m (Object m)
+    existsObject :: Oid m -> m Bool
 
     -- Object creation
     newTree :: m (Tree m)
     createBlob :: BlobContents m -> m (BlobOid m)
-    createCommit ::
-        [ObjRef m (Commit m)] -> ObjRef m (Tree m)
-        -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
+    createCommit :: [CommitRef m] -> TreeRef m
+                 -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
 
 {- $exceptions -}
@@ -157,6 +161,14 @@ data Object m = BlobObj   (BlobRef m)
 data Blob m = Blob { blobOid      :: BlobOid m
                    , blobContents :: BlobContents m }
 
+blobRefOid :: Repository m => BlobRef m -> BlobOid m
+blobRefOid (ByOid oid) = oid
+blobRefOid (Known (Blob {..})) = blobOid
+
+resolveBlob :: Repository m => BlobRef m -> m (Blob m)
+resolveBlob (ByOid oid) = lookupBlob oid
+resolveBlob (Known obj) = return obj
+
 #if MIN_VERSION_conduit(1, 0, 0)
 type ByteSource m = Producer m ByteString
 #else
@@ -174,7 +186,7 @@ instance Eq (BlobContents m) where
 {- $trees -}
 data TreeEntry m = BlobEntry { blobEntryOid :: BlobOid m
                              , blobEntryExe :: Bool }
-                 | TreeEntry { treeEntryRef :: ObjRef m (Tree m) }
+                 | TreeEntry { treeEntryRef :: TreeRef m }
 
 blobEntry :: RepositoryBase m => BlobOid m -> Bool -> TreeEntry m
 blobEntry = BlobEntry
@@ -220,17 +232,16 @@ class RepositoryBase (TreeRepository t) => Treeish t where
 
     writeTree :: t -> TreeRepository t (TreeOid (TreeRepository t))
 
-treeRef :: Tree m -> ObjRef m (Tree m)
+treeRef :: Tree m -> TreeRef m
 treeRef = Known
 
-treeRefOid :: Repository m => ObjRef m (Tree m) -> m (TreeOid m)
+treeRefOid :: Repository m => TreeRef m -> m (TreeOid m)
 treeRefOid (ByOid x) = return x
 treeRefOid (Known x) = writeTree x
 
-resolveTree :: RepositoryBase m => ObjRef m (Tree m) -> m (Tree m)
-resolveTree objRef = case objRef of
-    ByOid oid -> lookupTree oid
-    Known obj -> return obj
+resolveTree :: Repository m => TreeRef m -> m (Tree m)
+resolveTree (ByOid oid) = lookupTree oid
+resolveTree (Known obj) = return obj
 
 type Repository m = (RepositoryBase m,
                      m ~ TreeRepository (Tree m),
@@ -279,28 +290,27 @@ class (RepositoryBase (CommitRepository c), Treeish c) => Commitish c where
 
     commitTree' :: c -> CommitRepository c (Tree (CommitRepository c))
     commitTree' c = case commitTree c of
-        Known t   -> return t
         ByOid oid -> lookupTree oid
+        Known obj -> return obj
 
     commitAuthor    :: c -> Signature
     commitCommitter :: c -> Signature
     commitLog       :: c -> Text
     commitEncoding  :: c -> Text
 
-commitRef :: Commit c -> ObjRef m (Commit c)
+commitRef :: Commit m -> CommitRef m
 commitRef = Known
 
 commitRefTarget :: Commit c -> RefTarget m (Commit c)
 commitRefTarget = RefObj . Known
 
-commitRefOid :: Repository m => ObjRef m (Commit m) -> CommitOid m
+commitRefOid :: Repository m => CommitRef m -> CommitOid m
 commitRefOid (ByOid x) = x
 commitRefOid (Known x) = commitOid x
 
-resolveCommit :: RepositoryBase m => ObjRef m (Commit m) -> m (Commit m)
-resolveCommit objRef = case objRef of
-    ByOid oid -> lookupCommit oid
-    Known obj -> return obj
+resolveCommit :: Repository m => CommitRef m -> m (Commit m)
+resolveCommit (ByOid oid) = lookupCommit oid
+resolveCommit (Known obj) = return obj
 
 {- $tags -}
 

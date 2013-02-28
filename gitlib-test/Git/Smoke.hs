@@ -121,12 +121,12 @@ smokeTestSpec wr = describe "Smoke tests" $ do
             , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
       c <- sampleCommit tr sig
-      let x = renderOid (commitOid c)
+      let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
       coid <- Git.parseOid "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
       c <- lookupCommit (Tagged coid)
-      let x = renderOid (commitOid c)
+      let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
   it "create two commits" $ do
@@ -147,7 +147,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = posixSecondsToUTCTime 1348980883 }
       c <- sampleCommit tr sig
-      let x = renderOid (commitOid c)
+      let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
       goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
@@ -161,7 +161,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
             , signatureWhen  = posixSecondsToUTCTime 1348981883 }
       c2 <- createCommit [commitRef c] (treeRef tr) sig sig
                         "Second sample log message.\n" Nothing
-      let x = renderOid (commitOid c2)
+      let x = renderObjOid (commitOid c2)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       updateRef_ "refs/heads/master" (RefObj (commitRef c2))
@@ -171,7 +171,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
 
       Just c3 <- resolveRef "refs/heads/master"
       c3 <- resolveCommit c3
-      let x = renderOid (commitOid c3)
+      let x = renderObjOid (commitOid c3)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       refs <- allRefNames

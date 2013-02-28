@@ -94,6 +94,7 @@ instance Git.RepositoryBase LgRepository where
     lookupBlob   = lgLookupBlob
     lookupTag    = undefined
     lookupObject = lgLookupObject
+    existsObject = lgExistsObject
     newTree      = lgNewTree
     createBlob   = lgCreateBlob
     createCommit = lgCreateCommit
@@ -115,8 +116,8 @@ lgParseOid str
   where
     len = S.length str
 
-lgRenderOid :: Tagged a (Git.Oid LgRepository) -> Text
-lgRenderOid = T.pack . show . unTagged
+lgRenderOid :: Git.Oid LgRepository -> Text
+lgRenderOid = T.pack . show
 
 instance Show (Git.Oid LgRepository) where
     show (Oid coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
@@ -488,6 +489,22 @@ lgLookupObject str
                            else failure (Git.ObjectLookupFailed str len)
 
     ret f = return . f . Git.ByOid . Tagged
+
+lgExistsObject :: Oid -> LgRepository Bool
+lgExistsObject oid = do
+    repo <- lgGet
+    result <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
+        alloca $ \pptr -> do
+            r0 <- c'git_repository_odb pptr repoPtr
+            if r0 < 0
+                then return Nothing
+                else
+                withForeignPtr (getOid oid) $ \coid -> do
+                    ptr <- peek pptr
+                    r <- c'git_odb_exists ptr coid
+                    c'git_odb_free ptr
+                    return (Just (r == 0))
+    maybe (failure Git.RepositoryInvalid) return result
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.

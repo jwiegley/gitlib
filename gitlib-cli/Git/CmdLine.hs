@@ -83,7 +83,7 @@ instance Git.RepositoryBase CmdLineRepository where
         { Git.hasSymbolicReferences = True }
 
     parseOid = return . Oid . TL.fromStrict
-    renderOid (Tagged (Oid x)) = TL.toStrict x
+    renderOid (Oid x) = TL.toStrict x
 
     lookupRef    = cliLookupRef
     createRef    = cliUpdateRef
@@ -96,6 +96,7 @@ instance Git.RepositoryBase CmdLineRepository where
     lookupBlob   = cliLookupBlob
     lookupTag    = undefined -- cliLookupTag
     lookupObject = undefined -- cliLookupObject
+    existsObject = undefined -- cliExistsObject
     newTree      = cliNewTree
     createBlob   = cliCreateBlob
     createCommit = cliCreateCommit
@@ -134,9 +135,9 @@ runGit_ :: [TL.Text] -> CmdLineRepository ()
 runGit_ = flip (doRunGit run_) (return ())
 
 cliLookupBlob :: BlobOid -> CmdLineRepository Blob
-cliLookupBlob (Tagged (Oid sha)) =
+cliLookupBlob oid@(Tagged (Oid sha)) =
     runGit ["cat-file", "-p", sha]
-        >>= return . Git.BlobString . T.encodeUtf8 . TL.toStrict
+        >>= return . Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict
 
 cliCreateBlob :: Git.BlobContents CmdLineRepository -> CmdLineRepository BlobOid
 cliCreateBlob (Git.BlobString content) = do
@@ -266,9 +267,10 @@ cliWriteTree tree = do
                            , " blob ", sha, "\t", TL.fromStrict path ]
     renderLine (path, Git.TreeEntry tref) = do
         treeOid <- Git.treeRefOid tref
-        return $ TL.concat [ "040000 tree "
-                            , TL.fromStrict (Git.renderOid treeOid), "\t"
-                            , TL.fromStrict path ]
+        return $ TL.concat
+            [ "040000 tree "
+            , TL.fromStrict (Git.renderObjOid treeOid), "\t"
+            , TL.fromStrict path ]
 
 parseCliTime :: Text -> UTCTime
 parseCliTime =
@@ -317,9 +319,9 @@ cliCreateCommit parents tree author committer message ref = do
 
     oid <- doRunGit run
            (["commit-tree"]
-            <> L.concat [["-p", TL.fromStrict (Git.renderOid poid)] |
+            <> L.concat [["-p", TL.fromStrict (Git.renderObjOid poid)] |
                          poid <- parentOids]
-            <> [TL.fromStrict (Git.renderOid treeOid)])
+            <> [TL.fromStrict (Git.renderObjOid treeOid)])
            $ do mapM_ (\(var,f,val) -> setenv var (TL.fromStrict (f val)))
                       [ ("GIT_AUTHOR_NAME",  Git.signatureName,  author)
                       , ("GIT_AUTHOR_EMAIL", Git.signatureEmail, author)

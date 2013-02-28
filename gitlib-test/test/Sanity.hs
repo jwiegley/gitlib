@@ -119,6 +119,8 @@ instance Git.RepositoryBase MockRepository where
                                          (Git.BlobString "Hello, world!\n"))))
             else undefined
 
+    existsObject = undefined
+
     newTree = return (Tree HashMap.empty)
 
     createBlob (Git.BlobString x) =
