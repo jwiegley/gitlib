@@ -499,6 +499,8 @@ lgExistsObject oid = do
             if r0 < 0
                 then return Nothing
                 else
+                -- jww (2013-02-28): Need to guard against exceptions so that
+                -- ptr doesn't leak.
                 withForeignPtr (getOid oid) $ \coid -> do
                     ptr <- peek pptr
                     r <- c'git_odb_exists ptr coid
