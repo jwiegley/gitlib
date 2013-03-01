@@ -135,7 +135,7 @@ instance Ord (Git.Oid LgRepository) where
                      else return EQ
 
 instance Eq (Git.Oid LgRepository) where
-    Oid coid1 == Oid coid2 = coid1 `compare` coid2 == EQ
+    oid1 == oid2 = oid1 `compare` oid2 == EQ
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
