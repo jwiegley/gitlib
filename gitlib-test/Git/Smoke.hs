@@ -135,7 +135,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       tr <- newTree
       putBlob tr "hello/world.txt" hello
       oid <- Git.writeTree tr
-      let x = renderOid oid
+      let x = renderObjOid oid
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       let sig  = Signature {
@@ -144,7 +144,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
             , signatureWhen  = posixSecondsToUTCTime 1348980883 }
 
       c <- sampleCommit tr sig
-      let x = renderOid (commitOid c)
+      let x = renderObjOid (commitOid c)
       liftIO $ x @?= "d592871f56aa949d726fcc211370d1af305e9597"
 
       tr' <- Git.resolveTree (Git.commitTree c)
@@ -152,7 +152,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       putBlob tr' "hello/goodbye.txt" goodbye
 
       oid <- Git.writeTree tr'
-      let x = renderOid oid
+      let x = renderObjOid oid
       liftIO $ x @?= "19974fde643bddd26c46052f7a8bdf87f7772c1e"
 
       let sig  = Signature {
@@ -162,7 +162,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
 
       c <- createCommit [commitRef c] (treeRef tr') sig sig
                        "Sample log message 2.\n" (Just "refs/heads/master")
-      let x = renderOid (commitOid c)
+      let x = renderObjOid (commitOid c)
       liftIO $ x @?= "61a2c6425d2e60a480d272aa921d4f4ffe5dd20f"
 
   it "create two commits" $ do
