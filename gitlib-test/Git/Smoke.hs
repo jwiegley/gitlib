@@ -129,6 +129,42 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
+  it "modify a commit" $ do
+    withNewRepository wr "modifyCommit.git" $ do
+      hello <- createBlobUtf8 "Hello, world!\n"
+      tr <- newTree
+      putBlob tr "hello/world.txt" hello
+      oid <- Git.writeTree tr
+      let x = renderOid oid
+      liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
+
+      let sig  = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+
+      c <- sampleCommit tr sig
+      let x = renderOid (commitOid c)
+      liftIO $ x @?= "d592871f56aa949d726fcc211370d1af305e9597"
+
+      tr' <- Git.resolveTree (Git.commitTree c)
+      goodbye <- createBlobUtf8 "Goodbye, world!\n"
+      putBlob tr' "hello/goodbye.txt" goodbye
+
+      oid <- Git.writeTree tr'
+      let x = renderOid oid
+      liftIO $ x @?= "19974fde643bddd26c46052f7a8bdf87f7772c1e"
+
+      let sig  = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+
+      c <- createCommit [commitRef c] (treeRef tr') sig sig
+                       "Sample log message 2.\n" (Just "refs/heads/master")
+      let x = renderOid (commitOid c)
+      liftIO $ x @?= "61a2c6425d2e60a480d272aa921d4f4ffe5dd20f"
+
   it "create two commits" $ do
     withNewRepository wr "createTwoCommits.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
