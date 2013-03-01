@@ -268,12 +268,9 @@ doLookupTreeEntry t (name:names) = do
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 lgWriteTree :: Tree -> LgRepository TreeOid
-lgWriteTree t = do
-    info <- liftIO $ readIORef (lgTreeInfo t)
-    maybe (do oid <- doWriteTree t
-              maybe (failure Git.TreeBuilderWriteFailed)
-                    (return . Tagged) oid)
-          return (gitId info)
+lgWriteTree t = doWriteTree t
+                >>= maybe (failure Git.TreeBuilderWriteFailed)
+                          (return . Tagged)
 
 insertEntry :: CStringable a
             => ForeignPtr C'git_treebuilder -> a -> Oid -> CUInt
