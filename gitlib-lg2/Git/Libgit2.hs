@@ -312,8 +312,9 @@ doWriteTree t = do
         then return Nothing
         else go contents (repoObj repo)
   where
-    go :: ForeignPtr C'git_treebuilder -> ForeignPtr C'git_repository
-          -> LgRepository (Maybe Oid)
+    go :: ForeignPtr C'git_treebuilder
+       -> ForeignPtr C'git_repository
+       -> LgRepository (Maybe Oid)
     go fptr repo = do
         (r3,coid) <- liftIO $ do
             coid <- mallocForeignPtr
