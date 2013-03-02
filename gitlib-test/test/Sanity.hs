@@ -81,7 +81,7 @@ instance Git.RepositoryBase MockRepository where
     parseOid x = do
         y <- unhex (T.encodeUtf8 x)
         return $ Oid (BL.fromChunks [y])
-    renderOid (Tagged (Oid x)) = T.pack (hex (TL.unpack (TL.decodeUtf8 x)))
+    renderOid (Oid x) = T.pack (hex (TL.unpack (TL.decodeUtf8 x)))
     lookupRef name = do
         liftIO $ Prelude.putStrLn $ "lookupRef.."
         return undefined
