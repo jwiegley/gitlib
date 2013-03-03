@@ -319,9 +319,9 @@ cliCreateCommit parents tree author committer message ref = do
 
     oid <- doRunGit run
            (["commit-tree"]
+            <> [TL.fromStrict (Git.renderObjOid treeOid)]
             <> L.concat [["-p", TL.fromStrict (Git.renderObjOid poid)] |
-                         poid <- parentOids]
-            <> [TL.fromStrict (Git.renderObjOid treeOid)])
+                         poid <- parentOids])
            $ do mapM_ (\(var,f,val) -> setenv var (TL.fromStrict (f val)))
                       [ ("GIT_AUTHOR_NAME",  Git.signatureName,  author)
                       , ("GIT_AUTHOR_EMAIL", Git.signatureEmail, author)
