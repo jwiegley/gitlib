@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
@@ -11,6 +12,7 @@ import           Control.Applicative
 import           Control.Exception
 import           Control.Failure
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Data.Monoid
 import           Data.Stringable
@@ -29,40 +31,25 @@ instance Eq Repository where
 instance Show Repository where
   show x = "Repository " <> toString (repoPath x)
 
-newtype LgRepository a = LgRepository
-    { runLgRepository :: ReaderT Repository IO a }
+newtype LgRepository m a = LgRepository
+    { runLgRepository :: ReaderT Repository m a }
+    deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
 
-type Oid       = Git.Oid LgRepository
+type Oid m     = Git.Oid (LgRepository m)
 
-type BlobOid   = Git.BlobOid LgRepository
-type TreeOid   = Git.TreeOid LgRepository
-type CommitOid = Git.CommitOid LgRepository
+type BlobOid m   = Git.BlobOid (LgRepository m)
+type TreeOid m   = Git.TreeOid (LgRepository m)
+type CommitOid m = Git.CommitOid (LgRepository m)
 
-type Tree      = Git.Tree LgRepository
-type Commit    = Git.Commit LgRepository
+type Tree m      = Git.Tree (LgRepository m)
+type Commit m    = Git.Commit (LgRepository m)
 
-type TreeRef   = Git.TreeRef LgRepository
-type CommitRef = Git.CommitRef LgRepository
+type TreeRef m   = Git.TreeRef (LgRepository m)
+type CommitRef m = Git.CommitRef (LgRepository m)
 
-type Reference = Git.Reference LgRepository Commit
+type Reference m = Git.Reference (LgRepository m) (Commit m)
 
-instance Functor LgRepository where
-    fmap f (LgRepository x) = LgRepository (fmap f x)
-
-instance Applicative LgRepository where
-    pure = LgRepository . pure
-    LgRepository f <*> LgRepository x = LgRepository (f <*> x)
-
-instance Monad LgRepository where
-    return = LgRepository . return
-    LgRepository m >>= f = LgRepository (m >>= runLgRepository . f)
-
-instance MonadIO LgRepository where
-    liftIO m = LgRepository (liftIO m)
-
-instance Failure Git.GitException LgRepository where
-    failure = liftIO . throwIO
-
+lgGet :: Monad m => LgRepository m Repository
 lgGet = LgRepository ask
 
 -- Types.hs
