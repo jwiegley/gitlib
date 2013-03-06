@@ -60,7 +60,9 @@ import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import qualified System.IO.Unsafe as SU
 
-instance (Applicative m, MonadIO m, Failure Git.GitException m) => Git.RepositoryBase (LgRepository m) where
+type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
+
+instance M m => Git.RepositoryBase (LgRepository m) where
     data Oid (LgRepository m) = Oid
         { getOid :: ForeignPtr C'git_oid }
 
@@ -144,7 +146,9 @@ instance Eq (Git.Oid (LgRepository m)) where
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the given string is 'empty', it is an error.
-lgCreateBlob :: M m => Git.BlobContents (LgRepository m) -> LgRepository m (BlobOid m)
+lgCreateBlob :: M m
+             => Git.BlobContents (LgRepository m)
+             -> LgRepository m (BlobOid m)
 lgCreateBlob b = do
     repo <- lgGet
     ptr  <- liftIO $ mallocForeignPtr
@@ -179,7 +183,7 @@ lgLookupBlob oid =
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
-instance (Applicative m, MonadIO m, Failure Git.GitException m) => Git.Treeish (Tree m) where
+instance M m => Git.Treeish (Tree m) where
     type TreeRepository (Tree m) = LgRepository m
     modifyTree = lgModifyTree
     writeTree  = lgWriteTree
@@ -233,7 +237,10 @@ lgLookupTree len oid =
                               , lgPendingUpdates = upds
                               , lgTreeContents   = fptr }
 
-doLookupTreeEntry :: M m => Tree m -> [Text] -> LgRepository m (Maybe (TreeEntry m))
+doLookupTreeEntry :: M m
+                  => Tree m
+                  -> [Text]
+                  -> LgRepository m (Maybe (TreeEntry m))
 doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
 doLookupTreeEntry t (name:names) = do
   -- Lookup the current name in this tree.  If it doesn't exist, and there are
@@ -406,7 +413,7 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
-instance (Applicative m, MonadIO m, Failure Git.GitException m) => Git.Commitish (Commit m) where
+instance M m => Git.Commitish (Commit m) where
     type CommitRepository (Commit m) = LgRepository m
     commitOid       = fromJust . gitId . lgCommitInfo
     commitParents   = lgCommitParents
@@ -416,7 +423,7 @@ instance (Applicative m, MonadIO m, Failure Git.GitException m) => Git.Commitish
     commitLog       = lgCommitLog
     commitEncoding  = T.pack . lgCommitEncoding
 
-instance (Applicative m, MonadIO m, Failure Git.GitException m) => Git.Treeish (Commit m) where
+instance M m => Git.Treeish (Commit m) where
     type TreeRepository (Commit m) = LgRepository m
     modifyTree c path createIfNotExist f =
         Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
@@ -642,8 +649,6 @@ lgResolveRef name = do
 --   int force)
 
 --renameRef = c'git_reference_rename
-
-type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
 
 lgDeleteRef :: M m
             => Text -> LgRepository m ()
