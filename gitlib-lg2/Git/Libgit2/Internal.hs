@@ -40,16 +40,16 @@ import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
-withOpenLgRepository :: Repository -> LgRepository a -> IO a
+withOpenLgRepository :: Repository -> LgRepository m a -> m a
 withOpenLgRepository repo action =
     runReaderT (runLgRepository action) repo
 
-withLgRepository :: FilePath -> Bool -> LgRepository a -> IO a
+withLgRepository :: MonadIO m => FilePath -> Bool -> LgRepository m a -> m a
 withLgRepository path bare action = do
-    repo <- openOrCreateLgRepository path bare
+    repo <- liftIO $ openOrCreateLgRepository path bare
     withOpenLgRepository repo action
 
-addTracingBackend :: LgRepository ()
+addTracingBackend :: MonadIO m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
     case F.toText (repoPath repo </> "objects") of
@@ -99,8 +99,8 @@ openRepositoryWith path fn = do
 
 type ObjPtr a = Maybe (ForeignPtr a)
 
-data Base a b = Base { gitId  :: Maybe (Tagged a (Git.Oid LgRepository))
-                     , gitObj :: ObjPtr b }
+data Base m a b = Base { gitId  :: Maybe (Tagged a (Git.Oid (LgRepository m)))
+                       , gitObj :: ObjPtr b }
 
 coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
 coidPtrToOid coidptr = do
@@ -113,11 +113,12 @@ oidToStr :: Ptr C'git_oid -> IO String
 oidToStr = c'git_oid_allocfmt >=> peekCString
 
 lookupObject'
-  :: ForeignPtr C'git_oid -> Int
+  :: MonadIO m
+  => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
   -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> IO b)
-  -> LgRepository b
+  -> LgRepository m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- lgGet
     liftIO $ alloca $ \ptr -> do
