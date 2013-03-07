@@ -2,6 +2,9 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Git.S3
        ( odbS3Backend
@@ -160,9 +163,9 @@ putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
              -> ResourceT IO BL.ByteString
 putFileS3 = curry . odbS3dispatch putFileS3'
 
-type RefMap = M.HashMap Text (Maybe (Git.Reference LgRepository Commit))
+type RefMap m = M.HashMap Text (Maybe (Git.Reference (LgRepository m) (Commit m)))
 
-instance Y.FromJSON (Git.Reference LgRepository Commit) where
+instance Y.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
     parseJSON j = do
         o <- Y.parseJSON j
         let lst = M.toList (o :: Y.Object)
@@ -187,7 +190,7 @@ coidToJSON :: ForeignPtr C'git_oid -> Y.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $ \oid ->
                     Y.toJSON <$> oidToStr oid
 
-instance Y.ToJSON (Git.Reference LgRepository Commit) where
+instance M m => Y.ToJSON (Git.Reference (LgRepository m) (Commit m)) where
   toJSON (Git.Reference name (Git.RefSymbolic target)) =
       object [ "symbolic" .= name
              , "target"   .= target ]
@@ -199,7 +202,7 @@ instance Y.ToJSON (Git.Reference LgRepository Commit) where
              , "target" .=
                coidToJSON (getOid (unTagged (Git.commitOid commit))) ]
 
-readRefs :: Ptr C'git_odb_backend -> IO (Maybe RefMap)
+readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
   odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
   exists <- catch (runResourceT $ testFileS3 odbS3 "refs.yml")
@@ -216,18 +219,18 @@ readRefs be = do
                               throwIO e)
     case bytes of
       Nothing     -> return Nothing
-      Just bytes' -> return (Y.decode bytes' :: Maybe RefMap)
+      Just bytes' -> return (Y.decode bytes' :: Maybe (RefMap m))
 
     else return Nothing
 
-writeRefs :: Ptr C'git_odb_backend -> RefMap -> IO ()
+writeRefs :: M m => Ptr C'git_odb_backend -> RefMap m -> IO ()
 writeRefs be refs = do
   let payload = Y.encode refs
   odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
   void $ runResourceT $
     putFileS3 odbS3 "refs.yml" (sourceLbs (BL.fromChunks [payload]))
 
-mirrorRefsFromS3 :: Ptr C'git_odb_backend -> LgRepository ()
+mirrorRefsFromS3 :: M m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsFromS3 be = do
     repo <- lgGet
     refs <- liftIO $ readRefs be
@@ -250,7 +253,9 @@ mirrorRefsFromS3 be = do
             Nothing -> return 0
         when (r < 0) $ throwIO Git.RepositoryInvalid
 
-mirrorRefsToS3 :: Ptr C'git_odb_backend -> LgRepository ()
+type M m = (Applicative m, MonadIO m, Failure Git.GitException m)
+
+mirrorRefsToS3 :: M m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsToS3 be = do
     odbS3 <- liftIO $ peek (castPtr be :: Ptr OdbS3Backend)
     names <- Git.allRefNames
