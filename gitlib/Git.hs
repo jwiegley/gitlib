@@ -15,6 +15,7 @@ import           Control.Applicative
 import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
+import           Control.Monad.Trans.Class
 import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.Default
@@ -231,6 +232,15 @@ class RepositoryBase (TreeRepository t) => Treeish t where
         void (modifyTree t path False (const (return Nothing)))
 
     writeTree :: t -> TreeRepository t (TreeOid (TreeRepository t))
+
+    traverseEntries :: t -> (FilePath -> TreeEntry (TreeRepository t)
+                             -> TreeRepository t b)
+                    -> TreeRepository t [b]
+
+    traverseEntries_ :: t -> (FilePath -> TreeEntry (TreeRepository t)
+                              -> TreeRepository t b)
+                     -> TreeRepository t ()
+    traverseEntries_ = (void .) . traverseEntries_
 
 treeRef :: Tree m -> TreeRef m
 treeRef = Known

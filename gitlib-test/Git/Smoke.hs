@@ -11,6 +11,7 @@ module Git.Smoke where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.List (sort)
 import           Data.Tagged
 import           Data.Time.Clock.POSIX
 import           Filesystem (removeTree, isDirectory)
@@ -249,5 +250,26 @@ smokeTestSpec wr = describe "Smoke tests" $ do
                              "This is another log message." (Just masterRef)
 
       liftIO $ True @?= True
+
+  it "traversal test" $ do
+    withNewRepository wr "traversalTest.git" $ do
+      let masterRef = "refs/heads/master"
+          sig = Signature { signatureName  = "First Name"
+                          , signatureEmail = "user1@email.org"
+                          , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+      tree <- newTree
+      putBlob tree "One"         =<< createBlobUtf8 "One\n"
+      putBlob tree "Two"         =<< createBlobUtf8 "Two\n"
+      putBlob tree "Files/Three" =<< createBlobUtf8 "Three\n"
+      putBlob tree "More/Four"   =<< createBlobUtf8 "Four\n"
+      commit <- createCommit [] (treeRef tree) sig sig "Initial commit"
+                            (Just masterRef)
+
+      paths <- traverseEntries tree $ \fp _ -> do
+          liftIO $ putStrLn $ "Entry path: " ++ show fp
+          return fp
+
+      liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
+                              , "Files/Three", "More/Four" ]
 
 -- Main.hs ends here

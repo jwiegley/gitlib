@@ -41,7 +41,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as U
 import           Data.Traversable (for)
-import           Filesystem.Path.CurrentOS (FilePath)
+import           Filesystem.Path.CurrentOS (FilePath, (</>))
 import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
 import           Foreign.C.Types
@@ -185,8 +185,35 @@ type TreeEntry m = Git.TreeEntry (LgRepository m)
 
 instance M m => Git.Treeish (Tree m) where
     type TreeRepository (Tree m) = LgRepository m
+
     modifyTree = lgModifyTree
     writeTree  = lgWriteTree
+
+    traverseEntries t f = go "" t f
+      where
+        go fp t f = do
+            entries <- liftIO $ withForeignPtr (lgTreeContents t) $ \tb -> do
+                ior <- newIORef []
+                bracket
+                    (mk'git_treebuilder_filter_callback (callback fp ior))
+                    freeHaskellFunPtr
+                    (flip (c'git_treebuilder_filter tb) nullPtr)
+                readIORef ior
+            concat <$> mapM (uncurry handle) entries
+
+        handle path entry@(Git.TreeEntry tref) = do
+            x  <- f path entry
+            xs <- Git.resolveTree tref >>= flip (go path) f
+            return (x:xs)
+        handle path entry = liftM2 (:) (f path entry) (return [])
+
+        callback fp ior te _ = do
+            cname <- c'git_tree_entry_name te
+            name  <- (fp </>) . F.decodeString <$> peekCString cname
+            entry <- entryToTreeEntry te
+            modifyIORef ior $
+                seq name $ seq entry $ (\xs -> (name,entry):xs)
+            return 0
 
 -- | Create a new, empty tree.
 --
@@ -237,6 +264,17 @@ lgLookupTree len oid =
                               , lgPendingUpdates = upds
                               , lgTreeContents   = fptr }
 
+entryToTreeEntry :: M m => Ptr C'git_tree_entry -> IO (TreeEntry m)
+entryToTreeEntry entry = do
+    coid <- c'git_tree_entry_id entry
+    oid  <- coidPtrToOid coid
+    typ  <- c'git_tree_entry_type entry
+    if typ == c'GIT_OBJ_BLOB
+        then do attrs <- c'git_tree_entry_attributes entry
+                return $ Git.BlobEntry (Tagged (Oid oid))
+                                       (attrs == 0o100755)
+        else return $ Git.TreeEntry (Git.ByOid (Tagged (Oid oid)))
+
 doLookupTreeEntry :: M m
                   => Tree m
                   -> [Text]
@@ -256,16 +294,7 @@ doLookupTreeEntry t (name:names) = do
               entry <- withCStringable name (c'git_treebuilder_get builder)
               if entry == nullPtr
                   then return Nothing
-                  else do
-                  coid  <- c'git_tree_entry_id entry
-                  oid   <- coidPtrToOid coid
-                  typ   <- c'git_tree_entry_type entry
-                  attrs <- c'git_tree_entry_attributes entry
-                  return $ if typ == c'GIT_OBJ_BLOB
-                           then Just (Git.BlobEntry (Tagged (Oid oid))
-                                                    (attrs == 0o100755))
-                           else Just (Git.TreeEntry
-                                      (Git.ByOid (Tagged (Oid oid))))
+                  else Just <$> entryToTreeEntry entry
 
   if null names
       then return y
@@ -425,9 +454,13 @@ instance M m => Git.Commitish (Commit m) where
 
 instance M m => Git.Treeish (Commit m) where
     type TreeRepository (Commit m) = LgRepository m
+
     modifyTree c path createIfNotExist f =
         Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
+
     writeTree c = Git.commitTree' c >>= Git.writeTree
+
+    traverseEntries c f = Git.commitTree' c >>= flip Git.traverseEntries f
 
 lgLookupCommit :: M m => Int -> CommitOid m -> LgRepository m (Commit m)
 lgLookupCommit len oid =
