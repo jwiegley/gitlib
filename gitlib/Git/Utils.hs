@@ -15,6 +15,7 @@ import           Data.Conduit
 import qualified Data.Conduit.List as CList
 import           Data.Function
 import           Data.List
+import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -61,6 +62,12 @@ blobContentsToByteString (BlobSizedStream bs _) = do
 
 blobToByteString :: Repository m => Blob m -> m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
+
+treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
+treeBlobEntries tree =
+    mconcat <$> traverseEntries tree (\fp e -> case e of
+                                           BlobEntry {} -> return [(fp,e)]
+                                           _ -> return [])
 
 commitEntry :: Repository m
             => Commit m
