@@ -69,12 +69,12 @@ treeBlobEntries tree =
                                            BlobEntry {} -> return [(fp,e)]
                                            _ -> return [])
 
-commitEntry :: Repository m
-            => Commit m
-            -> FilePath
-            -> TreeRepository (Tree m)
-                (Maybe (TreeEntry (TreeRepository (Tree m))))
-commitEntry c path = flip lookupEntry path =<< resolveTree (commitTree c)
+commitTreeEntry :: Repository m
+                => Commit m
+                -> FilePath
+                -> TreeRepository (Tree m)
+                      (Maybe (TreeEntry (TreeRepository (Tree m))))
+commitTreeEntry c path = flip lookupEntry path =<< resolveTree (commitTree c)
 
 copyOid :: (Repository m1, Repository m2) => Oid m1 -> m1 (m2 (Oid m2))
 copyOid oid = do
@@ -164,7 +164,7 @@ commitEntryHistory c path =
         return $ maybe rest (:rest) entry
 
     getEntry co = do
-        ce <- commitEntry co path
+        ce <- commitTreeEntry co path
         case ce of
             Nothing  -> return Nothing
             Just ce' -> Just <$> identifyEntry co ce'

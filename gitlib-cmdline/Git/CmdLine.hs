@@ -166,8 +166,9 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
             [mode,kind,sha] = TL.words prefix
         in (TL.toStrict path,
             case kind of
-            "blob" -> Git.BlobEntry (Tagged (Oid sha)) (mode == "100755")
-            "tree" -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
+            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) (mode == "100755")
+            "commit" -> Git.CommitEntry (Git.ByOid (Tagged (Oid sha)))
+            "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")
 
 doLookupTreeEntry :: Tree -> [Text] -> CmdLineRepository (Maybe TreeEntry)
@@ -182,9 +183,10 @@ doLookupTreeEntry t (name:names) = do
   if null names
       then return y
       else case y of
-      Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-      Just (Git.TreeEntry t') -> do t'' <- Git.resolveTree t'
-                                    doLookupTreeEntry t'' names
+      Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+      Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+                                      doLookupTreeEntry t'' names
       _ -> return Nothing
 
 doModifyTree :: Tree
@@ -230,8 +232,9 @@ doModifyTree t (name:names) createIfNotExist f = do
         -- 'Left' values.
         case y of
             Nothing -> return Nothing
-            Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-            Just (Git.TreeEntry st') -> do
+            Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+            Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+            Just (Git.TreeEntry st')  -> do
                 st <- Git.resolveTree st'
                 ze <- doModifyTree st names createIfNotExist f
                 liftIO $ do
@@ -265,12 +268,36 @@ cliWriteTree tree = do
     renderLine (path, Git.BlobEntry (Tagged (Oid sha)) exe) =
         return $ TL.concat [ if exe then "100755" else "100644"
                            , " blob ", sha, "\t", TL.fromStrict path ]
+    renderLine (path, Git.CommitEntry cref) = do
+        let coid = Git.commitRefOid cref
+        return $ TL.concat [ "160000 commit "
+                           , TL.fromStrict (Git.renderObjOid coid), "\t"
+                           , TL.fromStrict path ]
     renderLine (path, Git.TreeEntry tref) = do
         treeOid <- Git.treeRefOid tref
         return $ TL.concat
             [ "040000 tree "
             , TL.fromStrict (Git.renderObjOid treeOid), "\t"
             , TL.fromStrict path ]
+
+cliTraverseEntries :: Tree -> (FilePath -> TreeEntry -> CmdLineRepository b)
+                   -> CmdLineRepository [b]
+cliTraverseEntries tree f = do
+    Tagged (Oid sha) <- Git.writeTree tree
+    contents <- runGit ["ls-tree", "-t", "-r", "-z", sha]
+    -- Even though the tree entries are separated by \NUL, for whatever reason
+    -- @git ls-tree@ also outputs a newline at the end.
+    mapM (uncurry f) $ map parseLine (L.init (TL.splitOn "\NUL" contents))
+  where
+    parseLine line =
+        let [prefix,path] = TL.splitOn "\t" line
+            [mode,kind,sha] = TL.words prefix
+        in (fromText path,
+            case kind of
+            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) (mode == "100755")
+            "commit" -> Git.CommitEntry (Git.ByOid (Tagged (Oid sha)))
+            "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
+            _ -> error "This cannot happen")
 
 parseCliTime :: Text -> UTCTime
 parseCliTime =
@@ -316,7 +343,6 @@ cliCreateCommit :: [CommitRef] -> TreeRef
 cliCreateCommit parents tree author committer message ref = do
     treeOid <- Git.treeRefOid tree
     let parentOids = map Git.commitRefOid parents
-
     oid <- doRunGit run
            (["commit-tree"]
             <> [TL.fromStrict (Git.renderObjOid treeOid)]
@@ -446,8 +472,9 @@ cliGet = CmdLineRepository ask
 
 instance Git.Treeish Tree where
     type TreeRepository Tree = CmdLineRepository
-    modifyTree = cliModifyTree
-    writeTree  = cliWriteTree
+    modifyTree      = cliModifyTree
+    writeTree       = cliWriteTree
+    traverseEntries = cliTraverseEntries
 
 instance Git.Commitish Commit where
     type CommitRepository Commit = CmdLineRepository
@@ -461,8 +488,9 @@ instance Git.Commitish Commit where
 
 instance Git.Treeish Commit where
     type TreeRepository Commit = CmdLineRepository
-    modifyTree = Git.defaultCommitModifyTree
-    writeTree  = Git.defaultCommitWriteTree
+    modifyTree      = Git.defaultCommitModifyTree
+    writeTree       = Git.defaultCommitWriteTree
+    traverseEntries = Git.defaultCommitTraverseEntries
 
 withOpenCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
 withOpenCmdLineRepository repo action =

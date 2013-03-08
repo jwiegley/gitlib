@@ -277,6 +277,26 @@ treeEntryToProxy name (Git.BlobEntry oid exe) =
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
         }
+treeEntryToProxy name (Git.CommitEntry (Git.ByOid oid)) =
+    return GitHubTreeEntryProxy
+        { ghpTreeEntryType    = "commit"
+        , ghpTreeEntryPath    = name
+        , ghpTreeEntryMode    = "160000"
+        , ghpTreeEntrySize    = (-1)
+        , ghpTreeEntrySha     = Git.renderObjOid oid
+        , ghpTreeEntrySubtree = Nothing
+        }
+treeEntryToProxy name (Git.CommitEntry (Git.Known commit)) = do
+    let oid = Git.commitOid commit
+    return GitHubTreeEntryProxy
+        { ghpTreeEntryType    = "commit"
+        , ghpTreeEntryPath    = name
+        , ghpTreeEntryMode    = "160000"
+        , ghpTreeEntrySize    = (-1)
+        , ghpTreeEntrySha     = Git.renderObjOid oid
+        , ghpTreeEntrySubtree = Nothing
+        }
+
 treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "tree"
@@ -301,6 +321,10 @@ proxyToTreeEntry :: GitHubTreeEntryProxy -> GitHubRepository TreeEntry
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "blob" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)
     return $ Git.BlobEntry (Tagged oid) (ghpTreeEntryMode entry == "100755")
+
+proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "commit" }) = do
+    oid <- Git.parseOid (ghpTreeEntrySha entry)
+    return $ Git.CommitEntry (Git.ByOid (Tagged oid))
 
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "tree" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)
@@ -354,9 +378,10 @@ doLookupTreeEntry t (name:names) = do
   if null names
       then return y
       else case y of
-      Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-      Just (Git.TreeEntry t') -> do t'' <- Git.resolveTree t'
-                                    doLookupTreeEntry t'' names
+      Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+      Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+                                      doLookupTreeEntry t'' names
       _ -> return Nothing
 
 doModifyTree :: Tree
@@ -402,8 +427,9 @@ doModifyTree t (name:names) createIfNotExist f = do
         -- 'Left' values.
         case y of
             Nothing -> return Nothing
-            Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-            Just (Git.TreeEntry st') -> do
+            Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+            Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+            Just (Git.TreeEntry st')  -> do
                 st <- Git.resolveTree st'
                 ze <- doModifyTree st names createIfNotExist f
                 liftIO $ do
@@ -438,6 +464,16 @@ ghWriteTree tree = do
         return (Tagged oid)
 
         else failure (Git.TreeCreateFailed "Attempt to create an empty tree")
+
+ghTraverseEntries :: Tree -> (FilePath -> TreeEntry -> GitHubRepository b)
+                  -> GitHubRepository [b]
+ghTraverseEntries tree f = do
+    oid <- Git.writeTree tree
+    treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderObjOid oid
+                                              <> "?recursive=1") ()
+    mapM (\entry -> f (F.fromText (ghpTreeEntryPath entry))
+                        =<< proxyToTreeEntry entry)
+         (ghpTreeContents treeProxy)
 
 -- data GitHubSignature = GitHubSignature
 --     { ghSignatureDate  :: Text
@@ -680,8 +716,9 @@ ghGet = GitHubRepository ask
 
 instance Git.Treeish Tree where
     type TreeRepository Tree = GitHubRepository
-    modifyTree = ghModifyTree
-    writeTree  = ghWriteTree
+    modifyTree      = ghModifyTree
+    writeTree       = ghWriteTree
+    traverseEntries = ghTraverseEntries
 
 instance Git.Commitish Commit where
     type CommitRepository Commit = GitHubRepository
@@ -695,9 +732,10 @@ instance Git.Commitish Commit where
 
 instance Git.Treeish Commit where
     type TreeRepository Commit = GitHubRepository
-    modifyTree c path createIfNotExist f =
-        Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
-    writeTree c = Git.commitTree' c >>= Git.writeTree
+
+    modifyTree      = Git.defaultCommitModifyTree
+    writeTree       = Git.defaultCommitWriteTree
+    traverseEntries = Git.defaultCommitTraverseEntries
 
 withOpenGhRepository :: Repository -> GitHubRepository a -> IO a
 withOpenGhRepository repo action = runReaderT (runGhRepository action) repo

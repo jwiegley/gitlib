@@ -71,8 +71,8 @@ type TreeEntry m = Git.TreeEntry (SampleRepository m)
 instance M m => Git.Treeish (Tree m) where
     type TreeRepository (Tree m) = SampleRepository m
 
-    modifyTree = undefined
-    writeTree  = undefined
+    modifyTree          = undefined
+    writeTree           = undefined
     traverseEntries t f = undefined
 
 instance M m => Git.Commitish (Commit m) where
@@ -88,9 +88,9 @@ instance M m => Git.Commitish (Commit m) where
 instance M m => Git.Treeish (Commit m) where
     type TreeRepository (Commit m) = SampleRepository m
 
-    modifyTree c path createIfNotExist f = undefined
-    writeTree c = undefined
-    traverseEntries c f = undefined
+    modifyTree      = Git.defaultCommitModifyTree
+    writeTree       = Git.defaultCommitWriteTree
+    traverseEntries = Git.defaultCommitTraverseEntries
 
 data Repository = Repository Void
 

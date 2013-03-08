@@ -269,11 +269,16 @@ entryToTreeEntry entry = do
     coid <- c'git_tree_entry_id entry
     oid  <- coidPtrToOid coid
     typ  <- c'git_tree_entry_type entry
-    if typ == c'GIT_OBJ_BLOB
-        then do attrs <- c'git_tree_entry_attributes entry
+    case () of
+        () | typ == c'GIT_OBJ_BLOB ->
+             do attrs <- c'git_tree_entry_attributes entry
                 return $ Git.BlobEntry (Tagged (Oid oid))
                                        (attrs == 0o100755)
-        else return $ Git.TreeEntry (Git.ByOid (Tagged (Oid oid)))
+           | typ == c'GIT_OBJ_TREE ->
+             return $ Git.TreeEntry (Git.ByOid (Tagged (Oid oid)))
+           | typ == c'GIT_OBJ_COMMIT ->
+             return $ Git.CommitEntry (Git.ByOid (Tagged (Oid oid)))
+           | otherwise -> error "Unexpected"
 
 doLookupTreeEntry :: M m
                   => Tree m
@@ -299,9 +304,10 @@ doLookupTreeEntry t (name:names) = do
   if null names
       then return y
       else case y of
-      Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-      Just (Git.TreeEntry t') -> do t'' <- Git.resolveTree t'
-                                    doLookupTreeEntry t'' names
+      Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+      Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+                                      doLookupTreeEntry t'' names
       _ -> return Nothing
 
 -- | Write out a tree to its repository.  If it has already been written,
@@ -403,8 +409,9 @@ doModifyTree t (name:names) createIfNotExist f = do
           -- 'Left' values.
           case y of
               Nothing -> return Nothing
-              Just (Git.BlobEntry {}) -> failure Git.TreeCannotTraverseBlob
-              Just (Git.TreeEntry st') -> do
+              Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+              Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+              Just (Git.TreeEntry st')  -> do
                   st <- Git.resolveTree st'
                   ze <- doModifyTree st names createIfNotExist f
                   liftIO $ modifyIORef
@@ -424,6 +431,9 @@ doModifyTree t (name:names) createIfNotExist f = do
 
     treeEntryToOid (Git.BlobEntry oid exe) =
         return (Just (unTagged oid), if exe then 0o100755 else 0o100644)
+    treeEntryToOid (Git.CommitEntry cr) = do
+        let coid = Git.commitRefOid cr
+        return (Just (unTagged coid), 0o160000)
     treeEntryToOid (Git.TreeEntry tr) = do
         oid <- Git.treeRefOid tr
         return (Just (unTagged oid), 0o040000)
@@ -455,12 +465,9 @@ instance M m => Git.Commitish (Commit m) where
 instance M m => Git.Treeish (Commit m) where
     type TreeRepository (Commit m) = LgRepository m
 
-    modifyTree c path createIfNotExist f =
-        Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
-
-    writeTree c = Git.commitTree' c >>= Git.writeTree
-
-    traverseEntries c f = Git.commitTree' c >>= flip Git.traverseEntries f
+    modifyTree      = Git.defaultCommitModifyTree
+    writeTree       = Git.defaultCommitWriteTree
+    traverseEntries = Git.defaultCommitTraverseEntries
 
 lgLookupCommit :: M m => Int -> CommitOid m -> LgRepository m (Commit m)
 lgLookupCommit len oid =

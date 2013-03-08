@@ -111,6 +111,7 @@ data GitException = BackendError Text
                   | TreeBuilderWriteFailed
                   | TreeLookupFailed
                   | TreeCannotTraverseBlob
+                  | TreeCannotTraverseCommit
                   | TreeEntryLookupFailed FilePath
                   | TreeUpdateFailed
                   | TreeWalkFailed
@@ -185,15 +186,19 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
-data TreeEntry m = BlobEntry { blobEntryOid :: BlobOid m
-                             , blobEntryExe :: Bool }
-                 | TreeEntry { treeEntryRef :: TreeRef m }
+data TreeEntry m = BlobEntry   { blobEntryOid :: BlobOid m
+                               , blobEntryExe :: Bool }
+                 | TreeEntry   { treeEntryRef :: TreeRef m }
+                 | CommitEntry { commitEntryRef :: CommitRef m }
 
 blobEntry :: RepositoryBase m => BlobOid m -> Bool -> TreeEntry m
 blobEntry = BlobEntry
 
 treeEntry :: RepositoryBase m => Tree m -> TreeEntry m
 treeEntry = TreeEntry . treeRef
+
+commitEntry :: RepositoryBase m => Commit m -> TreeEntry m
+commitEntry = CommitEntry . commitRef
 
 -- | A 'Tree' is anything that is "treeish".
 --
@@ -222,10 +227,13 @@ class RepositoryBase (TreeRepository t) => Treeish t where
                -> TreeRepository t ()
     putBlob t path b = putTreeEntry t path (BlobEntry b False)
 
-    putTree :: t -> FilePath
-            -> ObjRef (TreeRepository t) (Tree (TreeRepository t))
+    putTree :: t -> FilePath -> TreeRef (TreeRepository t)
             -> TreeRepository t ()
     putTree t path tr = putTreeEntry t path (TreeEntry tr)
+
+    putCommit :: t -> FilePath -> CommitRef (TreeRepository t)
+              -> TreeRepository t ()
+    putCommit t path c = putTreeEntry t path (CommitEntry c)
 
     dropFromTree :: t -> FilePath -> TreeRepository t ()
     dropFromTree t path =
@@ -273,6 +281,13 @@ defaultCommitWriteTree ::
     => t -> m (TreeOid m)
 defaultCommitWriteTree = commitTree' >=> writeTree
 
+defaultCommitTraverseEntries ::
+    (Repository m, m ~ TreeRepository t, m ~ CommitRepository t,
+     Commitish t, Treeish t)
+    => t -> (FilePath -> TreeEntry (TreeRepository t)
+             -> TreeRepository t b) -> m [b]
+defaultCommitTraverseEntries c f = commitTree' c >>= flip traverseEntries f
+
 {- $commits -}
 data Signature = Signature
     { signatureName  :: Text
@@ -293,10 +308,8 @@ class (RepositoryBase (CommitRepository c), Treeish c) => Commitish c where
     type CommitRepository c :: * -> *
 
     commitOid     :: c -> CommitOid (CommitRepository c)
-    commitParents :: c -> [ObjRef (CommitRepository c)
-                                (Commit (CommitRepository c))]
-    commitTree    :: c -> ObjRef (CommitRepository c)
-                               (Tree (CommitRepository c))
+    commitParents :: c -> [CommitRef (CommitRepository c)]
+    commitTree    :: c -> TreeRef (CommitRepository c)
 
     commitTree' :: c -> CommitRepository c (Tree (CommitRepository c))
     commitTree' c = case commitTree c of
