@@ -1,10 +1,11 @@
 ./gitlib
+./gitlib-cmdline
+./gitlib-sample
+./gitlib-github
+./gitlib-libgit2
+./gitlib-s3
 ./gitlib-test
 ./hlibgit2
-./gitlib-lg2
-./gitlib-s3
-./gitlib-github
-./gitlib-cli
 ./vendor/aws
 ./vendor/c2hsc
 ./vendor/data-marshal

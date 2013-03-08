@@ -1,4 +1,4 @@
-Name:                gitlib-lg2
+Name:                gitlib-libgit2
 Version:             1.0.1
 Synopsis:            Libgit2 backend for gitlib
 License-file:        LICENSE
@@ -24,7 +24,7 @@ Test-suite smoke
           base >=3
         , gitlib
         , gitlib-test
-        , gitlib-lg2
+        , gitlib-libgit2
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3

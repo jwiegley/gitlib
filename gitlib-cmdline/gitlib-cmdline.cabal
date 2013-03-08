@@ -1,4 +1,4 @@
-Name:                gitlib-cli
+Name:                gitlib-cmdline
 Version:             0.1.0.0
 Synopsis:            Gitlib repository backend that uses the git command-line tool.
 Description:         Gitlib repository backend that uses the git command-line tool.
@@ -45,7 +45,7 @@ Test-suite smoke
       base >=3
     , gitlib
     , gitlib-test
-    , gitlib-cli
+    , gitlib-cmdline
     , HUnit              >= 1.2.5
     , hspec              >= 1.4.4
     , hspec-expectations >= 0.3

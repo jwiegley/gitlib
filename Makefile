@@ -26,3 +26,9 @@ tests:
 	     GITHUB_OWNER=$(GITHUB_OWNER) GITHUB_TOKEN=$(GITHUB_TOKEN)	\
 	     dist/build/smoke/smoke) ;					\
 	done
+	for i in test sample ; do					\
+	    (cd gitlib-$$i ;						\
+	     cabal clean > /dev/null ;					\
+	     cabal configure --enable-tests > /dev/null ;		\
+	     cabal build) ;						\
+	done
