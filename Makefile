@@ -1,13 +1,6 @@
 TAGS:
 	find . -name '*.hs' | xargs hasktags -e -o - > TAGS
 
-rebuild:
-	cabal-delete gitlib-s3
-	cabal-delete gitlib
-	cabal-delete hlibgit2
-	cabal-delete aws
-	cabal-meta install -j1
-
 AGENTS = $(HOME)/Library/LaunchAgents
 
 tests:
@@ -17,7 +10,7 @@ tests:
 	if ! ps ax | grep -q '[m]ock_s3\.py'; then			\
 	    python vendor/mock-s3/mock_s3.py ;				\
 	fi
-	for i in cli github lg2 s3 ; do					\
+	for i in cmdline github libgit2 s3 ; do				\
 	    (cd gitlib-$$i ;						\
 	     cabal clean > /dev/null ;					\
 	     cabal configure --enable-tests > /dev/null ;		\
