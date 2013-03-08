@@ -78,6 +78,8 @@ instance Git.RepositoryBase MockRepository where
     data Commit MockRepository = Commit
     data Tag MockRepository    = Tag
 
+    facts = undefined
+
     parseOid x = do
         y <- unhex (T.encodeUtf8 x)
         return $ Oid (BL.fromChunks [y])
@@ -87,6 +89,9 @@ instance Git.RepositoryBase MockRepository where
         return undefined
     updateRef name commit = do
         liftIO $ Prelude.putStrLn $ "updateRef.."
+        return undefined
+    createRef name target = do
+        liftIO $ Prelude.putStrLn $ "createRef.."
         return undefined
     deleteRef name = do
         liftIO $ Prelude.putStrLn $ "deleteRef.."
@@ -143,19 +148,25 @@ instance Eq (Git.Oid MockRepository) where
 
 instance Git.Treeish Tree where
     type TreeRepository Tree = MockRepository
-    modifyTree = undefined
-    writeTree  = undefined
+    modifyTree      = undefined
+    writeTree       = undefined
+    traverseEntries = undefined
 
 instance Git.Commitish Commit where
     type CommitRepository Commit = MockRepository
-    commitOid     = undefined
-    commitParents = undefined
-    commitTree    = undefined
+    commitOid       = undefined
+    commitParents   = undefined
+    commitTree      = undefined
+    commitAuthor    = undefined
+    commitCommitter = undefined
+    commitLog       = undefined
+    commitEncoding  = undefined
 
 instance Git.Treeish Commit where
     type TreeRepository Commit = MockRepository
-    modifyTree = Git.defaultCommitModifyTree
-    writeTree  = Git.defaultCommitWriteTree
+    modifyTree      = Git.defaultCommitModifyTree
+    writeTree       = Git.defaultCommitWriteTree
+    traverseEntries = undefined
 
 withOpenMockRepository :: Repository -> MockRepository a -> IO a
 withOpenMockRepository repo action =
