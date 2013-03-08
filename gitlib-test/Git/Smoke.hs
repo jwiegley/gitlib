@@ -265,10 +265,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       commit <- createCommit [] (treeRef tree) sig sig "Initial commit"
                             (Just masterRef)
 
-      paths <- traverseEntries tree $ \fp _ -> do
-          liftIO $ putStrLn $ "Entry path: " ++ show fp
-          return fp
-
+      paths <- traverseEntries tree $ \fp _ -> return fp
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 

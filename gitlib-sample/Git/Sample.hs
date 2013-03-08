@@ -22,6 +22,8 @@ import           Control.Failure
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
+import           Filesystem.Path.CurrentOS
+import           Prelude hiding (FilePath)
 import qualified Git as Git
 
 data Void
@@ -120,23 +122,22 @@ type Reference m = Git.Reference (SampleRepository m) (Commit m)
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
 
+withSampleRepository :: MonadIO m => FilePath -> SampleRepository m a -> m a
+withSampleRepository path action = do
+    repo <- liftIO $ openOrCreateSampleRepository path
+    withOpenSampleRepository repo action
+
 withOpenSampleRepository :: Repository -> SampleRepository m a -> m a
 withOpenSampleRepository repo action =
     runReaderT (runSampleRepository action) repo
 
-withSampleRepository :: MonadIO m
-                     => FilePath -> Bool -> SampleRepository m a -> m a
-withSampleRepository path bare action = do
-    repo <- liftIO $ openOrCreateSampleRepository path bare
-    withOpenSampleRepository repo action
-
 openSampleRepository :: FilePath -> IO Repository
 openSampleRepository path = undefined
 
-createSampleRepository :: FilePath -> Bool -> IO Repository
-createSampleRepository path bare = undefined
+createSampleRepository :: FilePath -> IO Repository
+createSampleRepository path = undefined
 
-openOrCreateSampleRepository :: FilePath -> Bool -> IO Repository
-openOrCreateSampleRepository path bare = undefined
+openOrCreateSampleRepository :: FilePath -> IO Repository
+openOrCreateSampleRepository path = undefined
 
 -- Sample.hs

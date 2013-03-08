@@ -76,7 +76,7 @@ createLgRepository path bare =
 
 openOrCreateLgRepository :: FilePath -> Bool -> IO Repository
 openOrCreateLgRepository path bare = do
-  p <- liftIO $ isDirectory path
+  p <- isDirectory path
   if p
     then openLgRepository path
     else createLgRepository path bare
@@ -85,7 +85,7 @@ openRepositoryWith :: FilePath
                    -> (Ptr (Ptr C'git_repository) -> CString -> IO CInt)
                    -> IO Repository
 openRepositoryWith path fn = do
-    fptr <- liftIO $ alloca $ \ptr ->
+    fptr <- alloca $ \ptr ->
         case F.toText path of
             Left p  -> error $ "Repository does not exist: " ++ T.unpack p
             Right p -> withCStringable p $ \str -> do
