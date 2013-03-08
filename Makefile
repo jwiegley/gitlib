@@ -10,6 +10,7 @@ tests:
 	if ! ps ax | grep -q '[m]ock_s3\.py'; then			\
 	    python vendor/mock-s3/mock_s3.py ;				\
 	fi
+	perl -i -pe 's/^-- //;' gitlib-github/gitlib-github.cabal
 	for i in cmdline github libgit2 s3 ; do				\
 	    (cd gitlib-$$i ;						\
 	     cabal clean > /dev/null ;					\
