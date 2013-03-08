@@ -31,10 +31,10 @@ data Void
 type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
 
 instance M m => Git.RepositoryBase (SampleRepository m) where
-    data Oid (SampleRepository m) = Oid Void
-    data Tree (SampleRepository m) = Tree Void
+    data Oid (SampleRepository m)    = Oid Void
+    data Tree (SampleRepository m)   = Tree Void
     data Commit (SampleRepository m) = Commit Void
-    data Tag (SampleRepository m) = Tag Void
+    data Tag (SampleRepository m)    = Tag Void
 
     facts = return Git.RepositoryFacts { Git.hasSymbolicReferences = True }
 
@@ -71,9 +71,9 @@ type TreeEntry m = Git.TreeEntry (SampleRepository m)
 instance M m => Git.Treeish (Tree m) where
     type TreeRepository (Tree m) = SampleRepository m
 
-    modifyTree          = undefined
-    writeTree           = undefined
-    traverseEntries t f = undefined
+    modifyTree      = undefined
+    writeTree       = undefined
+    traverseEntries = undefined
 
 instance M m => Git.Commitish (Commit m) where
     type CommitRepository (Commit m) = SampleRepository m
