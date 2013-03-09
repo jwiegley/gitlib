@@ -16,9 +16,6 @@
 [submodule "vendor/convertible"]
 	path = vendor/convertible
 	url = git://github.com/jwiegley/convertible
-[submodule "vendor/data-marshal"]
-	path = vendor/data-marshal
-	url = git@github.com:fpco/data-marshal.git
 [submodule "vendor/general-prelude"]
 	path = vendor/general-prelude
 	url = git://github.com/jwiegley/general-prelude.git
