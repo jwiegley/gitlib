@@ -12,9 +12,9 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.List (sort)
+import           Data.Proxy
 import           Data.Tagged
 import           Data.Time.Clock.POSIX
-import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS
 import           Git
 import           Git.Utils
@@ -24,30 +24,10 @@ import           Test.Hspec (Spec, describe, it, hspec)
 import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 
-withNewRepository :: (Repository m, MonadIO m)
-                  => (FilePath -> Bool -> m () -> IO ())
-                  -> FilePath -> m () -> IO ()
-withNewRepository wrapper dir action = do
-  exists <- isDirectory dir
-  when exists $ removeTree dir
-
-  a <- wrapper dir True action
-  -- we want exceptions to leave the repo behind
-
-  exists <- isDirectory dir
-  when exists $ removeTree dir
-
-  return a
-
-sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
-sampleCommit tr sig =
-    createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
-
-smokeTestSpec :: (Repository m, MonadIO m)
-              => (FilePath -> Bool -> m () -> IO ()) -> Spec
-smokeTestSpec wr = describe "Smoke tests" $ do
-  it "create a single blob" $ do
-    withNewRepository wr "singleBlob.git" $ do
+smokeTestSpec :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
+              => Proxy (r ()) -> Spec
+smokeTestSpec pr = describe "Smoke tests" $ do
+  it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
       x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
@@ -57,8 +37,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       -- x <- catBlob "af5626b"
       -- liftIO $ x @?= "Hello, world!\n"
 
-  it "create a single tree" $ do
-    withNewRepository wr "singleTree.git" $ do
+  it "create a single tree" $ withNewRepository pr "singleTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
@@ -70,8 +49,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       x <- oid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  it "create two trees" $ do
-    withNewRepository wr "twoTrees.git" $ do
+  it "create two trees" $ withNewRepository pr "twoTrees.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
@@ -83,8 +61,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       x <- oid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-  it "delete an item from a tree" $ do
-    withNewRepository wr "deleteTree.git" $ do
+  it "delete an item from a tree" $ withNewRepository pr "deleteTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
@@ -103,8 +80,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       x <- oid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-  it "create a single commit" $ do
-    withNewRepository wr "createCommit.git" $ do
+  it "create a single commit" $ withNewRepository pr "createCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
@@ -130,8 +106,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
-  it "modify a commit" $ do
-    withNewRepository wr "modifyCommit.git" $ do
+  it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
@@ -166,8 +141,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "61a2c6425d2e60a480d272aa921d4f4ffe5dd20f"
 
-  it "create two commits" $ do
-    withNewRepository wr "createTwoCommits.git" $ do
+  it "create two commits" $ withNewRepository pr "createTwoCommits.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
@@ -230,8 +204,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
 
       return ()
 
-  it "another small test" $ do
-    withNewRepository wr "smallTest1.git" $ do
+  it "another small test" $ withNewRepository pr "smallTest1.git" $ do
       blob <- createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
       let masterRef = "refs/heads/master"
           sig = Signature { signatureName   = "First Name"
@@ -251,8 +224,7 @@ smokeTestSpec wr = describe "Smoke tests" $ do
 
       liftIO $ True @?= True
 
-  it "traversal test" $ do
-    withNewRepository wr "traversalTest.git" $ do
+  it "traversal test" $ withNewRepository pr "traversalTest.git" $ do
       let masterRef = "refs/heads/master"
           sig = Signature { signatureName  = "First Name"
                           , signatureEmail = "user1@email.org"
@@ -268,5 +240,17 @@ smokeTestSpec wr = describe "Smoke tests" $ do
       paths <- traverseEntries tree $ \fp _ -> return fp
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
+
+  -- it "pushRef test" $ do
+  --     push <- withExistingRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+  --         ref <- lookupRef "refs/heads/master"
+  --         case ref of
+  --             Just r  -> pushRef r ("origin","") "refs/heads/master"
+  --             Nothing -> return Nothing
+  --     ref <- withExistingRepository pr "/tmp/gitlib/.git"
+  --                (push :: r (Maybe (Reference r (Commit r))))
+  --     liftIO $ Prelude.putStrLn $ "refTarget: " ++ show (refTarget <$> ref)
+  --     let name = refName <$> ref
+  --     liftIO $ name @?= Just "refs/heads/master"
 
 -- Main.hs ends here

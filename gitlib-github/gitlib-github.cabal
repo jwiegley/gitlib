@@ -49,19 +49,19 @@ Library
   exposed-modules:
     Git.GitHub
 
--- Test-suite smoke
---   default-language: Haskell98
---   type: exitcode-stdio-1.0
---   main-is: Smoke.hs
---   hs-source-dirs: test
---   build-depends:
---       base >=3
---     , gitlib
---     , gitlib-test
---     , gitlib-github
---     , HUnit              >= 1.2.5
---     , hspec              >= 1.4.4
---     , hspec-expectations >= 0.3
---     , system-filepath    >= 0.4.7
---     , text               >= 0.11.2
---     , transformers       >= 0.2.2
+Test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Smoke.hs
+  hs-source-dirs: test
+  build-depends:
+      base >=3
+    , gitlib
+    , gitlib-test
+    , gitlib-github
+    , HUnit              >= 1.2.5
+    , hspec              >= 1.4.4
+    , hspec-expectations >= 0.3
+    , system-filepath    >= 0.4.7
+    , text               >= 0.11.2
+    , transformers       >= 0.2.2

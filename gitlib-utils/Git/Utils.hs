@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -9,6 +10,7 @@ import           Control.Applicative
 import           Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Conduit
@@ -16,11 +18,13 @@ import qualified Data.Conduit.List as CList
 import           Data.Function
 import           Data.List
 import           Data.Monoid
+import           Data.Proxy
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Traversable hiding (mapM, sequence)
+import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null)
 import           Git
 import           Prelude hiding (FilePath)
@@ -77,33 +81,26 @@ commitTreeEntry :: Repository m
 commitTreeEntry c path = flip lookupEntry path =<< resolveTree (commitTree c)
 
 copyOid :: (Repository m1, Repository m2) => Oid m1 -> m1 (m2 (Oid m2))
-copyOid oid = do
-    let text = renderOid oid
-    return $ parseOid text
+copyOid = return . parseOid . renderOid
 
 copyBlob :: (Repository m1, Repository m2) => BlobRef m1 -> m1 (m2 (BlobOid m2))
 copyBlob blobr = do
     let oid = unTagged (blobRefOid blobr)
     exists <- existsObject oid
     if exists
-        then do
-        oid' <- copyOid oid
-        return (Tagged <$> oid')
-        else do
-        blob <- resolveBlob blobr
-        contents <- blobToByteString blob
-        return (createBlob (BlobString contents))
+        then do oid' <- copyOid oid
+                return (Tagged <$> oid')
+        else createBlob . BlobString
+             <$> (blobToByteString =<< resolveBlob blobr)
 
 copyTree :: (Repository m1, Repository m2) => TreeRef m1 -> m1 (m2 (Tree m2))
 copyTree treer = do
     oid    <- unTagged <$> treeRefOid treer
     exists <- existsObject oid
     if exists
-        then do
-        oid' <- copyOid oid
-        return (lookupTree =<< (Tagged <$> oid'))
-        else do
-        return undefined
+        then do oid' <- copyOid oid
+                return $ lookupTree =<< (Tagged <$> oid')
+        else return undefined           -- jww (2013-03-09): NYI
 
 copyCommit :: (Repository m1, Repository m2)
            => CommitRef m1
@@ -113,23 +110,29 @@ copyCommit cr mref = do
     let oid = unTagged (commitRefOid cr)
     exists <- existsObject oid
     if exists
-        then do
-        oid' <- copyOid oid
-        return (lookupCommit =<< (Tagged <$> oid'))
+        then do oid' <- copyOid oid
+                return $ lookupCommit =<< (Tagged <$> oid')
         else do
-        commit  <- resolveCommit cr
-        parents <- mapM (flip copyCommit Nothing) (commitParents commit)
-        tree    <- copyTree (commitTree commit)
-        return $ do
-            parents' <- sequence parents
-            tree'    <- tree
-            createCommit
-                (map commitRef parents')
-                (treeRef tree')
-                (commitAuthor commit)
-                (commitCommitter commit)
-                (commitLog commit)
-                mref
+            commit  <- resolveCommit cr
+            parents <- mapM (flip copyCommit Nothing) (commitParents commit)
+            tree    <- copyTree (commitTree commit)
+            return $ do
+                parents' <- sequence parents
+                tree'    <- tree
+                createCommit
+                    (map commitRef parents')
+                    (treeRef tree')
+                    (commitAuthor commit)
+                    (commitCommitter commit)
+                    (commitLog commit)
+                    mref
+
+genericPushRef :: (Repository m1, Repository m2)
+               => Reference m1 (Commit m1)
+               -> (Text,Text)
+               -> Text
+               -> m1 (m2 (Maybe (Reference m2 (Commit m2))))
+genericPushRef = undefined              -- jww (2013-03-09): NYI
 
 commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =
@@ -171,5 +174,28 @@ commitEntryHistory c path =
 
 getCommitParents :: Repository m => Commit m -> m [Commit m]
 getCommitParents = traverse resolveCommit . commitParents
+
+withNewRepository :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
+                  => Proxy (r ()) -> FilePath -> r a -> IO a
+withNewRepository _ dir action = do
+  exists <- isDirectory dir
+  when exists $ removeTree dir
+
+  a <- withRepository (Tagged dir :: Tagged (r ()) FilePath) True action
+  -- we want exceptions to leave the repo behind
+
+  exists <- isDirectory dir
+  when exists $ removeTree dir
+
+  return a
+
+withExistingRepository :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
+                       => Proxy (r ()) -> FilePath -> r a -> IO a
+withExistingRepository _ dir act =
+    withRepository (Tagged dir :: Tagged (r ()) FilePath) True act
+
+sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
+sampleCommit tr sig =
+    createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
 -- Utils.hs ends here

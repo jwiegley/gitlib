@@ -2,7 +2,9 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -15,6 +17,7 @@ import           Control.Applicative
 import qualified Control.Exception as Exc
 import           Control.Failure
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Data.ByteString (ByteString)
 import           Data.Conduit
@@ -92,6 +95,12 @@ class (Applicative m, Monad m, Failure GitException m,
     createCommit :: [CommitRef m] -> TreeRef m
                  -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
+
+class (Repository m1, Repository m2) => RepositoryLink m1 m2 where
+    pushRef :: Reference m1 (Commit m1)
+            -> (Text,Text)
+            -> Text
+            -> m1 (m2 (Maybe (Reference m2 (Commit m2))))
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
@@ -336,5 +345,14 @@ resolveCommit (ByOid oid) = lookupCommit oid
 resolveCommit (Known obj) = return obj
 
 {- $tags -}
+
+class (Repository r, MonadIO m) => RepositoryFactoryT r m where
+    type RepositoryImpl r :: *
+
+    withOpenRepository     :: RepositoryImpl r -> r a -> m a
+    withRepository         :: Tagged (r ()) FilePath -> Bool -> r a -> m a
+    openRepository         :: Tagged (r ()) FilePath -> m (RepositoryImpl r)
+    createRepository       :: Tagged (r ()) FilePath -> Bool -> m (RepositoryImpl r)
+    openOrCreateRepository :: Tagged (r ()) FilePath -> Bool -> m (RepositoryImpl r)
 
 -- Repository.hs

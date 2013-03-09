@@ -163,8 +163,6 @@ putFileS3 :: OdbS3Backend -> Text -> Source (ResourceT IO) ByteString
              -> ResourceT IO BL.ByteString
 putFileS3 = curry . odbS3dispatch putFileS3'
 
-type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
-
 type RefMap m =
     M.HashMap Text (Maybe (Git.Reference (LgRepository m) (Commit m)))
 

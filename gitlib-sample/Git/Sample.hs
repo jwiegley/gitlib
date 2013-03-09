@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Git.Sample
        ( SampleRepository(..), Repository(..)
@@ -22,6 +23,7 @@ import           Control.Failure
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
+import           Data.Tagged
 import           Filesystem.Path.CurrentOS
 import           Prelude hiding (FilePath)
 import qualified Git as Git
@@ -122,22 +124,31 @@ type Reference m = Git.Reference (SampleRepository m) (Commit m)
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
 
-withSampleRepository :: MonadIO m => FilePath -> SampleRepository m a -> m a
-withSampleRepository path action = do
-    repo <- liftIO $ openOrCreateSampleRepository path
-    withOpenSampleRepository repo action
-
-withOpenSampleRepository :: Repository -> SampleRepository m a -> m a
+withOpenSampleRepository :: M m => Repository -> SampleRepository m a -> m a
 withOpenSampleRepository repo action =
     runReaderT (runSampleRepository action) repo
 
-openSampleRepository :: FilePath -> IO Repository
+withSampleRepository :: M m => FilePath -> Bool -> SampleRepository m a -> m a
+withSampleRepository path bare action = do
+    repo <- liftIO $ openOrCreateSampleRepository path bare
+    withOpenSampleRepository repo action
+
+openSampleRepository :: M m => FilePath -> m Repository
 openSampleRepository path = undefined
 
-createSampleRepository :: FilePath -> IO Repository
-createSampleRepository path = undefined
+createSampleRepository :: M m => FilePath -> Bool -> m Repository
+createSampleRepository path bare = undefined
 
-openOrCreateSampleRepository :: FilePath -> IO Repository
-openOrCreateSampleRepository path = undefined
+openOrCreateSampleRepository :: M m => FilePath -> Bool -> m Repository
+openOrCreateSampleRepository path bare = undefined
+
+instance M m => Git.RepositoryFactoryT (SampleRepository m) m where
+    type RepositoryImpl (SampleRepository m) = Repository
+
+    withOpenRepository        = withOpenSampleRepository
+    withRepository fp         = withSampleRepository (unTagged fp)
+    openRepository fp         = openSampleRepository (unTagged fp)
+    createRepository fp       = createSampleRepository (unTagged fp)
+    openOrCreateRepository fp = openOrCreateSampleRepository (unTagged fp)
 
 -- Sample.hs

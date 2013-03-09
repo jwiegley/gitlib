@@ -5,6 +5,7 @@
 ./gitlib-libgit2
 ./gitlib-s3
 ./gitlib-test
+./gitlib-utils
 ./hlibgit2
 ./vendor/aws
 ./vendor/c2hsc

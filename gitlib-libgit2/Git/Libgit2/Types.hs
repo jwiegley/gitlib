@@ -3,6 +3,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Git.Libgit2.Types where
@@ -20,6 +21,8 @@ import           Filesystem.Path.CurrentOS (FilePath)
 import           Foreign.ForeignPtr
 import qualified Git
 import           Prelude hiding (FilePath)
+
+type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
 
 data Repository = Repository
     { repoPath :: FilePath

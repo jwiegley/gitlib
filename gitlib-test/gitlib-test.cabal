@@ -43,6 +43,7 @@ Library
     build-depends:
           base                 >= 3 && < 5
         , gitlib
+        , gitlib-utils
         , HUnit                >= 1.2.5
         , hspec                >= 1.4.4
         , hspec-expectations   >= 0.3

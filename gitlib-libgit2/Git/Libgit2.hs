@@ -60,8 +60,6 @@ import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import qualified System.IO.Unsafe as SU
 
-type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
-
 instance M m => Git.RepositoryBase (LgRepository m) where
     data Oid (LgRepository m) = Oid
         { getOid :: ForeignPtr C'git_oid }
@@ -825,5 +823,14 @@ lgAllRefNames = listRefNames allRefsFlag
 -- int git_reference_cmp(git_reference *ref1, git_reference *ref2)
 
 --compareRef = c'git_reference_cmp
+
+instance M m => Git.RepositoryFactoryT (LgRepository m) m where
+    type RepositoryImpl (LgRepository m) = Repository
+
+    withOpenRepository        = withOpenLgRepository
+    withRepository fp         = withLgRepository (unTagged fp)
+    openRepository fp         = openLgRepository (unTagged fp)
+    createRepository fp       = createLgRepository (unTagged fp)
+    openOrCreateRepository fp = openOrCreateLgRepository (unTagged fp)
 
 -- Libgit2.hs

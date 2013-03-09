@@ -3,6 +3,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Git.Libgit2.Internal where
 
@@ -40,16 +42,16 @@ import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
-withOpenLgRepository :: Repository -> LgRepository m a -> m a
+withOpenLgRepository :: M m => Repository -> LgRepository m a -> m a
 withOpenLgRepository repo action =
     runReaderT (runLgRepository action) repo
 
-withLgRepository :: MonadIO m => FilePath -> Bool -> LgRepository m a -> m a
+withLgRepository :: M m => FilePath -> Bool -> LgRepository m a -> m a
 withLgRepository path bare action = do
     repo <- liftIO $ openOrCreateLgRepository path bare
     withOpenLgRepository repo action
 
-addTracingBackend :: MonadIO m => LgRepository m ()
+addTracingBackend :: M m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
     case F.toText (repoPath repo </> "objects") of
@@ -66,17 +68,18 @@ addTracingBackend = do
                     odbBackendAdd repo backend 3
                     return ()
 
-openLgRepository :: FilePath -> IO Repository
+openLgRepository :: M m => FilePath -> m Repository
 openLgRepository path =
-  openRepositoryWith path c'git_repository_open
+  liftIO $ openRepositoryWith path c'git_repository_open
 
-createLgRepository :: FilePath -> Bool -> IO Repository
+createLgRepository :: M m => FilePath -> Bool -> m Repository
 createLgRepository path bare =
-  openRepositoryWith path (\x y -> c'git_repository_init x y (fromBool bare))
+  liftIO $ openRepositoryWith path
+      (\x y -> c'git_repository_init x y (fromBool bare))
 
-openOrCreateLgRepository :: FilePath -> Bool -> IO Repository
+openOrCreateLgRepository :: M m => FilePath -> Bool -> m Repository
 openOrCreateLgRepository path bare = do
-  p <- isDirectory path
+  p <- liftIO $ isDirectory path
   if p
     then openLgRepository path
     else createLgRepository path bare
