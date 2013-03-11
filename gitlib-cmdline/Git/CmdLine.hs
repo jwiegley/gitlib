@@ -101,6 +101,7 @@ instance Git.RepositoryBase CmdLineRepository where
     lookupObject = undefined -- cliLookupObject
     existsObject = undefined -- cliExistsObject
     newTree      = cliNewTree
+    hashContents = cliHashContents
     createBlob   = cliCreateBlob
     createCommit = cliCreateCommit
     createTag    = cliCreateTag
@@ -165,16 +166,24 @@ instance Git.RepositoryLink CmdLineRepository CmdLineRepository where
 
 cliLookupBlob :: BlobOid -> CmdLineRepository Blob
 cliLookupBlob oid@(Tagged (Oid sha)) =
-    runGit ["cat-file", "-p", sha]
-        >>= return . Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict
+    Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict <$>
+        runGit ["cat-file", "-p", sha]
+
+cliDoCreateBlob :: Git.BlobContents CmdLineRepository -> Bool
+                -> CmdLineRepository BlobOid
+cliDoCreateBlob b persist = do
+    Tagged . Oid . TL.init <$>
+        (Git.blobContentsToByteString b
+         >>= \bs ->
+             doRunGit run (["hash-object"] <> ["-w" | persist] <> ["--stdin"]) $
+                 setStdin (TL.fromStrict (T.decodeUtf8 (bs))))
+
+cliHashContents :: Git.BlobContents CmdLineRepository
+                -> CmdLineRepository BlobOid
+cliHashContents b = cliDoCreateBlob b False
 
 cliCreateBlob :: Git.BlobContents CmdLineRepository -> CmdLineRepository BlobOid
-cliCreateBlob (Git.BlobString content) = do
-    oid  <- doRunGit run ["hash-object", "-w", "--stdin"]
-            $ setStdin (TL.fromStrict (T.decodeUtf8 content))
-    return (Tagged (Oid (TL.init oid)))
-
-cliCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
+cliCreateBlob b = cliDoCreateBlob b True
 
 cliNewTree :: CmdLineRepository Tree
 cliNewTree = CmdLineTree <$> (liftIO $ newIORef Nothing)
@@ -214,7 +223,7 @@ doLookupTreeEntry t (name:names) = do
       else case y of
       Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
       Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTreeRef t'
                                       doLookupTreeEntry t'' names
       _ -> return Nothing
 
@@ -264,7 +273,7 @@ doModifyTree t (name:names) createIfNotExist f = do
             Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
             Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
             Just (Git.TreeEntry st')  -> do
-                st <- Git.resolveTree st'
+                st <- Git.resolveTreeRef st'
                 ze <- doModifyTree st names createIfNotExist f
                 liftIO $ do
                     modifyIORef (cliTreeOid t) (const Nothing)
@@ -525,9 +534,11 @@ withOpenCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
 withOpenCmdLineRepository repo action =
     runReaderT (runCmdLineRepository action) repo
 
-withCmdLineRepository :: FilePath -> Bool -> CmdLineRepository a -> IO a
-withCmdLineRepository path bar action =
-    openOrCreateCmdLineRepository path bar
+withCmdLineRepository :: FilePath -> Bool -> Bool -> CmdLineRepository a -> IO a
+withCmdLineRepository path createIfNotExist bare action =
+    (if createIfNotExist
+     then openOrCreateCmdLineRepository path bare
+     else openCmdLineRepository path)
         >>= flip withOpenCmdLineRepository action
 
 openCmdLineRepository :: FilePath -> IO Repository

@@ -1,7 +1,6 @@
 ./gitlib
 ./gitlib-cmdline
 ./gitlib-sample
-./gitlib-github
 ./gitlib-libgit2
 ./gitlib-s3
 ./gitlib-test
@@ -10,6 +9,4 @@
 ./vendor/aws
 ./vendor/c2hsc
 ./vendor/general-prelude
-./vendor/github
-./vendor/rest-client
 ./vendor/stringable

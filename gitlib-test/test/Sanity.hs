@@ -172,8 +172,8 @@ withOpenMockRepository :: Repository -> MockRepository a -> IO a
 withOpenMockRepository repo action =
     runReaderT (runMockRepository action) repo
 
-withMockRepository :: FilePath -> Bool -> MockRepository a -> IO a
-withMockRepository path bare action = do
+withMockRepository :: FilePath -> Bool -> Bool -> MockRepository a -> IO a
+withMockRepository _ _ _ action = do
     withOpenMockRepository Repository action
 
 main :: IO ()

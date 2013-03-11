@@ -35,7 +35,7 @@ main = do
         (defaultConfig { configVerbose = True })
         (Git.smokeTestSpec
          (\path _ act ->
-           Lg.withLgRepository path True $ do
+           Lg.withLgRepository path True True $ do
                repo <- Lg.lgGet
                liftIO $ Git.addS3Backend
                    repo

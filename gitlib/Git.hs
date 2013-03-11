@@ -91,6 +91,7 @@ class (Applicative m, Monad m, Failure GitException m,
 
     -- Object creation
     newTree :: m (Tree m)
+    hashContents :: BlobContents m -> m (BlobOid m)
     createBlob :: BlobContents m -> m (BlobOid m)
     createCommit :: [CommitRef m] -> TreeRef m
                  -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
@@ -176,9 +177,9 @@ blobRefOid :: Repository m => BlobRef m -> BlobOid m
 blobRefOid (ByOid oid) = oid
 blobRefOid (Known (Blob {..})) = blobOid
 
-resolveBlob :: Repository m => BlobRef m -> m (Blob m)
-resolveBlob (ByOid oid) = lookupBlob oid
-resolveBlob (Known obj) = return obj
+resolveBlobRef :: Repository m => BlobRef m -> m (Blob m)
+resolveBlobRef (ByOid oid) = lookupBlob oid
+resolveBlobRef (Known obj) = return obj
 
 #if MIN_VERSION_conduit(1, 0, 0)
 type ByteSource m = Producer m ByteString
@@ -232,9 +233,13 @@ class RepositoryBase (TreeRepository t) => Treeish t where
                  -> TreeRepository t ()
     putTreeEntry t path = void . modifyTree t path True . const . return . Just
 
+    putBlob' :: t -> FilePath -> BlobOid (TreeRepository t) -> Bool
+             -> TreeRepository t ()
+    putBlob' t path b exe = putTreeEntry t path (BlobEntry b exe)
+
     putBlob :: t -> FilePath -> BlobOid (TreeRepository t)
-               -> TreeRepository t ()
-    putBlob t path b = putTreeEntry t path (BlobEntry b False)
+            -> TreeRepository t ()
+    putBlob t path b = putBlob' t path b False
 
     putTree :: t -> FilePath -> TreeRef (TreeRepository t)
             -> TreeRepository t ()
@@ -266,9 +271,9 @@ treeRefOid :: Repository m => TreeRef m -> m (TreeOid m)
 treeRefOid (ByOid x) = return x
 treeRefOid (Known x) = writeTree x
 
-resolveTree :: Repository m => TreeRef m -> m (Tree m)
-resolveTree (ByOid oid) = lookupTree oid
-resolveTree (Known obj) = return obj
+resolveTreeRef :: Repository m => TreeRef m -> m (Tree m)
+resolveTreeRef (ByOid oid) = lookupTree oid
+resolveTreeRef (Known obj) = return obj
 
 type Repository m = (RepositoryBase m,
                      m ~ TreeRepository (Tree m),
@@ -340,9 +345,9 @@ commitRefOid :: Repository m => CommitRef m -> CommitOid m
 commitRefOid (ByOid x) = x
 commitRefOid (Known x) = commitOid x
 
-resolveCommit :: Repository m => CommitRef m -> m (Commit m)
-resolveCommit (ByOid oid) = lookupCommit oid
-resolveCommit (Known obj) = return obj
+resolveCommitRef :: Repository m => CommitRef m -> m (Commit m)
+resolveCommitRef (ByOid oid) = lookupCommit oid
+resolveCommitRef (Known obj) = return obj
 
 {- $tags -}
 
@@ -350,7 +355,7 @@ class (Repository r, MonadIO m) => RepositoryFactoryT r m where
     type RepositoryImpl r :: *
 
     withOpenRepository     :: RepositoryImpl r -> r a -> m a
-    withRepository         :: Tagged (r ()) FilePath -> Bool -> r a -> m a
+    withRepository         :: Tagged (r ()) FilePath -> Bool -> Bool -> r a -> m a
     openRepository         :: Tagged (r ()) FilePath -> m (RepositoryImpl r)
     createRepository       :: Tagged (r ()) FilePath -> Bool -> m (RepositoryImpl r)
     openOrCreateRepository :: Tagged (r ()) FilePath -> Bool -> m (RepositoryImpl r)

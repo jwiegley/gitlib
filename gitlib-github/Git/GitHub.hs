@@ -380,7 +380,7 @@ doLookupTreeEntry t (name:names) = do
       else case y of
       Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
       Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTreeRef t'
                                       doLookupTreeEntry t'' names
       _ -> return Nothing
 
@@ -430,7 +430,7 @@ doModifyTree t (name:names) createIfNotExist f = do
             Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
             Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
             Just (Git.TreeEntry st')  -> do
-                st <- Git.resolveTree st'
+                st <- Git.resolveTreeRef st'
                 ze <- doModifyTree st names createIfNotExist f
                 liftIO $ do
                     modifyIORef (ghTreeOid t) (const Nothing)

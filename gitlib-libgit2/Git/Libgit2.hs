@@ -12,13 +12,10 @@
 --   associated with the repository — such as the list of branches — is
 --   queried as needed.
 module Git.Libgit2
-       ( LgRepository(..), Repository(..)
-       , Git.Oid(..), BlobOid(..), TreeOid(..), CommitOid(..)
-       , Tree(..), Commit(..)
-       , TreeRef(..), CommitRef(..), Reference(..)
+       ( LgRepository(..)
        , withLgRepository, withOpenLgRepository
        , openLgRepository, createLgRepository, openOrCreateLgRepository
-       , addTracingBackend, lgGet
+       , addTracingBackend
        ) where
 
 import           Bindings.Libgit2
@@ -55,6 +52,7 @@ import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git as Git
 import           Git.Libgit2.Internal
+import           Git.Libgit2.Trace
 import           Git.Libgit2.Types
 import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
@@ -99,6 +97,7 @@ instance M m => Git.RepositoryBase (LgRepository m) where
     lookupObject = lgLookupObject
     existsObject = lgExistsObject
     newTree      = lgNewTree
+    hashContents = lgHashContents
     createBlob   = lgCreateBlob
     createCommit = lgCreateCommit
     createTag    = undefined
@@ -139,6 +138,20 @@ instance Ord (Git.Oid (LgRepository m)) where
 
 instance Eq (Git.Oid (LgRepository m)) where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
+
+lgHashContents :: M m => Git.BlobContents (LgRepository m)
+               -> LgRepository m (BlobOid m)
+lgHashContents b = do
+    repo <- lgGet
+    ptr  <- liftIO $ mallocForeignPtr
+    r    <- Git.blobContentsToByteString b
+            >>= \bs -> liftIO $ withForeignPtr ptr $ \oidPtr ->
+            BU.unsafeUseAsCStringLen bs $
+            uncurry (\cstr len ->
+                      c'git_odb_hash oidPtr (castPtr cstr)
+                                     (fromIntegral len) c'GIT_OBJ_BLOB)
+    when (r < 0) $ failure Git.BlobCreateFailed
+    return (Tagged (Oid ptr))
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -201,7 +214,7 @@ instance M m => Git.Treeish (Tree m) where
 
         handle path entry@(Git.TreeEntry tref) = do
             x  <- f path entry
-            xs <- Git.resolveTree tref >>= flip (go path) f
+            xs <- Git.resolveTreeRef tref >>= flip (go path) f
             return (x:xs)
         handle path entry = liftM2 (:) (f path entry) (return [])
 
@@ -304,7 +317,7 @@ doLookupTreeEntry t (name:names) = do
       else case y of
       Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
       Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTreeRef t'
                                       doLookupTreeEntry t'' names
       _ -> return Nothing
 
@@ -410,7 +423,7 @@ doModifyTree t (name:names) createIfNotExist f = do
               Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
               Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
               Just (Git.TreeEntry st')  -> do
-                  st <- Git.resolveTree st'
+                  st <- Git.resolveTreeRef st'
                   ze <- doModifyTree st names createIfNotExist f
                   liftIO $ modifyIORef
                       (lgPendingUpdates t) (HashMap.insert name st)

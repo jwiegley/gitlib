@@ -78,7 +78,7 @@ commitTreeEntry :: Repository m
                 -> FilePath
                 -> TreeRepository (Tree m)
                       (Maybe (TreeEntry (TreeRepository (Tree m))))
-commitTreeEntry c path = flip lookupEntry path =<< resolveTree (commitTree c)
+commitTreeEntry c path = flip lookupEntry path =<< resolveTreeRef (commitTree c)
 
 copyOid :: (Repository m1, Repository m2) => Oid m1 -> m1 (m2 (Oid m2))
 copyOid = return . parseOid . renderOid
@@ -91,7 +91,7 @@ copyBlob blobr = do
         then do oid' <- copyOid oid
                 return (Tagged <$> oid')
         else createBlob . BlobString
-             <$> (blobToByteString =<< resolveBlob blobr)
+             <$> (blobToByteString =<< resolveBlobRef blobr)
 
 copyTree :: (Repository m1, Repository m2) => TreeRef m1 -> m1 (m2 (Tree m2))
 copyTree treer = do
@@ -113,7 +113,7 @@ copyCommit cr mref = do
         then do oid' <- copyOid oid
                 return $ lookupCommit =<< (Tagged <$> oid')
         else do
-            commit  <- resolveCommit cr
+            commit  <- resolveCommitRef cr
             parents <- mapM (flip copyCommit Nothing) (commitParents commit)
             tree    <- copyTree (commitTree commit)
             return $ do
@@ -163,7 +163,7 @@ commitEntryHistory c path =
         entry <- getEntry co
         rest  <- case commitParents co of
             []    -> return []
-            (p:_) -> go =<< resolveCommit p
+            (p:_) -> go =<< resolveCommitRef p
         return $ maybe rest (:rest) entry
 
     getEntry co = do
@@ -173,7 +173,7 @@ commitEntryHistory c path =
             Just ce' -> Just <$> identifyEntry co ce'
 
 getCommitParents :: Repository m => Commit m -> m [Commit m]
-getCommitParents = traverse resolveCommit . commitParents
+getCommitParents = traverse resolveCommitRef . commitParents
 
 withNewRepository :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
                   => Proxy (r ()) -> FilePath -> r a -> IO a
@@ -181,7 +181,7 @@ withNewRepository _ dir action = do
   exists <- isDirectory dir
   when exists $ removeTree dir
 
-  a <- withRepository (Tagged dir :: Tagged (r ()) FilePath) True action
+  a <- withRepository (Tagged dir :: Tagged (r ()) FilePath) True True action
   -- we want exceptions to leave the repo behind
 
   exists <- isDirectory dir
@@ -192,10 +192,17 @@ withNewRepository _ dir action = do
 withExistingRepository :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
                        => Proxy (r ()) -> FilePath -> r a -> IO a
 withExistingRepository _ dir act =
-    withRepository (Tagged dir :: Tagged (r ()) FilePath) True act
+    withRepository (Tagged dir :: Tagged (r ()) FilePath) True True act
 
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
+
+resolveRefTree :: Repository m => Text -> m (Tree m)
+resolveRefTree refName = do
+    c <- resolveRef refName
+    case c of
+        Nothing -> newTree
+        Just c' -> resolveCommitRef c' >>= resolveTreeRef . commitTree
 
 -- Utils.hs ends here

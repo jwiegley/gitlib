@@ -128,9 +128,11 @@ withOpenSampleRepository :: M m => Repository -> SampleRepository m a -> m a
 withOpenSampleRepository repo action =
     runReaderT (runSampleRepository action) repo
 
-withSampleRepository :: M m => FilePath -> Bool -> SampleRepository m a -> m a
-withSampleRepository path bare action = do
-    repo <- liftIO $ openOrCreateSampleRepository path bare
+withSampleRepository :: M m => FilePath -> Bool -> Bool -> SampleRepository m a -> m a
+withSampleRepository path createIfNotExist bare action = do
+    repo <- liftIO $ if createIfNotExist
+                     then openOrCreateSampleRepository path bare
+                     else openSampleRepository path
     withOpenSampleRepository repo action
 
 openSampleRepository :: M m => FilePath -> m Repository

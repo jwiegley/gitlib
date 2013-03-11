@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
@@ -38,7 +39,7 @@ newtype LgRepository m a = LgRepository
     { runLgRepository :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
 
-type Oid m     = Git.Oid (LgRepository m)
+type Oid m       = Git.Oid (LgRepository m)
 
 type BlobOid m   = Git.BlobOid (LgRepository m)
 type TreeOid m   = Git.TreeOid (LgRepository m)

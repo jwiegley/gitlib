@@ -123,7 +123,7 @@ smokeTestSpec pr = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "d592871f56aa949d726fcc211370d1af305e9597"
 
-      tr' <- Git.resolveTree (Git.commitTree c)
+      tr' <- Git.resolveTreeRef (Git.commitTree c)
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
       putBlob tr' "hello/goodbye.txt" goodbye
 
@@ -181,7 +181,7 @@ smokeTestSpec pr = describe "Smoke tests" $ do
           updateRef_ "HEAD" (RefSymbolic "refs/heads/master")
 
       Just c3 <- resolveRef "refs/heads/master"
-      c3 <- resolveCommit c3
+      c3 <- resolveCommitRef c3
       let x = renderObjOid (commitOid c3)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
