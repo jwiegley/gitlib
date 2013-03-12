@@ -12,7 +12,7 @@
 --   associated with the repository — such as the list of branches — is
 --   queried as needed.
 module Git.Libgit2
-       ( LgRepository(..)
+       ( LgRepository(..), Git.Oid(..)
        , withLgRepository, withOpenLgRepository
        , openLgRepository, createLgRepository, openOrCreateLgRepository
        , addTracingBackend

@@ -6,7 +6,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Git.Libgit2.Internal where
+module Git.Libgit2.Internal (module Git.Libgit2.Internal, oidToStr) where
 
 import           Bindings.Libgit2
 import           Control.Applicative
