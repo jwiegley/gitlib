@@ -126,7 +126,6 @@ doMain opts = do
         str  <- resolveTreeRef (commitTree sc)
         toid <- writeTree str
         ft   <- readFileTree' str wd (isNothing scr)
-        return (str, Just sc, Just toid, ft)
 
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
