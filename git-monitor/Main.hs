@@ -22,14 +22,14 @@ import           Data.Text (Text)
 import qualified Data.Text as T (unpack)
 import qualified Data.Text.Lazy as TL (unpack, toStrict, init)
 import           Data.Time.Clock (UTCTime, getCurrentTime)
-import           Filesystem (getModified)
-import           Filesystem.Path.CurrentOS (FilePath, (</>))
+import           Filesystem (getModified, isDirectory, canonicalizePath)
+import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git
 import           Git.Libgit2 (withLgRepository)
 import           Git.Utils (treeBlobEntries)
 import           Options.Applicative
-import           Prelude hiding (FilePath)
-import           Shelly (toTextIgnore, silently, shelly, run)
+import           Prelude hiding (FilePath, null)
+import           Shelly (toTextIgnore, fromText, silently, shelly, run)
 import           System.IO (stderr)
 import           System.Log.Formatter (tfLogFormatter)
 import           System.Log.Handler (setFormatter)
@@ -50,9 +50,9 @@ options :: Parser Options
 options = Options
     <$> switch (short 'v' <> long "verbose" <> help "Display statistics")
     <*> option (long "git-dir" <> value ".git"
-                <> help "Git repository to store snapshots in")
-    <*> option (short 'd' <> long "dir" <> value "."
-                <> help "The working tree to snapshot")
+                <> help "Git repository to store snapshots in (def: \".git\")")
+    <*> option (short 'd' <> long "work-dir" <> value ""
+                <> help "The working tree to snapshot (def: \".\")")
     <*> option (short 'i' <> long "interval" <> value 60
                 <> help "Snapshot each N seconds")
     <*> switch (short 'r' <> long "resume" <> value False
@@ -64,8 +64,10 @@ main = execParser opts >>= doMain
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
     hdr  = "git-monitor 1.0.0 - quickly snapshot working tree changes"
-    desc = "Passively snapshot working tree changes efficiently.\n\
-           \These are kept in refs/snapshots/refs/heads/$BRANCH"
+    desc = "\nPassively snapshot working tree changes efficiently.\n\n\
+           \The intended usage is to run \"git monitor &\" in your project\n\
+           \directory before you begin a hacking session.\n\n\
+           \Snapshots are kept in refs/snapshots/refs/heads/$BRANCH"
 
 doMain :: Options -> IO ()
 doMain opts = do
@@ -77,12 +79,22 @@ doMain opts = do
         (,) <$> (TL.init <$> run "git" ["config", "user.name"])
             <*> (TL.init <$> run "git" ["config", "user.email"])
 
+    isDir <- isDirectory (gitDir opts)
+    gd    <- if isDir
+             then return (gitDir opts)
+             else shelly $ silently $
+                  fromText . TL.init <$> run "git" ["rev-parse", "--git-dir"]
+
+    let wd = if null (workingDir opts) then parent gd else "."
+
     -- Make sure we're in a known branch, and if so, let it begin
-    withLgRepository (gitDir opts) True False $ do
+    withLgRepository gd True False $ do
+        infoL $ "Saving snapshots in " ++ fileStr gd
+        infoL $ "Working tree in " ++ fileStr wd
         ref <- lookupRef "HEAD"
         void $ case ref of
             Just (Reference _ (RefSymbolic name)) ->
-                start (TL.toStrict userName) (TL.toStrict userEmail) name
+                start wd (TL.toStrict userName) (TL.toStrict userEmail) name
             _ -> error "Cannot use git-monitor if no branch is checked out"
   where
     initLogging = do
@@ -94,7 +106,7 @@ doMain opts = do
         updateGlobalLogger "git-monitor" (setLevel level)
         updateGlobalLogger "git-monitor" (addHandler h)
 
-    start userName userEmail ref = do
+    start wd userName userEmail ref = do
         let sref = "refs/snapshots/" <> ref
 
         -- Usually we ignore any snapshot history from a prior invocation of
@@ -113,50 +125,57 @@ doMain opts = do
         sc     <- resolveCommitRef scr'
         str    <- resolveTreeRef (commitTree sc)
         strOid <- writeTree str
-        ft     <- readFileTree' str (workingDir opts) (isNothing scr)
+        ft     <- readFileTree' str wd (isNothing scr)
         return (str, Just sc, Just strOid, ft)
 
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
         -- time, typically using SIGINT (C-c) or even SIGKILL.
-        (snapshotTree opts userName userEmail ref sref) sc str strOid ft
+        (snapshotTree opts wd userName userEmail ref sref) sc str strOid ft
 
+-- | 'snapshotTree' is the core workhorse of this utility.  It periodically
+--   checks the filesystem for changes to Git-tracked files, and snapshots
+--   any changes that have occurred in them.
 snapshotTree :: (Repository m, MonadIO m)
-             => Options
+             => Options -> FilePath
              -> Text -> Text -> Text -> Text
              -> Commit m -> Tree m -> TreeOid m
              -> Map FilePath (FileEntry m)
              -> m ()
-snapshotTree opts name email ref sref = fix $ \f sc str strOid ft -> do
+snapshotTree opts wd name email ref sref = fix $ \loop sc str strOid ft -> do
     -- Read the current working tree's state on disk
-    ft' <- readFileTree ref (workingDir opts) False
+    ft' <- readFileTree ref wd False
 
-    -- Prune files which have been dropped from the last interval
+    -- Prune files which have been removed since the last interval
     void $ flip Map.traverseWithKey ft $
         \fp _ -> case Map.lookup fp ft' of
             Nothing -> do
-                infoL $ "Removed: " ++ TL.unpack (toTextIgnore fp)
+                infoL $ "Removed: " ++ fileStr fp
                 dropFromTree str fp
             _ -> return ()
 
-    -- Find files which have been added or changed since last interval
+    -- Find files which have been added or changed
     void $ flip Map.traverseWithKey ft' $
         \fp (FileEntry mt (BlobEntry oid exe) foid) ->
             case Map.lookup fp ft of
                 Nothing -> do
-                    infoL $ "Added to snapshot: "
-                         ++ TL.unpack (toTextIgnore fp)
+                    infoL $ "Added to snapshot: " ++ fileStr fp
                     putBlob' str fp oid exe
                 Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
                     | oid /= oldOid || exe /= oldExe -> do
-                        infoL $ "Changed (hash or exe flag): "
-                              ++ TL.unpack (toTextIgnore fp)
+                        infoL $ "Changed (hash or exe flag): " ++ fileStr fp
                         putBlob' str fp oid exe
-                    | mt /= oldMt || oid /= fileOid -> changed str fp exe
+                    | mt /= oldMt || oid /= fileOid -> do
+                        path <- fileStr <$>
+                                (liftIO $ canonicalizePath (wd </> fp))
+                        infoL $ "Changed: " ++ fileStr fp
+                        contents <- liftIO $ B.readFile path
+                        newOid   <- createBlob (BlobString contents)
+                        putBlob' str fp newOid exe
                     | otherwise -> return ()
                 _ -> return ()
 
-    -- If the snapshot tree has changed, create a new commit to reflect it
+    -- If the snapshot tree changed, create a new commit to reflect it
     strOid' <- writeTree str
 
     sc' <- if strOid /= strOid'
@@ -172,7 +191,7 @@ snapshotTree opts name email ref sref = fix $ \f sc str strOid ft -> do
               c <- createCommit [commitRef sc] (treeRef str)
                                 sig sig msg (Just sref)
               infoL $ "Committed: "
-                    ++ (T.unpack . renderObjOid . commitOid $ c)
+                   ++ (T.unpack . renderObjOid . commitOid $ c)
               return c
           else return sc
 
@@ -180,15 +199,7 @@ snapshotTree opts name email ref sref = fix $ \f sc str strOid ft -> do
     liftIO $ threadDelay (interval opts * 1000000)
 
     -- Rinse, wash, repeat.
-    f sc' str strOid' ft'
-  where
-    changed :: (Repository m, MonadIO m) => Tree m -> FilePath -> Bool -> m ()
-    changed str fp exe = do
-        let path = TL.unpack (toTextIgnore fp)
-        infoL $ "Changed: " ++ path
-        contents <- liftIO $ B.readFile path
-        newOid   <- createBlob (BlobString contents)
-        putBlob' str fp newOid exe
+    loop sc' str strOid' ft'
 
 data FileEntry m = FileEntry
     { fileModTime   :: UTCTime
@@ -212,8 +223,7 @@ readFileTree' :: (Repository m, MonadIO m)
               => Tree m -> FilePath -> Bool -> m (FileTree m)
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
-    Map.traverseWithKey (readModTime wdir getHash)
-                        (Map.fromList blobs)
+    Map.traverseWithKey (readModTime wdir getHash) (Map.fromList blobs)
 
 readModTime :: (Repository m, MonadIO m)
             => FilePath -> Bool -> FilePath -> TreeEntry m -> m (FileEntry m)
@@ -222,12 +232,12 @@ readModTime wdir getHash fp ent =
         <$> liftIO (getModified (wdir </> fp))
         <*> pure ent
         <*> if getHash
-            then do
-                contents <-
-                    liftIO $
-                    B.readFile (TL.unpack (toTextIgnore (wdir </> fp)))
-                hashContents (BlobString contents)
+            then do contents <- liftIO $ B.readFile (fileStr (wdir </> fp))
+                    hashContents (BlobString contents)
             else return (blobEntryOid ent)
+
+fileStr :: FilePath -> String
+fileStr = TL.unpack . toTextIgnore
 
 infoL :: (Repository m, MonadIO m) => String -> m ()
 infoL = liftIO . infoM "git-monitor"
