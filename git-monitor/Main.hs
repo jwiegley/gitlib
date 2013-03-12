@@ -88,9 +88,9 @@ doMain opts = do
     let wd = if null (workingDir opts) then parent gd else "."
 
     -- Make sure we're in a known branch, and if so, let it begin
-    withLgRepository gd True False $ do
+    forever $ withLgRepository gd True False $ do
         infoL $ "Saving snapshots in " ++ fileStr gd
-        infoL $ "Working tree in " ++ fileStr wd
+        infoL $ "Working tree: " ++ fileStr wd
         ref <- lookupRef "HEAD"
         void $ case ref of
             Just (Reference _ (RefSymbolic name)) ->
@@ -118,20 +118,20 @@ doMain opts = do
         -- Also, it is useful to root the snapshot history at the current HEAD
         -- commit.  Note that it must be a Just value at this point, see
         -- above.
-        scr    <- if resume opts
-                  then resolveRef sref
-                  else return Nothing
-        scr'   <- maybe (fromJust <$> resolveRef "HEAD") return scr
-        sc     <- resolveCommitRef scr'
-        str    <- resolveTreeRef (commitTree sc)
-        strOid <- writeTree str
-        ft     <- readFileTree' str wd (isNothing scr)
-        return (str, Just sc, Just strOid, ft)
+        scr  <- if resume opts
+                then resolveRef sref
+                else return Nothing
+        scr' <- maybe (fromJust <$> resolveRef "HEAD") return scr
+        sc   <- resolveCommitRef scr'
+        str  <- resolveTreeRef (commitTree sc)
+        toid <- writeTree str
+        ft   <- readFileTree' str wd (isNothing scr)
+        return (str, Just sc, Just toid, ft)
 
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
         -- time, typically using SIGINT (C-c) or even SIGKILL.
-        (snapshotTree opts wd userName userEmail ref sref) sc str strOid ft
+        (snapshotTree opts wd userName userEmail ref sref) sc str toid ft
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots
@@ -142,7 +142,7 @@ snapshotTree :: (Repository m, MonadIO m)
              -> Commit m -> Tree m -> TreeOid m
              -> Map FilePath (FileEntry m)
              -> m ()
-snapshotTree opts wd name email ref sref = fix $ \loop sc str strOid ft -> do
+snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     -- Read the current working tree's state on disk
     ft' <- readFileTree ref wd False
 
@@ -176,9 +176,9 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str strOid ft -> do
                 _ -> return ()
 
     -- If the snapshot tree changed, create a new commit to reflect it
-    strOid' <- writeTree str
+    toid' <- writeTree str
 
-    sc' <- if strOid /= strOid'
+    sc' <- if toid /= toid'
           then do
               now <- liftIO getCurrentTime
               let sig = Signature
@@ -199,7 +199,13 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str strOid ft -> do
     liftIO $ threadDelay (interval opts * 1000000)
 
     -- Rinse, wash, repeat.
-    loop sc' str strOid' ft'
+    ref' <- lookupRef "HEAD"
+    let refChanged = case ref' of
+            Just (Reference _ (RefSymbolic ref'')) -> ref /= ref''
+            _ -> True
+    if refChanged
+        then infoL "Branch has changed, restarting"
+        else loop sc' str toid' ft'
 
 data FileEntry m = FileEntry
     { fileModTime   :: UTCTime
