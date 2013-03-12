@@ -52,6 +52,6 @@ Test-suite smoke
     , hspec              >= 1.4.4
     , hspec-expectations >= 0.3
     , system-filepath    >= 0.4.7
-    , tagged             >= 0.4.4
+    , tagged             >= 0.2.3.1
     , text               >= 0.11.2
     , transformers       >= 0.2.2
