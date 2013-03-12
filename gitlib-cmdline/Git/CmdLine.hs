@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -161,8 +162,8 @@ instance Git.RepositoryLink CmdLineRepository CmdLineRepository where
                  ]
             else return Nothing
 
--- instance Git.Repository m => Git.RepositoryLink CmdLineRepository m where
---     pushRef = Git.genericPushRef
+instance Git.Repository m => Git.RepositoryLink CmdLineRepository m where
+    pushRef = Git.genericPushRef
 
 cliLookupBlob :: BlobOid -> CmdLineRepository Blob
 cliLookupBlob oid@(Tagged (Oid sha)) =

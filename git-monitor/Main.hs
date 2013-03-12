@@ -15,16 +15,16 @@ import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import qualified Data.ByteString as B (readFile)
 import           Data.Function (fix)
+import           Data.Foldable (foldlM)
 import           Data.Map (Map)
-import qualified Data.Map as Map (mapWithKey, foldlWithKey',
-                                  lookup, fromList, empty)
+import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
 import qualified Data.Text as T (unpack)
 import qualified Data.Text.Lazy as TL (unpack, toStrict, init)
 import           Data.Time.Clock (UTCTime, getCurrentTime)
 import           Data.Traversable (sequenceA)
-import           Filesystem (getModified, isDirectory, canonicalizePath)
+import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git
 import           Git.Libgit2 (withLgRepository)
@@ -241,19 +241,28 @@ readFileTree' :: (Repository m, MonadIO m)
               => Tree m -> FilePath -> Bool -> m (FileTree m)
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
-    sequenceA $
-        Map.mapWithKey (readModTime wdir getHash) (Map.fromList blobs)
+    foldlM (\m (fp,ent) -> do
+                 fent <- readModTime wdir getHash fp ent
+                 return $ maybe m (flip (Map.insert fp) m)
+                                fent)
+           Map.empty blobs
 
 readModTime :: (Repository m, MonadIO m)
-            => FilePath -> Bool -> FilePath -> TreeEntry m -> m (FileEntry m)
-readModTime wdir getHash fp ent =
-    FileEntry
-        <$> liftIO (getModified (wdir </> fp))
-        <*> pure ent
-        <*> if getHash
-            then do contents <- liftIO $ B.readFile (fileStr (wdir </> fp))
-                    hashContents (BlobString contents)
-            else return (blobEntryOid ent)
+            => FilePath -> Bool -> FilePath -> TreeEntry m
+            -> m (Maybe (FileEntry m))
+readModTime wdir getHash fp ent = do
+    let path = wdir </> fp
+    exists <- liftIO $ isFile path
+    if exists
+        then Just <$>
+             (FileEntry
+                  <$> liftIO (getModified path)
+                  <*> pure ent
+                  <*> if getHash
+                      then do contents <- liftIO $ B.readFile (fileStr path)
+                              hashContents (BlobString contents)
+                      else return (blobEntryOid ent))
+        else return Nothing
 
 fileStr :: FilePath -> String
 fileStr = TL.unpack . toTextIgnore
