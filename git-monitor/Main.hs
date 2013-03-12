@@ -42,6 +42,7 @@ instance Read FilePath
 
 data Options = Options
     { verbose    :: Bool
+    , debug      :: Bool
     , gitDir     :: FilePath
     , workingDir :: FilePath
     , interval   :: Int
@@ -50,7 +51,8 @@ data Options = Options
 
 options :: Parser Options
 options = Options
-    <$> switch (short 'v' <> long "verbose" <> help "Display statistics")
+    <$> switch (short 'v' <> long "verbose" <> help "Display info")
+    <*> switch (short 'D' <> long "debug" <> help "Display debug")
     <*> option (long "git-dir" <> value ".git"
                 <> help "Git repository to store snapshots in (def: \".git\")")
     <*> option (short 'd' <> long "work-dir" <> value ""
@@ -74,7 +76,7 @@ main = execParser opts >>= doMain
 doMain :: Options -> IO ()
 doMain opts = do
     -- Setup logging service if --verbose is used
-    when (verbose opts) initLogging
+    when (verbose opts) $ initLogging (debug opts)
 
     -- Ask Git for the user name and email in this repository
     (userName,userEmail) <- shelly $ silently $
@@ -100,8 +102,9 @@ doMain opts = do
                 start wd (TL.toStrict userName) (TL.toStrict userEmail) name
             _ -> error "Cannot use git-monitor if no branch is checked out"
   where
-    initLogging = do
-        let level | verbose opts = INFO
+    initLogging debugMode = do
+        let level | debugMode    = DEBUG
+                  | verbose opts = INFO
                   | otherwise    = NOTICE
         h <- (`setFormatter` tfLogFormatter "%H:%M:%S" "$time - [$prio] $msg")
              <$> streamHandler System.IO.stderr level
@@ -243,8 +246,7 @@ readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
     foldlM (\m (fp,ent) -> do
                  fent <- readModTime wdir getHash fp ent
-                 return $ maybe m (flip (Map.insert fp) m)
-                                fent)
+                 return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
 readModTime :: (Repository m, MonadIO m)
@@ -252,6 +254,7 @@ readModTime :: (Repository m, MonadIO m)
             -> m (Maybe (FileEntry m))
 readModTime wdir getHash fp ent = do
     let path = wdir </> fp
+    debugL $ "Checking file: " ++ fileStr path
     exists <- liftIO $ isFile path
     if exists
         then Just <$>
@@ -269,5 +272,8 @@ fileStr = TL.unpack . toTextIgnore
 
 infoL :: (Repository m, MonadIO m) => String -> m ()
 infoL = liftIO . infoM "git-monitor"
+
+debugL :: (Repository m, MonadIO m) => String -> m ()
+debugL = liftIO . debugM "git-monitor"
 
 -- Main.hs (git-monitor) ends here
