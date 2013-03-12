@@ -3,8 +3,10 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 
-module Git.Libgit2.Internal where
+module Git.Libgit2.Internal (module Git.Libgit2.Internal, oidToStr) where
 
 import           Bindings.Libgit2
 import           Control.Applicative
@@ -19,6 +21,7 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
+import           Debug.Trace
 import           Data.Time
 import           Data.Time.Clock
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
@@ -40,16 +43,18 @@ import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
-withOpenLgRepository :: Repository -> LgRepository m a -> m a
+withOpenLgRepository :: M m => Repository -> LgRepository m a -> m a
 withOpenLgRepository repo action =
     runReaderT (runLgRepository action) repo
 
-withLgRepository :: MonadIO m => FilePath -> Bool -> LgRepository m a -> m a
-withLgRepository path bare action = do
-    repo <- liftIO $ openOrCreateLgRepository path bare
+withLgRepository :: M m => FilePath -> Bool -> Bool -> LgRepository m a -> m a
+withLgRepository path createIfNotExist bare action = do
+    repo <- liftIO $ if createIfNotExist
+                     then openOrCreateLgRepository path bare
+                     else openLgRepository path
     withOpenLgRepository repo action
 
-addTracingBackend :: MonadIO m => LgRepository m ()
+addTracingBackend :: M m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
     case F.toText (repoPath repo </> "objects") of
@@ -66,17 +71,18 @@ addTracingBackend = do
                     odbBackendAdd repo backend 3
                     return ()
 
-openLgRepository :: FilePath -> IO Repository
+openLgRepository :: M m => FilePath -> m Repository
 openLgRepository path =
-  openRepositoryWith path c'git_repository_open
+  liftIO $ openRepositoryWith path c'git_repository_open
 
-createLgRepository :: FilePath -> Bool -> IO Repository
+createLgRepository :: M m => FilePath -> Bool -> m Repository
 createLgRepository path bare =
-  openRepositoryWith path (\x y -> c'git_repository_init x y (fromBool bare))
+  liftIO $ openRepositoryWith path
+      (\x y -> c'git_repository_init x y (fromBool bare))
 
-openOrCreateLgRepository :: FilePath -> Bool -> IO Repository
+openOrCreateLgRepository :: M m => FilePath -> Bool -> m Repository
 openOrCreateLgRepository path bare = do
-  p <- isDirectory path
+  p <- liftIO $ isDirectory path
   if p
     then openLgRepository path
     else createLgRepository path bare
@@ -109,11 +115,8 @@ coidPtrToOid coidptr = do
         c'git_oid_cpy ptr coidptr
     return fptr
 
-oidToStr :: Ptr C'git_oid -> IO String
-oidToStr = c'git_oid_allocfmt >=> peekCString
-
 lookupObject'
-  :: MonadIO m
+  :: M m
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
@@ -121,22 +124,29 @@ lookupObject'
   -> LgRepository m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- lgGet
-    liftIO $ alloca $ \ptr -> do
-      r <- withForeignPtr (repoObj repo) $ \repoPtr ->
-          withForeignPtr oid $ \oidPtr ->
-              if len == 40
-              then lookupFn ptr repoPtr oidPtr
-              else lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
-      if r < 0
-        then error "lookupObject' failed"
-        else do
-        ptr'     <- peek ptr
-        coid     <- c'git_object_id (castPtr ptr')
-        coidCopy <- mallocForeignPtr
-        withForeignPtr coidCopy $ flip c'git_oid_cpy coid
+    result <- liftIO $ alloca $ \ptr -> do
+        r <- withForeignPtr (repoObj repo) $ \repoPtr ->
+            withForeignPtr oid $ \oidPtr ->
+                if len == 40
+                then lookupFn ptr repoPtr oidPtr
+                else lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
+        if r < 0
+            then do
+              err    <- c'giterr_last
+              errmsg <- peekCString . c'git_error'message =<< peek err
+              oidStr <- withForeignPtr oid oidToStr
+              return $ Left $
+                  T.concat [ "Could not lookup ", T.pack oidStr
+                           , ": ", T.pack errmsg ]
+            else do
+              ptr'     <- peek ptr
+              coid     <- c'git_object_id (castPtr ptr')
+              coidCopy <- mallocForeignPtr
+              withForeignPtr coidCopy $ flip c'git_oid_cpy coid
 
-        fptr <- newForeignPtr p'git_object_free (castPtr ptr')
-        createFn coidCopy (castForeignPtr fptr) ptr'
+              fptr <- newForeignPtr p'git_object_free (castPtr ptr')
+              Right <$> createFn coidCopy (castForeignPtr fptr) ptr'
+    either (failure . Git.BackendError) return result
 
 -- lgLookupObject :: Text -> LgRepository Dynamic
 -- lgLookupObject str

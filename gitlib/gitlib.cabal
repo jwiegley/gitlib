@@ -37,7 +37,6 @@ Test-suite doctests
 
 Library
     default-language:   Haskell98
-    default-extensions: ForeignFunctionInterface
     build-depends:
           base                 >= 3 && < 5
         , bytestring           >= 0.9.2.1
@@ -51,5 +50,4 @@ Library
         , time                 >= 1.4
     exposed-modules:
         Git
-        Git.Utils
         Git.Tutorial

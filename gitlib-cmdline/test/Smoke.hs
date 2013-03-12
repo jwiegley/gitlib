@@ -8,6 +8,7 @@ module Main where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class (liftIO)
+import           Data.Proxy
 import           Data.Text as T
 import           Filesystem.Path.CurrentOS
 import qualified Git
@@ -25,15 +26,9 @@ import           Test.Hspec.Runner
 main :: IO ()
 main = do
     summary <-
-        hspecWith
-        (defaultConfig { configVerbose = True })
-        (Git.smokeTestSpec
-         (\path _ act -> do
-               result <- Cli.withCmdLineRepository path True act
-               either (\e -> do putStrLn $ "Failed: " ++ show e
-                                exitFailure)
-                      (const (return ()))
-                      result))
+        hspecWith (defaultConfig { configVerbose = True })
+                  (Git.smokeTestSpec
+                   (undefined :: Proxy (Cli.CmdLineRepository ())))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

@@ -23,7 +23,7 @@ main = do
     summary <- hspecWith
                (defaultConfig { configVerbose = True })
                (Git.smokeTestSpec
-                (\path _ act -> Samp.withSampleRepository path act))
+                (\path _ act -> Samp.withSampleRepository path True True act))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

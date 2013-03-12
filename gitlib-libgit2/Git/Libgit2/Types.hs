@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Git.Libgit2.Types where
@@ -21,6 +23,8 @@ import           Foreign.ForeignPtr
 import qualified Git
 import           Prelude hiding (FilePath)
 
+type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
+
 data Repository = Repository
     { repoPath :: FilePath
     , repoObj  :: ForeignPtr C'git_repository }
@@ -35,7 +39,7 @@ newtype LgRepository m a = LgRepository
     { runLgRepository :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
 
-type Oid m     = Git.Oid (LgRepository m)
+type Oid m       = Git.Oid (LgRepository m)
 
 type BlobOid m   = Git.BlobOid (LgRepository m)
 type TreeOid m   = Git.TreeOid (LgRepository m)

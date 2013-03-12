@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -24,7 +26,7 @@ import           Data.List as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text as T hiding (drop, map, null)
+import           Data.Text as T hiding (map, null)
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (UTCTime)
@@ -32,6 +34,7 @@ import           Data.Time.Format (formatTime, parseTime)
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
+import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import           Shelly hiding (trace)
 import           System.IO.Unsafe
@@ -98,6 +101,7 @@ instance Git.RepositoryBase CmdLineRepository where
     lookupObject = undefined -- cliLookupObject
     existsObject = undefined -- cliExistsObject
     newTree      = cliNewTree
+    hashContents = cliHashContents
     createBlob   = cliCreateBlob
     createCommit = cliCreateCommit
     createTag    = cliCreateTag
@@ -134,18 +138,52 @@ runGit = flip (doRunGit run) (return ())
 runGit_ :: [TL.Text] -> CmdLineRepository ()
 runGit_ = flip (doRunGit run_) (return ())
 
+instance Git.RepositoryLink CmdLineRepository CmdLineRepository where
+    -- jww (2013-03-09): If 'remoteName' is not yet a remote in the given
+    -- repository, create it using remoteUri.
+    pushRef ref (remoteName,remoteUri) remoteRefName = do
+        repo <- cliGet
+        r <- shellyNoDir $ silently $ errExit False $ do
+            run_ "git" $ [ "--git-dir", repoPath repo ]
+                      <> [ "push", TL.fromStrict remoteName
+                         , TL.concat [ TL.fromStrict (Git.refName ref)
+                                     , ":", TL.fromStrict remoteRefName ] ]
+            lastExitCode
+        return <$>
+            if r == 0
+            then cliLookupRef $ T.concat
+                 [ "refs/remotes/"
+                 , remoteName
+                 , "/"
+                 , if "refs/heads/" `T.isPrefixOf` Git.refName ref
+                   then T.drop 11 (Git.refName ref)
+                   else Git.refName ref
+                 ]
+            else return Nothing
+
+-- instance Git.Repository m => Git.RepositoryLink CmdLineRepository m where
+--     pushRef = Git.genericPushRef
+
 cliLookupBlob :: BlobOid -> CmdLineRepository Blob
 cliLookupBlob oid@(Tagged (Oid sha)) =
-    runGit ["cat-file", "-p", sha]
-        >>= return . Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict
-
-cliCreateBlob :: Git.BlobContents CmdLineRepository -> CmdLineRepository BlobOid
-cliCreateBlob (Git.BlobString content) = do
-    oid  <- doRunGit run ["hash-object", "-w", "--stdin"]
-            $ setStdin (TL.fromStrict (T.decodeUtf8 content))
-    return (Tagged (Oid (TL.init oid)))
+    Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict <$>
+        runGit ["cat-file", "-p", sha]
 
-cliCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
+cliDoCreateBlob :: Git.BlobContents CmdLineRepository -> Bool
+                -> CmdLineRepository BlobOid
+cliDoCreateBlob b persist = do
+    Tagged . Oid . TL.init <$>
+        (Git.blobContentsToByteString b
+         >>= \bs ->
+             doRunGit run (["hash-object"] <> ["-w" | persist] <> ["--stdin"]) $
+                 setStdin (TL.fromStrict (T.decodeUtf8 (bs))))
+
+cliHashContents :: Git.BlobContents CmdLineRepository
+                -> CmdLineRepository BlobOid
+cliHashContents b = cliDoCreateBlob b False
+
+cliCreateBlob :: Git.BlobContents CmdLineRepository -> CmdLineRepository BlobOid
+cliCreateBlob b = cliDoCreateBlob b True
 
 cliNewTree :: CmdLineRepository Tree
 cliNewTree = CmdLineTree <$> (liftIO $ newIORef Nothing)
@@ -185,7 +223,7 @@ doLookupTreeEntry t (name:names) = do
       else case y of
       Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
       Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTree t'
+      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTreeRef t'
                                       doLookupTreeEntry t'' names
       _ -> return Nothing
 
@@ -235,7 +273,7 @@ doModifyTree t (name:names) createIfNotExist f = do
             Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
             Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
             Just (Git.TreeEntry st')  -> do
-                st <- Git.resolveTree st'
+                st <- Git.resolveTreeRef st'
                 ze <- doModifyTree st names createIfNotExist f
                 liftIO $ do
                     modifyIORef (cliTreeOid t) (const Nothing)
@@ -396,8 +434,8 @@ cliLookupRef refName = do
                            , "show-ref", TL.fromStrict refName ]
         ec  <- lastExitCode
         return $ if ec == 0
-            then Just (makeRef (TL.words rev))
-            else Nothing
+                 then Just (makeRef (TL.words rev))
+                 else Nothing
 
 cliUpdateRef :: Text -> Git.RefTarget CmdLineRepository Commit
              -> CmdLineRepository Reference
@@ -496,39 +534,43 @@ withOpenCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
 withOpenCmdLineRepository repo action =
     runReaderT (runCmdLineRepository action) repo
 
-withCmdLineRepository ::
-    FilePath -> Bool -> CmdLineRepository a -> IO (Either Text a)
-withCmdLineRepository path bar action =
-    bracket
-    (openOrCreateCmdLineRepository path bar)
-    (\repo -> case repo of
-          Left _ -> return ()
-          Right _ -> return ())
-    (\repo -> case repo of
-          Left e -> return (Left e)
-          Right r -> Right <$> withOpenCmdLineRepository r action)
+withCmdLineRepository :: FilePath -> Bool -> Bool -> CmdLineRepository a -> IO a
+withCmdLineRepository path createIfNotExist bare action =
+    (if createIfNotExist
+     then openOrCreateCmdLineRepository path bare
+     else openCmdLineRepository path)
+        >>= flip withOpenCmdLineRepository action
 
 openCmdLineRepository :: FilePath -> IO Repository
 openCmdLineRepository path =
     case F.toText path of
-        Left _ -> error $ "Cannot convert path: " ++ show path
+        Left e  -> failure (Git.BackendError e)
         Right p -> return Repository { repoPath = TL.fromStrict p }
 
-createCmdLineRepository :: FilePath -> Bool -> IO (Either Text Repository)
+createCmdLineRepository :: FilePath -> Bool -> IO Repository
 createCmdLineRepository path bare = do
     case F.toText path of
-        Left e -> return (Left e)
+        Left e -> failure (Git.BackendError e)
         Right p -> do
             shellyNoDir $ silently $
                 run_ "git" $ ["--git-dir", TL.fromStrict p]
                           <> ["--bare" | bare] <> ["init"]
-            return (Right (Repository (TL.fromStrict p)))
+            return (Repository (TL.fromStrict p))
 
-openOrCreateCmdLineRepository :: FilePath -> Bool -> IO (Either Text Repository)
+openOrCreateCmdLineRepository :: FilePath -> Bool -> IO Repository
 openOrCreateCmdLineRepository path bare = do
     exists <- F.isDirectory path
     if exists
-        then Right <$> openCmdLineRepository path
+        then openCmdLineRepository path
         else createCmdLineRepository path bare
+
+instance Git.RepositoryFactoryT CmdLineRepository IO where
+    type RepositoryImpl CmdLineRepository = Repository
+
+    withOpenRepository        = withOpenCmdLineRepository
+    withRepository fp         = withCmdLineRepository (unTagged fp)
+    openRepository fp         = openCmdLineRepository (unTagged fp)
+    createRepository fp       = createCmdLineRepository (unTagged fp)
+    openOrCreateRepository fp = openOrCreateCmdLineRepository (unTagged fp)
 
 -- CmdLine.hs
