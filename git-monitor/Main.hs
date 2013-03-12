@@ -162,7 +162,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
                     putBlob' str fp oid exe
                 Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
                     | oid /= oldOid || exe /= oldExe -> do
-                        infoL $ "Changed (hash or exe flag): " ++ fileStr fp
+                        infoL $ "Changed (hash or mode): " ++ fileStr fp
                         putBlob' str fp oid exe
                     | mt /= oldMt || oid /= fileOid -> do
                         path <- fileStr <$>
