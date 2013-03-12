@@ -29,7 +29,7 @@ Library
     , system-fileio        >= 0.3.11
     , system-filepath      >= 0.4.7
     , tagged               >= 0.4.4
-    , time                 >= 1.4.0.1
+    , time                 >= 1.4
     , text                 >= 0.11.2
     , transformers         >= 0.2.2
     , transformers-base    >= 0.4.1
