@@ -95,7 +95,8 @@ doMain opts = do
         infoL $ "Working tree: " ++ fileStr wd
         ref <- lookupRef "HEAD"
         void $ case ref of
-            Just (Reference _ (RefSymbolic name)) ->
+            Just (Reference _ (RefSymbolic name)) -> do
+                infoL $ "Tracking branch " ++ T.unpack name
                 start wd (TL.toStrict userName) (TL.toStrict userEmail) name
             _ -> error "Cannot use git-monitor if no branch is checked out"
   where
@@ -176,11 +177,12 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
 
     -- Rinse, wash, repeat.
     ref' <- lookupRef "HEAD"
-    let refChanged = case ref' of
-            Just (Reference _ (RefSymbolic ref'')) -> ref /= ref''
-            _ -> True
-    if refChanged
-        then infoL "Branch has changed, restarting"
+    let curRef = case ref' of
+            Just (Reference _ (RefSymbolic ref'')) -> ref''
+            _ -> ""
+    if ref /= curRef
+        then infoL $ "Branch changed to " ++ T.unpack curRef
+                  ++ ", restarting"
         else loop sc' str toid' ft'
 
   where
