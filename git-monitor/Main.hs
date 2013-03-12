@@ -16,12 +16,14 @@ import           Control.Monad.IO.Class (MonadIO(..))
 import qualified Data.ByteString as B (readFile)
 import           Data.Function (fix)
 import           Data.Map (Map)
-import qualified Data.Map as Map (traverseWithKey, lookup, fromList, empty)
+import qualified Data.Map as Map (mapWithKey, foldlWithKey',
+                                  lookup, fromList, empty)
 import           Data.Maybe
 import           Data.Text (Text)
 import qualified Data.Text as T (unpack)
 import qualified Data.Text.Lazy as TL (unpack, toStrict, init)
 import           Data.Time.Clock (UTCTime, getCurrentTime)
+import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git
@@ -145,54 +147,29 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     -- Read the current working tree's state on disk
     ft' <- readFileTree ref wd False
 
-    -- Prune files which have been removed since the last interval
-    void $ flip Map.traverseWithKey ft $
-        \fp _ -> case Map.lookup fp ft' of
-            Nothing -> do
-                infoL $ "Removed: " ++ fileStr fp
-                dropFromTree str fp
-            _ -> return ()
-
-    -- Find files which have been added or changed
-    void $ flip Map.traverseWithKey ft' $
-        \fp (FileEntry mt (BlobEntry oid exe) foid) ->
-            case Map.lookup fp ft of
-                Nothing -> do
-                    infoL $ "Added to snapshot: " ++ fileStr fp
-                    putBlob' str fp oid exe
-                Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
-                    | oid /= oldOid || exe /= oldExe -> do
-                        infoL $ "Changed: " ++ fileStr fp
-                        putBlob' str fp oid exe
-                    | mt /= oldMt || oid /= fileOid -> do
-                        path <- fileStr <$>
-                                (liftIO $ canonicalizePath (wd </> fp))
-                        infoL $ "Changed: " ++ fileStr fp
-                        contents <- liftIO $ B.readFile path
-                        newOid   <- createBlob (BlobString contents)
-                        putBlob' str fp newOid exe
-                    | otherwise -> return ()
-                _ -> return ()
+    -- Prune files which have been removed since the last interval, and find
+    -- files which have been added or changed
+    Map.foldlWithKey' (const (scanOldEntry str ft')) (return ()) ft
+    Map.foldlWithKey' (const (scanNewEntry str ft)) (return ()) ft'
 
     -- If the snapshot tree changed, create a new commit to reflect it
     toid' <- writeTree str
+    sc'   <- if toid /= toid'
+            then do
+                now <- liftIO getCurrentTime
+                let sig = Signature
+                          { signatureName  = name
+                          , signatureEmail = email
+                          , signatureWhen  = now
+                          }
+                    msg = "Snapshot"
 
-    sc' <- if toid /= toid'
-          then do
-              now <- liftIO getCurrentTime
-              let sig = Signature
-                        { signatureName  = name
-                        , signatureEmail = email
-                        , signatureWhen  = now
-                        }
-                  msg = "Snapshot"
-
-              c <- createCommit [commitRef sc] (treeRef str)
-                                sig sig msg (Just sref)
-              infoL $ "Commit "
-                   ++ (T.unpack . renderObjOid . commitOid $ c)
-              return c
-          else return sc
+                c <- createCommit [commitRef sc] (treeRef str)
+                                  sig sig msg (Just sref)
+                infoL $ "Commit "
+                     ++ (T.unpack . renderObjOid . commitOid $ c)
+                return c
+            else return sc
 
     -- Wait a given number of seconds
     liftIO $ threadDelay (interval opts * 1000000)
@@ -205,6 +182,40 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     if refChanged
         then infoL "Branch has changed, restarting"
         else loop sc' str toid' ft'
+
+  where
+    scanOldEntry :: (Repository m, MonadIO m)
+                 => Tree m
+                 -> Map FilePath (FileEntry m)
+                 -> FilePath -> FileEntry m -> m ()
+    scanOldEntry str ft fp _ = case Map.lookup fp ft of
+        Nothing -> do
+            infoL $ "Removed: " ++ fileStr fp
+            dropFromTree str fp
+        _ -> return ()
+
+    scanNewEntry :: (Repository m, MonadIO m)
+                 => Tree m
+                 -> Map FilePath (FileEntry m)
+                 -> FilePath -> FileEntry m -> m ()
+    scanNewEntry str ft fp (FileEntry mt (BlobEntry oid exe) foid) =
+        case Map.lookup fp ft of
+            Nothing -> do
+                infoL $ "Added to snapshot: " ++ fileStr fp
+                putBlob' str fp oid exe
+            Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
+                | oid /= oldOid || exe /= oldExe -> do
+                    infoL $ "Changed: " ++ fileStr fp
+                    putBlob' str fp oid exe
+                | mt /= oldMt || oid /= fileOid -> do
+                    path <- fileStr <$>
+                            (liftIO $ canonicalizePath (wd </> fp))
+                    infoL $ "Changed: " ++ fileStr fp
+                    contents <- liftIO $ B.readFile path
+                    newOid   <- createBlob (BlobString contents)
+                    putBlob' str fp newOid exe
+                | otherwise -> return ()
+            _ -> return ()
 
 data FileEntry m = FileEntry
     { fileModTime   :: UTCTime
@@ -228,7 +239,8 @@ readFileTree' :: (Repository m, MonadIO m)
               => Tree m -> FilePath -> Bool -> m (FileTree m)
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
-    Map.traverseWithKey (readModTime wdir getHash) (Map.fromList blobs)
+    sequenceA $
+        Map.mapWithKey (readModTime wdir getHash) (Map.fromList blobs)
 
 readModTime :: (Repository m, MonadIO m)
             => FilePath -> Bool -> FilePath -> TreeEntry m -> m (FileEntry m)
