@@ -55,6 +55,7 @@ instance M m => Git.RepositoryBase (SampleRepository m) where
     lookupObject = undefined
     existsObject = undefined
     newTree      = undefined
+    hashContents = undefined
     createBlob   = undefined
     createCommit = undefined
     createTag    = undefined
