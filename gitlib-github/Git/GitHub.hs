@@ -32,7 +32,6 @@ import qualified Data.HashMap.Strict as HashMap
 import           Data.Hex
 import           Data.IORef
 import           Data.List as L
-import           Data.Marshal.JSON ()
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
