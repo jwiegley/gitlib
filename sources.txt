@@ -6,6 +6,7 @@
 ./gitlib-test
 ./gitlib-utils
 ./hlibgit2
+./git-monitor
 ./vendor/aws
 ./vendor/c2hsc
 ./vendor/general-prelude
