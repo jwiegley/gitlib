@@ -153,8 +153,8 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
 
     -- Prune files which have been removed since the last interval, and find
     -- files which have been added or changed
-    Map.foldlWithKey' (const (scanOldEntry str ft')) (return ()) ft
-    Map.foldlWithKey' (const (scanNewEntry str ft)) (return ()) ft'
+    Map.foldlWithKey' (\a p e -> a >> scanOldEntry str ft' p e) (return ()) ft
+    Map.foldlWithKey' (\a p e -> a >> scanNewEntry str ft p e) (return ()) ft'
 
     -- If the snapshot tree changed, create a new commit to reflect it
     toid' <- writeTree str
