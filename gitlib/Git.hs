@@ -191,17 +191,20 @@ data BlobContents m = BlobString ByteString
                     | BlobStream (ByteSource m)
                     | BlobSizedStream (ByteSource m) Int
 
+data BlobKind = PlainBlob | ExecutableBlob | SymlinkBlob | UnknownBlob
+              deriving (Show, Eq, Enum)
+
 instance Eq (BlobContents m) where
   BlobString str1 == BlobString str2 = str1 == str2
   _ == _ = False
 
 {- $trees -}
-data TreeEntry m = BlobEntry   { blobEntryOid :: BlobOid m
-                               , blobEntryExe :: Bool }
+data TreeEntry m = BlobEntry   { blobEntryOid  :: BlobOid m
+                               , blobEntryKind :: BlobKind }
                  | TreeEntry   { treeEntryRef :: TreeRef m }
                  | CommitEntry { commitEntryRef :: CommitRef m }
 
-blobEntry :: RepositoryBase m => BlobOid m -> Bool -> TreeEntry m
+blobEntry :: RepositoryBase m => BlobOid m -> BlobKind -> TreeEntry m
 blobEntry = BlobEntry
 
 treeEntry :: RepositoryBase m => Tree m -> TreeEntry m
@@ -233,13 +236,13 @@ class RepositoryBase (TreeRepository t) => Treeish t where
                  -> TreeRepository t ()
     putTreeEntry t path = void . modifyTree t path True . const . return . Just
 
-    putBlob' :: t -> FilePath -> BlobOid (TreeRepository t) -> Bool
+    putBlob' :: t -> FilePath -> BlobOid (TreeRepository t) -> BlobKind
              -> TreeRepository t ()
-    putBlob' t path b exe = putTreeEntry t path (BlobEntry b exe)
+    putBlob' t path b kind = putTreeEntry t path (BlobEntry b kind)
 
     putBlob :: t -> FilePath -> BlobOid (TreeRepository t)
             -> TreeRepository t ()
-    putBlob t path b = putBlob' t path b False
+    putBlob t path b = putBlob' t path b PlainBlob
 
     putTree :: t -> FilePath -> TreeRef (TreeRepository t)
             -> TreeRepository t ()

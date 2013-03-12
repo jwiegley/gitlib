@@ -205,7 +205,12 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
             [mode,kind,sha] = TL.words prefix
         in (TL.toStrict path,
             case kind of
-            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) (mode == "100755")
+            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) $
+                        case mode of
+                            "100644" -> Git.PlainBlob
+                            "100755" -> Git.ExecutableBlob
+                            "120000" -> Git.SymlinkBlob
+                            _        -> Git.UnknownBlob
             "commit" -> Git.CommitEntry (Git.ByOid (Tagged (Oid sha)))
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")
@@ -304,8 +309,12 @@ cliWriteTree tree = do
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
     return (Tagged (Oid (TL.init oid)))
   where
-    renderLine (path, Git.BlobEntry (Tagged (Oid sha)) exe) =
-        return $ TL.concat [ if exe then "100755" else "100644"
+    renderLine (path, Git.BlobEntry (Tagged (Oid sha)) kind) =
+        return $ TL.concat [ case kind of
+                                  Git.PlainBlob      -> "100644"
+                                  Git.ExecutableBlob -> "100755"
+                                  Git.SymlinkBlob    -> "120000"
+                                  Git.UnknownBlob    -> "100000"
                            , " blob ", sha, "\t", TL.fromStrict path ]
     renderLine (path, Git.CommitEntry cref) = do
         let coid = Git.commitRefOid cref
@@ -333,7 +342,12 @@ cliTraverseEntries tree f = do
             [mode,kind,sha] = TL.words prefix
         in (fromText path,
             case kind of
-            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) (mode == "100755")
+            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) $
+                        case mode of
+                            "100644" -> Git.PlainBlob
+                            "100755" -> Git.ExecutableBlob
+                            "120000" -> Git.SymlinkBlob
+                            _        -> Git.UnknownBlob
             "commit" -> Git.CommitEntry (Git.ByOid (Tagged (Oid sha)))
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")

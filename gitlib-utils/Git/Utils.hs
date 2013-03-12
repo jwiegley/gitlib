@@ -70,7 +70,10 @@ blobToByteString (Blob _ contents) = blobContentsToByteString contents
 treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
 treeBlobEntries tree =
     mconcat <$> traverseEntries tree (\fp e -> case e of
-                                           BlobEntry {} -> return [(fp,e)]
+                                           BlobEntry _ kind ->
+                                               if kind == PlainBlob
+                                               then return [(fp,e)]
+                                               else return []
                                            _ -> return [])
 
 commitTreeEntry :: Repository m

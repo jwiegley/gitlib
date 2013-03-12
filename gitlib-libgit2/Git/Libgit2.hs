@@ -286,8 +286,12 @@ entryToTreeEntry entry = do
     case () of
         () | typ == c'GIT_OBJ_BLOB ->
              do attrs <- c'git_tree_entry_attributes entry
-                return $ Git.BlobEntry (Tagged (Oid oid))
-                                       (attrs == 0o100755)
+                return $ Git.BlobEntry (Tagged (Oid oid)) $
+                    case attrs of
+                        0o100644 -> Git.PlainBlob
+                        0o100755 -> Git.ExecutableBlob
+                        0o120000 -> Git.SymlinkBlob
+                        _        -> Git.UnknownBlob
            | typ == c'GIT_OBJ_TREE ->
              return $ Git.TreeEntry (Git.ByOid (Tagged (Oid oid)))
            | typ == c'GIT_OBJ_COMMIT ->
@@ -443,8 +447,13 @@ doModifyTree t (name:names) createIfNotExist f = do
                     Just oid' -> insertEntry contents n oid' mode
         return z
 
-    treeEntryToOid (Git.BlobEntry oid exe) =
-        return (Just (unTagged oid), if exe then 0o100755 else 0o100644)
+    treeEntryToOid (Git.BlobEntry oid kind) =
+        return (Just (unTagged oid),
+                case kind of
+                    Git.PlainBlob      -> 0o100644
+                    Git.ExecutableBlob -> 0o100755
+                    Git.SymlinkBlob    -> 0o120000
+                    Git.UnknownBlob    -> 0o100000)
     treeEntryToOid (Git.CommitEntry cr) = do
         let coid = Git.commitRefOid cr
         return (Just (unTagged coid), 0o160000)
