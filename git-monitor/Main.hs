@@ -189,7 +189,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
 
               c <- createCommit [commitRef sc] (treeRef str)
                                 sig sig msg (Just sref)
-              infoL $ "Committed: "
+              infoL $ "Commit "
                    ++ (T.unpack . renderObjOid . commitOid $ c)
               return c
           else return sc
