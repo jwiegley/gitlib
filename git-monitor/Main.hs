@@ -100,7 +100,9 @@ doMain opts = do
             Just (Reference _ (RefSymbolic name)) -> do
                 infoL $ "Tracking branch " ++ T.unpack name
                 start wd (TL.toStrict userName) (TL.toStrict userEmail) name
-            _ -> error "Cannot use git-monitor if no branch is checked out"
+            _ -> do
+                infoL "Cannot use git-monitor if no branch is checked out"
+                liftIO $ threadDelay (interval opts * 1000000)
   where
     initLogging debugMode = do
         let level | debugMode    = DEBUG
