@@ -14,7 +14,7 @@
 module Git where
 
 import           Control.Applicative
-import qualified Control.Exception as Exc
+import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -44,6 +44,7 @@ class (Applicative m, Monad m, Failure GitException m,
     data Tree m
     data Commit m
     data Tag m
+    data Options m
 
     facts :: m RepositoryFacts
 
@@ -350,13 +351,29 @@ resolveCommitRef (Known obj) = return obj
 
 {- $tags -}
 
-class (Repository r, MonadIO m) => RepositoryFactoryT r m where
-    type RepositoryImpl r :: *
+data RepositoryOptions r = RepositoryOptions
+    { repoPath       :: FilePath
+    , repoIsBare     :: Bool
+    , repoAutoCreate :: Bool
+    , repoOptions    :: Options r
+    }
 
-    withOpenRepository     :: RepositoryImpl r -> r a -> m a
-    withRepository         :: Tagged (r ()) FilePath -> Bool -> Bool -> r a -> m a
-    openRepository         :: Tagged (r ()) FilePath -> m (RepositoryImpl r)
-    createRepository       :: Tagged (r ()) FilePath -> Bool -> m (RepositoryImpl r)
-    openOrCreateRepository :: Tagged (r ()) FilePath -> Bool -> m (RepositoryImpl r)
+data RepositoryFactory r = RepositoryFactory
+    { openRepository  :: (Repository r, MonadIO m)
+                      => forall a. RepositoryOptions r -> m (r a)
+    , runRepository   :: (Repository r, MonadIO m)
+                      => forall a. r a -> m a
+    , closeRepository :: (Repository r, MonadIO m)
+                      => forall a. r a -> m ()
+    }
+
+withRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
+               => forall a. RepositoryFactory r
+               -> RepositoryOptions r -> r a -> m a
+withRepository factory opts action =
+    Exc.bracket
+        (openRepository factory opts)
+        (closeRepository factory)
+        (runRepository factory . (>> action))
 
 -- Repository.hs

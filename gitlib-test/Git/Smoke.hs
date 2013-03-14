@@ -25,7 +25,7 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 
 smokeTestSpec :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
-              => Proxy (r ()) -> Spec
+              => RepositoryFactory r -> Spec
 smokeTestSpec pr = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"

@@ -178,24 +178,22 @@ commitEntryHistory c path =
 getCommitParents :: Repository m => Commit m -> m [Commit m]
 getCommitParents = traverse resolveCommitRef . commitParents
 
-withNewRepository :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
-                  => Proxy (r ()) -> FilePath -> r a -> IO a
-withNewRepository _ dir action = do
-  exists <- isDirectory dir
-  when exists $ removeTree dir
+withNewRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
+                  => RepositoryFactory r
+                  -> RepositoryOptions r -> r a -> m a
+withNewRepository factory opts action = do
+    liftIO $ do
+        exists <- isDirectory (repoPath opts)
+        when exists $ removeTree (repoPath opts)
 
-  a <- withRepository (Tagged dir :: Tagged (r ()) FilePath) True True action
-  -- we want exceptions to leave the repo behind
+    a <- withRepository factory opts action
+    -- we want exceptions to leave the repo behind
 
-  exists <- isDirectory dir
-  when exists $ removeTree dir
+    liftIO $ do
+        exists <- isDirectory (repoPath opts)
+        when exists $ removeTree (repoPath opts)
 
-  return a
-
-withExistingRepository :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
-                       => Proxy (r ()) -> FilePath -> r a -> IO a
-withExistingRepository _ dir act =
-    withRepository (Tagged dir :: Tagged (r ()) FilePath) True True act
+    return a
 
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =

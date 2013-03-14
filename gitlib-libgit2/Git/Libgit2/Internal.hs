@@ -43,17 +43,6 @@ import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
-withOpenLgRepository :: M m => Repository -> LgRepository m a -> m a
-withOpenLgRepository repo action =
-    runReaderT (runLgRepository action) repo
-
-withLgRepository :: M m => FilePath -> Bool -> Bool -> LgRepository m a -> m a
-withLgRepository path createIfNotExist bare action = do
-    repo <- liftIO $ if createIfNotExist
-                     then openOrCreateLgRepository path bare
-                     else openLgRepository path
-    withOpenLgRepository repo action
-
 addTracingBackend :: M m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
@@ -71,21 +60,16 @@ addTracingBackend = do
                     odbBackendAdd repo backend 3
                     return ()
 
-openLgRepository :: M m => FilePath -> m Repository
-openLgRepository path =
-  liftIO $ openRepositoryWith path c'git_repository_open
-
-createLgRepository :: M m => FilePath -> Bool -> m Repository
-createLgRepository path bare =
-  liftIO $ openRepositoryWith path
-      (\x y -> c'git_repository_init x y (fromBool bare))
-
-openOrCreateLgRepository :: M m => FilePath -> Bool -> m Repository
-openOrCreateLgRepository path bare = do
-  p <- liftIO $ isDirectory path
-  if p
-    then openLgRepository path
-    else createLgRepository path bare
+openLgRepository :: M m => Git.RepositoryOptions (LgRepository m)
+                 -> m Repository
+openLgRepository opts = do
+    let path = Git.repoPath opts
+    p <- liftIO $ isDirectory path
+    if Git.repoAutoCreate opts || p
+        then liftIO $ openRepositoryWith path c'git_repository_open
+        else liftIO $ openRepositoryWith path
+                 (\x y -> c'git_repository_init x y
+                              (fromBool (Git.repoIsBare opts)))
 
 openRepositoryWith :: FilePath
                    -> (Ptr (Ptr C'git_repository) -> CString -> IO CInt)
@@ -102,6 +86,13 @@ openRepositoryWith path fn = do
                 newForeignPtr p'git_repository_free ptr'
     return Repository { repoPath = path
                       , repoObj  = fptr }
+
+runLgRepository :: M m => LgRepository m a -> m a
+runLgRepository repo action =
+    runReaderT (lgRepositoryReaderT action) repo
+
+closeLgRepository :: M m => LgRepository m a -> m ()
+closeLgRepository _ = return ()
 
 type ObjPtr a = Maybe (ForeignPtr a)
 

@@ -36,7 +36,7 @@ instance Show Repository where
   show x = "Repository " <> toString (repoPath x)
 
 newtype LgRepository m a = LgRepository
-    { runLgRepository :: ReaderT Repository m a }
+    { lgRepositoryReaderT :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
 
 type Oid m       = Git.Oid (LgRepository m)

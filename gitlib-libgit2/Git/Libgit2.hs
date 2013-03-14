@@ -82,6 +82,8 @@ instance M m => Git.RepositoryBase (LgRepository m) where
     data Tag (LgRepository m) = Tag
         { tagCommit :: CommitRef m }
 
+    data Options (LgRepository m) = Options
+
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
@@ -849,13 +851,11 @@ lgAllRefNames = listRefNames allRefsFlag
 
 --compareRef = c'git_reference_cmp
 
-instance M m => Git.RepositoryFactoryT (LgRepository m) m where
-    type RepositoryImpl (LgRepository m) = Repository
-
-    withOpenRepository        = withOpenLgRepository
-    withRepository fp         = withLgRepository (unTagged fp)
-    openRepository fp         = openLgRepository (unTagged fp)
-    createRepository fp       = createLgRepository (unTagged fp)
-    openOrCreateRepository fp = openOrCreateLgRepository (unTagged fp)
+lgFactory :: M m => RepositoryFactory (LgRepository m)
+lgFactory = RepositoryFactory
+    { openRepository  = openLgRepository
+    , runRepository   = runLgRepository
+    , closeRepository = closeLgRepository
+    }
 
 -- Libgit2.hs
