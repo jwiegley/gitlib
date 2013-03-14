@@ -15,6 +15,7 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Conduit
 import qualified Data.Conduit.List as CList
+import           Data.Default
 import           Data.Function
 import           Data.List
 import           Data.Monoid
@@ -177,27 +178,6 @@ commitEntryHistory c path =
 
 getCommitParents :: Repository m => Commit m -> m [Commit m]
 getCommitParents = traverse resolveCommitRef . commitParents
-
-withNewRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
-                  => RepositoryFactory r
-                  -> RepositoryOptions r -> r a -> m a
-withNewRepository factory opts action = do
-    liftIO $ do
-        exists <- isDirectory (repoPath opts)
-        when exists $ removeTree (repoPath opts)
-
-    a <- withRepository factory opts action
-    -- we want exceptions to leave the repo behind
-
-    liftIO $ do
-        exists <- isDirectory (repoPath opts)
-        when exists $ removeTree (repoPath opts)
-
-    return a
-
-sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
-sampleCommit tr sig =
-    createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
 resolveRefTree :: Repository m => Text -> m (Tree m)
 resolveRefTree refName = do

@@ -9,6 +9,7 @@
 module Main where
 
 import           Control.Monad
+import qualified Git as Git
 import qualified Git.Smoke as Git
 import qualified Git.Libgit2 as Lg
 import           System.Exit
@@ -18,14 +19,12 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.Runner
 import           Test.Hspec.HUnit ()
 
+type LgRepoFactoryIO = Git.RepositoryFactory (Lg.LgRepository IO) IO
+
 main :: IO ()
 main = do
     summary <- hspecWith (defaultConfig { configVerbose = True })
-                         (Git.smokeTestSpec
-                          (\path _ act ->
-                            Lg.withLgRepository path True True act
-                                -- (Lg.addTracingBackend >> act)
-                          ))
+                         (Git.smokeTestSpec (Lg.lgFactory :: LgRepoFactoryIO))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

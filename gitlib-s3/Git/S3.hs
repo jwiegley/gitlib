@@ -413,7 +413,7 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-addS3Backend :: Repository
+addS3Backend :: M m => Repository (LgRepository m)
              -> Text -- ^ bucket
              -> Text -- ^ prefix
              -> Text -- ^ access key
@@ -421,7 +421,7 @@ addS3Backend :: Repository
              -> Maybe Manager
              -> Maybe Text -- ^ mock address
              -> LogLevel
-             -> IO Repository
+             -> IO (Repository (LgRepository m))
 addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
     manager <- maybe (newManager def) return mmanager
     odbS3   <- odbS3Backend

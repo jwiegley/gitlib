@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Git.Libgit2.Backend
        ( odbBackendAdd
@@ -44,8 +46,8 @@ type F'git_odb_backend_exists_callback =
   Ptr C'git_odb_backend -> Ptr C'git_oid -> IO CInt
 type F'git_odb_backend_free_callback = Ptr C'git_odb_backend -> IO ()
 
-odbBackendAdd :: Repository -> Ptr C'git_odb_backend -> Int
-                 -> IO (Either String Repository)
+odbBackendAdd :: M m => Repository m -> Ptr C'git_odb_backend -> Int
+              -> IO (Either String (Repository m))
 odbBackendAdd repo backend priority =
   withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \odbPtr -> do

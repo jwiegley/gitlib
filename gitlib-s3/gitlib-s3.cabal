@@ -21,6 +21,7 @@ Test-suite smoke
   hs-source-dirs: test
   build-depends:
       base >=3
+    , gitlib
     , gitlib-s3
     , gitlib-test
     , gitlib-libgit2

@@ -12,9 +12,7 @@ module Git.Sample
        , Git.Oid(..), BlobOid(..), TreeOid(..), CommitOid(..)
        , Tree(..), Commit(..)
        , TreeRef(..), CommitRef(..), Reference(..)
-       , withSampleRepository, withOpenSampleRepository
-       , openSampleRepository, createSampleRepository
-       , openOrCreateSampleRepository
+       , sampleFactory
        , sampleGet
        ) where
 
@@ -24,7 +22,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Data.Tagged
-import           Filesystem.Path.CurrentOS
+import           Filesystem.Path.CurrentOS as F
 import           Prelude hiding (FilePath)
 import qualified Git as Git
 
@@ -33,12 +31,15 @@ data Void
 type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
 
 instance M m => Git.RepositoryBase (SampleRepository m) where
-    data Oid (SampleRepository m)    = Oid Void
-    data Tree (SampleRepository m)   = Tree Void
-    data Commit (SampleRepository m) = Commit Void
-    data Tag (SampleRepository m)    = Tag Void
+    data Oid (SampleRepository m)     = Oid Void
+    data Tree (SampleRepository m)    = Tree Void
+    data Commit (SampleRepository m)  = Commit Void
+    data Tag (SampleRepository m)     = Tag Void
+    data Context (SampleRepository m) = Context Repository
+    data Options (SampleRepository m) = Options
 
-    facts = return Git.RepositoryFacts { Git.hasSymbolicReferences = True }
+    facts = return Git.RepositoryFacts
+        { Git.hasSymbolicReferences = True }
 
     parseOid     = undefined
     renderOid    = undefined
@@ -59,6 +60,8 @@ instance M m => Git.RepositoryBase (SampleRepository m) where
     createBlob   = undefined
     createCommit = undefined
     createTag    = undefined
+
+    deleteRepository = undefined
 
 instance Show (Git.Oid (SampleRepository m)) where
     show (Oid coid) = undefined
@@ -104,7 +107,7 @@ instance Show Repository where
   show x = undefined
 
 newtype SampleRepository m a = SampleRepository
-    { runSampleRepository :: ReaderT Repository m a }
+    { sampleRepositoryReaderT :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
 
 type Oid m       = Git.Oid (SampleRepository m)
@@ -125,33 +128,27 @@ type Reference m = Git.Reference (SampleRepository m) (Commit m)
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
 
-withOpenSampleRepository :: M m => Repository -> SampleRepository m a -> m a
-withOpenSampleRepository repo action =
-    runReaderT (runSampleRepository action) repo
+sampleFactory :: M m => Git.RepositoryFactory (SampleRepository m) m
+sampleFactory = Git.RepositoryFactory
+    { Git.openRepository  = openSampleRepository
+    , Git.runRepository   = runSampleRepository
+    , Git.closeRepository = closeSampleRepository
+    , Git.defaultOptions  = defaultSampleOptions
+    }
 
-withSampleRepository :: M m => FilePath -> Bool -> Bool -> SampleRepository m a -> m a
-withSampleRepository path createIfNotExist bare action = do
-    repo <- liftIO $ if createIfNotExist
-                     then openOrCreateSampleRepository path bare
-                     else openSampleRepository path
-    withOpenSampleRepository repo action
+openSampleRepository :: M m => Git.RepositoryOptions (SampleRepository m)
+                     -> m (Git.Context (SampleRepository m))
+openSampleRepository opts = undefined
 
-openSampleRepository :: M m => FilePath -> m Repository
-openSampleRepository path = undefined
+runSampleRepository :: M m => Git.Context (SampleRepository m)
+                    -> SampleRepository m a -> m a
+runSampleRepository (Context repo) action =
+    runReaderT (sampleRepositoryReaderT action) repo
 
-createSampleRepository :: M m => FilePath -> Bool -> m Repository
-createSampleRepository path bare = undefined
+closeSampleRepository :: M m => Git.Context (SampleRepository m) -> m ()
+closeSampleRepository = const (return ())
 
-openOrCreateSampleRepository :: M m => FilePath -> Bool -> m Repository
-openOrCreateSampleRepository path bare = undefined
-
-instance M m => Git.RepositoryFactoryT (SampleRepository m) m where
-    type RepositoryImpl (SampleRepository m) = Repository
-
-    withOpenRepository        = withOpenSampleRepository
-    withRepository fp         = withSampleRepository (unTagged fp)
-    openRepository fp         = openSampleRepository (unTagged fp)
-    createRepository fp       = createSampleRepository (unTagged fp)
-    openOrCreateRepository fp = openOrCreateSampleRepository (unTagged fp)
+defaultSampleOptions :: Git.RepositoryOptions (SampleRepository m)
+defaultSampleOptions = Git.RepositoryOptions F.empty False False undefined
 
 -- Sample.hs

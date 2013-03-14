@@ -13,8 +13,9 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Maybe (fromMaybe, isNothing)
 import           Data.Text as T
+import qualified Git as Git
 import qualified Git.Libgit2 as Lg
-import qualified Git.S3 as Git
+import qualified Git.S3 as S3
 import qualified Git.Smoke as Git
 import           System.Environment
 import           System.Exit
@@ -24,31 +25,34 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
+type LgRepoFactoryIO = Git.RepositoryFactory (Lg.LgRepository IO) IO
+
+s3Factory :: LgRepoFactoryIO
+s3Factory = Lg.lgFactory
+    { Git.runRepository = \ctxt -> Lg.runLgRepository ctxt . (s3back >>) }
+  where
+    s3back = do
+        env <- liftIO $ getEnvironment
+        let bucket    = T.pack <$> lookup "S3_BUCKET" env
+            accessKey = T.pack <$> lookup "AWS_ACCESS_KEY" env
+            secretKey = T.pack <$> lookup "AWS_SECRET_KEY" env
+        repo <- Lg.lgGet
+        void $ liftIO $ S3.addS3Backend
+            repo
+            (fromMaybe "test-bucket" bucket)
+            ""
+            (fromMaybe "" accessKey)
+            (fromMaybe "" secretKey)
+            Nothing
+            (if isNothing bucket
+             then Just "127.0.0.1"
+             else Nothing)
+            Error
+
 main :: IO ()
 main = do
-    env <- getEnvironment
-    let bucket    = T.pack <$> lookup "S3_BUCKET" env
-        accessKey = T.pack <$> lookup "AWS_ACCESS_KEY" env
-        secretKey = T.pack <$> lookup "AWS_SECRET_KEY" env
-    summary   <-
-        hspecWith
-        (defaultConfig { configVerbose = True })
-        (Git.smokeTestSpec
-         (\path _ act ->
-           Lg.withLgRepository path True True $ do
-               repo <- Lg.lgGet
-               liftIO $ Git.addS3Backend
-                   repo
-                   (fromMaybe "test-bucket" bucket)
-                   ""
-                   (fromMaybe "" accessKey)
-                   (fromMaybe "" secretKey)
-                   Nothing
-                   (if isNothing bucket
-                    then Just "127.0.0.1"
-                    else Nothing)
-                   Error
-               act))
+    summary <- hspecWith (defaultConfig { configVerbose = True })
+                        (Git.smokeTestSpec s3Factory)
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

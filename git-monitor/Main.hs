@@ -26,8 +26,8 @@ import           Data.Time.Clock (UTCTime, getCurrentTime)
 import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
-import           Git
-import           Git.Libgit2 (withLgRepository)
+import           Git hiding (Options)
+import           Git.Libgit2 (lgFactory)
 import           Git.Utils (treeBlobEntries)
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
@@ -92,7 +92,7 @@ doMain opts = do
     let wd = if null (workingDir opts) then parent gd else "."
 
     -- Make sure we're in a known branch, and if so, let it begin
-    forever $ withLgRepository gd True False $ do
+    forever $ withRepository lgFactory gd $ do
         infoL $ "Saving snapshots in " ++ fileStr gd
         infoL $ "Working tree: " ++ fileStr wd
         ref <- lookupRef "HEAD"

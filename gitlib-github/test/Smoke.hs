@@ -21,22 +21,31 @@ import           Test.Hspec (Spec, describe, it, hspec)
 import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
-
+
+ghFactory :: Text -> Maybe Text -> Git.RepositoryFactory Gh.GitHubRepository IO
+ghFactory owner token = Gh.ghFactory
+    { Git.openRepository  = Gh.openGhRepository
+    , Git.runRepository   = Gh.runGhRepository
+    , Git.closeRepository = Gh.closeGhRepository
+    , Git.defaultOptions  = Git.RepositoryOptions
+        { Git.repoPath       = undefined
+        , Git.repoIsBare     = True
+        , Git.repoAutoCreate = True
+        , Git.repoOptions = Gh.Options
+            { Gh.ghRepoOwner = Gh.GitHubUser owner
+            , Gh.ghRepoName  = undefined
+            , Gh.ghRepoToken = token
+            }
+        }
+    }
+  where
+
 main :: IO ()
 main = do
     owner <- T.pack <$> getEnv "GITHUB_OWNER"
     token <- T.pack <$> getEnv "GITHUB_TOKEN"
-    summary <-
-        hspecWith
-        (defaultConfig { configVerbose = True })
-        (Git.smokeTestSpec
-         (\path _ act -> do
-               result <- Gh.withGitHubRepository (Gh.GitHubUser owner)
-                         (either id id (toText path)) (Just token) act
-               either (\e -> do putStrLn $ "Failed: " ++ show e
-                                exitFailure)
-                      (const (return ()))
-                      result))
+    summary <- hspecWith (defaultConfig { configVerbose = True })
+                        (Git.smokeTestSpec (ghFactory owner (Just token)))
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

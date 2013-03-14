@@ -25,10 +25,8 @@ import           Test.Hspec.Runner
 
 main :: IO ()
 main = do
-    summary <-
-        hspecWith (defaultConfig { configVerbose = True })
-                  (Git.smokeTestSpec
-                   (undefined :: Proxy (Cli.CmdLineRepository ())))
+    summary <- hspecWith (defaultConfig { configVerbose = True })
+                        (Git.smokeTestSpec Cli.cliFactory)
     when (summaryFailures summary > 0) $ exitFailure
     return ()
 

@@ -8,24 +8,53 @@
 
 module Git.Smoke where
 
-import           Control.Applicative
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Data.List (sort)
-import           Data.Proxy
-import           Data.Tagged
-import           Data.Time.Clock.POSIX
-import           Filesystem.Path.CurrentOS
-import           Git
-import           Git.Utils
-import           Prelude hiding (FilePath, putStr)
-import           Test.HUnit
-import           Test.Hspec (Spec, describe, it, hspec)
-import           Test.Hspec.Expectations
-import           Test.Hspec.HUnit ()
+import Control.Applicative
+import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Control
+import Data.List (sort)
+import Data.Proxy
+import Data.Tagged
+import Data.Time.Clock.POSIX
+import Filesystem (removeTree, isDirectory)
+import Filesystem.Path.CurrentOS
+import Git
+import Git.Utils
+import Prelude hiding (FilePath, putStr)
+import Test.HUnit
+import Test.Hspec (Spec, Example, describe, it, hspec)
+import Test.Hspec.Expectations
+import Test.Hspec.HUnit ()
 
-smokeTestSpec :: (Repository r, MonadIO r, RepositoryFactoryT r IO)
-              => RepositoryFactory r -> Spec
+withNewRepository :: (Repository r, MonadBaseControl IO m, MonadIO m,
+                      Example (m ()))
+                  => RepositoryFactory r m
+                  -> FilePath -> r a -> m a
+withNewRepository factory path action = do
+    liftIO $ do
+        exists <- isDirectory path
+        when exists $ removeTree path
+
+    -- we want exceptions to leave the repo behind
+    a <- withRepository' factory (defaultOptions factory)
+        { repoPath       = path
+        , repoIsBare     = True
+        , repoAutoCreate = True
+        } action
+
+    liftIO $ do
+        exists <- isDirectory path
+        when exists $ removeTree path
+
+    return a
+
+sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
+sampleCommit tr sig =
+    createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
+
+smokeTestSpec :: (Repository r, MonadIO r, MonadBaseControl IO m, MonadIO m,
+                  Example (m ()))
+              => RepositoryFactory r m -> Spec
 smokeTestSpec pr = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"

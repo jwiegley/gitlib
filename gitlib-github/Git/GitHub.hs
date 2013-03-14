@@ -85,27 +85,36 @@ instance Git.RepositoryBase GitHubRepository where
 
     data Tag GitHubRepository = Tag { tagCommit :: CommitRef }
 
+    data Context GitHubRepository = Context Repository
+    data Options GitHubRepository = Options
+        { ghRepoOwner :: GitHubOwner
+        , ghRepoName  :: Text
+        , ghRepoToken :: Maybe Text
+        }
+
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = False }
 
     parseOid x = Oid <$> unhex (T.encodeUtf8 x)
     renderOid (Oid x) = T.toLower (T.decodeUtf8 (hex x))
 
-    createRef    = ghCreateRef
-    lookupRef    = ghLookupRef
-    updateRef    = ghUpdateRef
-    deleteRef    = ghDeleteRef
-    allRefs      = ghAllRefs
-    lookupCommit = ghLookupCommit
-    lookupTree   = ghLookupTree
-    lookupBlob   = ghLookupBlob
-    lookupTag    = undefined -- ghLookupTag
-    lookupObject = undefined -- ghLookupObject
-    existsObject = undefined -- ghExistsObject
-    newTree      = ghNewTree
-    createBlob   = ghCreateBlob
-    createCommit = ghCreateCommit
-    createTag    = undefined
+    createRef        = ghCreateRef
+    lookupRef        = ghLookupRef
+    updateRef        = ghUpdateRef
+    deleteRef        = ghDeleteRef
+    allRefs          = ghAllRefs
+    lookupCommit     = ghLookupCommit
+    lookupTree       = ghLookupTree
+    lookupBlob       = ghLookupBlob
+    lookupTag        = undefined -- ghLookupTag
+    lookupObject     = undefined -- ghLookupObject
+    existsObject     = undefined -- ghExistsObject
+    newTree          = ghNewTree
+    hashContents     = undefined        -- jww (2013-03-14): do it locally
+    createBlob       = ghCreateBlob
+    createCommit     = ghCreateCommit
+    createTag        = undefined
+    deleteRepository = ghDeleteRepository
 
 data GitHubBlob = GitHubBlob
     { ghBlobContent  :: ByteString
@@ -148,7 +157,7 @@ ghRestfulEx :: (ToJSON a, FromJSON b) => Text -> Text -> a -> RESTful ()
 ghRestfulEx method url arg act = do
     gh        <- ghGet
     urlPrefix <- ghPrefix
-    let tok = gitHubToken gh
+    let tok = ghRepoToken (gitHubOptions gh)
     result <- liftIO $ runResourceT $
               withRestfulEnvAndMgr (fromJust (httpManager gh))
               (for_ tok $ \t -> do
@@ -161,7 +170,7 @@ ghRestful :: (ToJSON a, FromJSON b) => Text -> Text -> a -> GitHubRepository b
 ghRestful method url arg = do
     gh        <- ghGet
     urlPrefix <- ghPrefix
-    let tok = gitHubToken gh
+    let tok = ghRepoToken (gitHubOptions gh)
     result <- liftIO $ runResourceT $
               withRestfulEnvAndMgr (fromJust (httpManager gh))
               (for_ tok $ \t -> do
@@ -267,11 +276,15 @@ instance Show GitHubTreeEntryProxy where
         ]
 
 treeEntryToProxy :: Text -> TreeEntry -> GitHubRepository GitHubTreeEntryProxy
-treeEntryToProxy name (Git.BlobEntry oid exe) =
+treeEntryToProxy name (Git.BlobEntry oid kind) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "blob"
         , ghpTreeEntryPath    = name
-        , ghpTreeEntryMode    = if exe then "100755" else "100644"
+        , ghpTreeEntryMode    = case kind of
+            Git.PlainBlob      -> "100644"
+            Git.ExecutableBlob -> "100755"
+            Git.SymlinkBlob    -> "120000"
+            Git.UnknownBlob    -> "100000"
         , ghpTreeEntrySize    = (-1)
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
@@ -319,7 +332,12 @@ treeEntryToProxy name (Git.TreeEntry ref@(Git.Known tree)) = do
 proxyToTreeEntry :: GitHubTreeEntryProxy -> GitHubRepository TreeEntry
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "blob" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)
-    return $ Git.BlobEntry (Tagged oid) (ghpTreeEntryMode entry == "100755")
+    return $ Git.BlobEntry (Tagged oid) $
+        case ghpTreeEntryMode entry of
+            "100644" -> Git.PlainBlob
+            "100755" -> Git.ExecutableBlob
+            "120000" -> Git.SymlinkBlob
+            _        -> Git.UnknownBlob
 
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "commit" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)
@@ -675,23 +693,22 @@ data GitHubOwner = GitHubUser Text
                  deriving (Show, Eq)
 
 data Repository = Repository
-    { httpManager :: Maybe Manager
-    , gitHubOwner :: GitHubOwner
-    , gitHubRepo  :: Github.Repo
-    , gitHubToken :: Maybe Text
+    { httpManager   :: Maybe Manager
+    , gitHubRepo    :: Github.Repo
+    , gitHubOptions :: Git.Options GitHubRepository
     }
 
 ghPrefix :: GitHubRepository Text
 ghPrefix = do
     repo <- ghGet
-    let owner = case gitHubOwner repo of
+    let owner = case ghRepoOwner (gitHubOptions repo) of
             GitHubUser name         -> name
             GitHubOrganization name -> name
         name  = Github.repoName (gitHubRepo repo)
     return [st|https://api.github.com/repos/#{owner}/#{name}|]
 
 newtype GitHubRepository a = GitHubRepository
-    { runGhRepository :: ReaderT Repository IO a }
+    { ghRepositoryReaderT :: ReaderT Repository IO a }
 
 instance Functor GitHubRepository where
     fmap f (GitHubRepository x) = GitHubRepository (fmap f x)
@@ -702,7 +719,7 @@ instance Applicative GitHubRepository where
 
 instance Monad GitHubRepository where
     return = GitHubRepository . return
-    GitHubRepository m >>= f = GitHubRepository (m >>= runGhRepository . f)
+    GitHubRepository m >>= f = GitHubRepository (m >>= ghRepositoryReaderT . f)
 
 instance MonadIO GitHubRepository where
     liftIO m = GitHubRepository (liftIO m)
@@ -736,63 +753,83 @@ instance Git.Treeish Commit where
     writeTree       = Git.defaultCommitWriteTree
     traverseEntries = Git.defaultCommitTraverseEntries
 
-withOpenGhRepository :: Repository -> GitHubRepository a -> IO a
-withOpenGhRepository repo action = runReaderT (runGhRepository action) repo
+-- dropRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository a
+--                -> IO (Either Github.Error a)
+-- dropRepository owner repoName token action =
+--     let repoName' = if ".git" `T.isSuffixOf` repoName
+--                     then T.take (T.length repoName - 4) repoName
+--                     else repoName
+--     in bracket
+--        (openOrCreateGhRepository owner repoName' token)
+--        (\repo -> case repo of
+--              Left _ -> return ()
+--              Right _ -> when (isJust token) $ do
+--              let name = case owner of
+--                      GitHubUser n -> n
+--                      GitHubOrganization n -> n
+--              _ <- Github.deleteRepo
+--                   (Github.GithubOAuth (T.unpack (fromJust token)))
+--                   (T.unpack name) (T.unpack repoName')
+--              return ())
+--        (\repo -> case repo of
+--              Left e -> return (Left e)
+--              Right r -> Right <$> withOpenGhRepository r action)
 
-withGitHubRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository a
-                     -> IO (Either Github.Error a)
-withGitHubRepository owner repoName token action =
-    let repoName' = if ".git" `T.isSuffixOf` repoName
+ghDeleteRepository :: GitHubRepository ()
+ghDeleteRepository = do
+    repo <- ghGet
+    let ghOpts    = gitHubOptions repo
+        owner     = ghRepoOwner ghOpts
+        repoName  = ghRepoName ghOpts
+        token     = ghRepoToken ghOpts
+        repoName' = if ".git" `T.isSuffixOf` repoName
                     then T.take (T.length repoName - 4) repoName
                     else repoName
-    in bracket
-       (openOrCreateGhRepository owner repoName' token)
-       (\repo -> case repo of
-             Left _ -> return ()
-             Right _ -> when (isJust token) $ do
-             let name = case owner of
-                     GitHubUser n -> n
-                     GitHubOrganization n -> n
-             _ <- Github.deleteRepo
+        name = case owner of
+            GitHubUser n -> n
+            GitHubOrganization n -> n
+    result <- liftIO $ Github.deleteRepo
                   (Github.GithubOAuth (T.unpack (fromJust token)))
                   (T.unpack name) (T.unpack repoName')
-             return ())
-       (\repo -> case repo of
-             Left e -> return (Left e)
-             Right r -> Right <$> withOpenGhRepository r action)
+    either (failure . userError . show) return result
 
-openGhRepository :: GitHubOwner -> Github.Repo -> Maybe Text -> IO Repository
-openGhRepository owner repo token = do
+doOpenGhRepository :: Git.RepositoryOptions GitHubRepository
+                   -> Github.Repo
+                   -> IO Repository
+doOpenGhRepository opts repo = do
+    let ghOpts = Git.repoOptions opts
     mgr <- newManager def
-    return Repository { httpManager = Just mgr
-                      , gitHubOwner = owner
-                      , gitHubRepo  = repo
-                      , gitHubToken = token }
+    return Repository { httpManager   = Just mgr
+                      , gitHubRepo    = repo
+                      , gitHubOptions = ghOpts }
 
-createGhRepository ::
-    GitHubOwner -> Text -> Text -> IO (Either Github.Error Repository)
-createGhRepository owner repoName token =
-    let auth = Github.GithubOAuth (T.unpack token)
-        newr = (Github.newRepo (T.unpack repoName))
+createGhRepository :: Git.RepositoryOptions GitHubRepository
+                   -> Text
+                   -> IO (Either Github.Error Repository)
+createGhRepository opts token =
+    let ghOpts   = Git.repoOptions opts
+        owner    = ghRepoOwner ghOpts
+        repoName = ghRepoName ghOpts
+        auth     = Github.GithubOAuth (T.unpack token)
+        newr     = (Github.newRepo (T.unpack repoName))
                    { Github.newRepoHasIssues = Just False
                    , Github.newRepoAutoInit  = Just True }
-    in either (return . Left) confirmCreation =<<
+    in either (return . Left) (confirmCreation ghOpts) =<<
        case owner of
            GitHubUser _ -> Github.createRepo auth newr
            GitHubOrganization name ->
                Github.createOrganizationRepo auth (T.unpack name) newr
   where
-    confirmCreation _ = do
-        repo <- query (20 :: Int)
+    confirmCreation ghOpts _ = do
+        repo <- query (ghRepoOwner ghOpts) (ghRepoName ghOpts) (20 :: Int)
         flip (either (return . Left)) repo $ \r -> do
             mgr <- newManager def
             return $ Right $ Repository
-                { httpManager = Just mgr
-                , gitHubOwner = owner
-                , gitHubRepo  = r
-                , gitHubToken = Just token }
+                { httpManager   = Just mgr
+                , gitHubRepo    = r
+                , gitHubOptions = ghOpts }
 
-    query count = do
+    query owner repoName count = do
         -- Poll every five seconds for 100 seconds, waiting for the repository
         -- to be created, since this happens asynchronously on the GitHub
         -- servers.
@@ -801,7 +838,7 @@ createGhRepository owner repoName token =
         case repo of
             Left l
                 | count < 0 -> return (Left l)
-                | otherwise -> query (count - 1)
+                | otherwise -> query owner repoName (count - 1)
             Right r -> return (Right r)
 
 doesRepoExist :: GitHubOwner -> Text -> IO (Either Github.Error Github.Repo)
@@ -812,15 +849,46 @@ doesRepoExist owner repoName =
         GitHubOrganization name -> do
             Github.organizationRepo (T.unpack name) (T.unpack repoName)
 
-openOrCreateGhRepository ::
-    GitHubOwner -> Text -> Maybe Text -> IO (Either Github.Error Repository)
-openOrCreateGhRepository owner repoName token = do
-    exists <- doesRepoExist owner repoName
+openOrCreateGhRepository :: Git.RepositoryOptions GitHubRepository
+                         -> IO (Either Github.Error Repository)
+openOrCreateGhRepository opts = do
+    let ghOpts = Git.repoOptions opts
+    exists <- doesRepoExist (ghRepoOwner ghOpts) (ghRepoName ghOpts)
     case exists of
-        Left _ -> case token of
-            Just tok -> createGhRepository owner repoName tok
+        Left _ -> case ghRepoToken ghOpts of
+            Just tok -> createGhRepository opts tok
             Nothing  -> return (Left (Github.UserError
                                       "Authentication token not provided"))
-        Right r -> Right <$> openGhRepository owner r token
+        Right r -> Right <$> doOpenGhRepository opts r
+
+ghFactory :: Git.RepositoryFactory GitHubRepository IO
+ghFactory = Git.RepositoryFactory
+    { Git.openRepository  = openGhRepository
+    , Git.runRepository   = runGhRepository
+    , Git.closeRepository = closeGhRepository
+    , Git.defaultOptions  = defaultGhOptions
+    }
+
+openGhRepository :: Git.RepositoryOptions GitHubRepository
+                 -> IO (Git.Context GitHubRepository)
+openGhRepository opts = do
+    repo <- openOrCreateGhRepository opts
+    either (throwIO . userError . show) (return . Context) repo
+
+runGhRepository :: Git.Context GitHubRepository
+                -> GitHubRepository a -> IO a
+runGhRepository (Context repo) action =
+    runReaderT (ghRepositoryReaderT action) repo
+
+closeGhRepository :: Git.Context GitHubRepository -> IO ()
+closeGhRepository = const (return ())
+
+defaultGhOptions :: Git.RepositoryOptions GitHubRepository
+defaultGhOptions = Git.RepositoryOptions "" False False undefined
+
+ghOptions :: GitHubOwner -> Text -> Maybe Text
+          -> Git.RepositoryOptions GitHubRepository
+ghOptions owner repoName token =
+    defaultGhOptions { Git.repoOptions = Options owner repoName token }
 
 -- GitHub.hs

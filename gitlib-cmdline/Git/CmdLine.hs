@@ -83,6 +83,10 @@ instance Git.RepositoryBase CmdLineRepository where
     data Tag CmdLineRepository = CmdLineTag
         { cliTagCommit :: CommitRef }
 
+    data Context CmdLineRepository = Context Repository
+
+    data Options CmdLineRepository = Options
+
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
@@ -106,6 +110,9 @@ instance Git.RepositoryBase CmdLineRepository where
     createBlob   = cliCreateBlob
     createCommit = cliCreateCommit
     createTag    = cliCreateTag
+
+    deleteRepository =
+        cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions
 
 instance Show (Git.Oid CmdLineRepository) where
     show (Oid x) = show x
@@ -497,10 +504,15 @@ cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
         , ""] <> TL.lines (TL.fromStrict msg)
     return $ CmdLineTag (Git.ByOid oid)
 
-data Repository = Repository { repoPath :: TL.Text } deriving Show
+data Repository = Repository
+    { repoOptions :: Git.RepositoryOptions CmdLineRepository
+    }
+
+repoPath :: Repository -> TL.Text
+repoPath = toTextIgnore . Git.repoPath . repoOptions
 
 newtype CmdLineRepository a = CmdLineRepository
-    { runCmdLineRepository :: ReaderT Repository IO a }
+    { cmdLineRepositoryReaderT :: ReaderT Repository IO a }
 
 instance Functor CmdLineRepository where
     fmap f (CmdLineRepository x) = CmdLineRepository (fmap f x)
@@ -512,7 +524,7 @@ instance Applicative CmdLineRepository where
 instance Monad CmdLineRepository where
     return = CmdLineRepository . return
     CmdLineRepository m >>= f =
-        CmdLineRepository (m >>= runCmdLineRepository . f)
+        CmdLineRepository (m >>= cmdLineRepositoryReaderT . f)
 
 instance MonadIO CmdLineRepository where
     liftIO m = CmdLineRepository (liftIO m)
@@ -545,47 +557,38 @@ instance Git.Treeish Commit where
     writeTree       = Git.defaultCommitWriteTree
     traverseEntries = Git.defaultCommitTraverseEntries
 
-withOpenCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
-withOpenCmdLineRepository repo action =
-    runReaderT (runCmdLineRepository action) repo
+cliFactory :: Git.RepositoryFactory CmdLineRepository IO
+cliFactory = Git.RepositoryFactory
+    { Git.openRepository  = openCmdLineRepository
+    , Git.runRepository   = runCmdLineRepository
+    , Git.closeRepository = closeCmdLineRepository
+    , Git.defaultOptions  = defaultCmdLineOptions
+    }
 
-withCmdLineRepository :: FilePath -> Bool -> Bool -> CmdLineRepository a -> IO a
-withCmdLineRepository path createIfNotExist bare action =
-    (if createIfNotExist
-     then openOrCreateCmdLineRepository path bare
-     else openCmdLineRepository path)
-        >>= flip withOpenCmdLineRepository action
-
-openCmdLineRepository :: FilePath -> IO Repository
-openCmdLineRepository path =
-    case F.toText path of
-        Left e  -> failure (Git.BackendError e)
-        Right p -> return Repository { repoPath = TL.fromStrict p }
-
-createCmdLineRepository :: FilePath -> Bool -> IO Repository
-createCmdLineRepository path bare = do
+openCmdLineRepository :: Git.RepositoryOptions CmdLineRepository
+                      -> IO (Git.Context CmdLineRepository)
+openCmdLineRepository opts = do
+    let path = Git.repoPath opts
+    exists <- F.isDirectory path
     case F.toText path of
         Left e -> failure (Git.BackendError e)
         Right p -> do
-            shellyNoDir $ silently $
-                run_ "git" $ ["--git-dir", TL.fromStrict p]
-                          <> ["--bare" | bare] <> ["init"]
-            return (Repository (TL.fromStrict p))
+            when (not exists && Git.repoAutoCreate opts) $
+                shellyNoDir $ silently $
+                    run_ "git" $ ["--git-dir", TL.fromStrict p]
+                              <> ["--bare" | Git.repoIsBare opts]
+                              <> ["init"]
+            return (Context (Repository { repoOptions = opts }))
 
-openOrCreateCmdLineRepository :: FilePath -> Bool -> IO Repository
-openOrCreateCmdLineRepository path bare = do
-    exists <- F.isDirectory path
-    if exists
-        then openCmdLineRepository path
-        else createCmdLineRepository path bare
+runCmdLineRepository :: Git.Context CmdLineRepository
+                     -> CmdLineRepository a -> IO a
+runCmdLineRepository (Context repo) action =
+    runReaderT (cmdLineRepositoryReaderT action) repo
 
-instance Git.RepositoryFactoryT CmdLineRepository IO where
-    type RepositoryImpl CmdLineRepository = Repository
+closeCmdLineRepository :: Git.Context CmdLineRepository -> IO ()
+closeCmdLineRepository = const (return ())
 
-    withOpenRepository        = withOpenCmdLineRepository
-    withRepository fp         = withCmdLineRepository (unTagged fp)
-    openRepository fp         = openCmdLineRepository (unTagged fp)
-    createRepository fp       = createCmdLineRepository (unTagged fp)
-    openOrCreateRepository fp = openOrCreateCmdLineRepository (unTagged fp)
+defaultCmdLineOptions :: Git.RepositoryOptions CmdLineRepository
+defaultCmdLineOptions = Git.RepositoryOptions "" False False undefined
 
 -- CmdLine.hs

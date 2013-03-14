@@ -44,6 +44,7 @@ class (Applicative m, Monad m, Failure GitException m,
     data Tree m
     data Commit m
     data Tag m
+    data Context m
     data Options m
 
     facts :: m RepositoryFacts
@@ -97,6 +98,8 @@ class (Applicative m, Monad m, Failure GitException m,
     createCommit :: [CommitRef m] -> TreeRef m
                  -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
+
+    deleteRepository :: m ()
 
 class (Repository m1, Repository m2) => RepositoryLink m1 m2 where
     pushRef :: Reference m1 (Commit m1)
@@ -358,22 +361,27 @@ data RepositoryOptions r = RepositoryOptions
     , repoOptions    :: Options r
     }
 
-data RepositoryFactory r = RepositoryFactory
-    { openRepository  :: (Repository r, MonadIO m)
-                      => forall a. RepositoryOptions r -> m (r a)
-    , runRepository   :: (Repository r, MonadIO m)
-                      => forall a. r a -> m a
-    , closeRepository :: (Repository r, MonadIO m)
-                      => forall a. r a -> m ()
+data RepositoryFactory r m = RepositoryFactory
+    { openRepository  :: RepositoryOptions r -> m (Context r)
+    , runRepository   :: forall a. Context r -> r a -> m a
+    , closeRepository :: Context r -> m ()
+    , defaultOptions  :: RepositoryOptions r
     }
 
-withRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
-               => forall a. RepositoryFactory r
-               -> RepositoryOptions r -> r a -> m a
-withRepository factory opts action =
+withRepository' :: (Repository r, MonadBaseControl IO m, MonadIO m)
+                => RepositoryFactory r m
+                -> RepositoryOptions r -> r a -> m a
+withRepository' factory opts action =
     Exc.bracket
         (openRepository factory opts)
         (closeRepository factory)
-        (runRepository factory . (>> action))
+        (flip (runRepository factory) action)
+
+withRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
+               => RepositoryFactory r m
+               -> FilePath -> r a -> m a
+withRepository factory path action =
+    withRepository' factory ((defaultOptions factory) { repoPath = path })
+        action
 
 -- Repository.hs

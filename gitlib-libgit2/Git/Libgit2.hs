@@ -16,9 +16,9 @@ module Git.Libgit2
        , Git.Oid(..), BlobOid(..), TreeOid(..), CommitOid(..)
        , Tree(..), Commit(..)
        , TreeRef(..), CommitRef(..), Reference(..)
-       , withLgRepository, withOpenLgRepository
-       , openLgRepository, createLgRepository, openOrCreateLgRepository
-       , addTracingBackend
+       , lgFactory, openLgRepository, runLgRepository
+       , closeLgRepository, defaultLgOptions
+       , lgGet, addTracingBackend
        ) where
 
 import           Bindings.Libgit2
@@ -27,6 +27,7 @@ import           Control.Exception
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Reader
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import           Data.HashMap.Strict (HashMap)
@@ -41,6 +42,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as U
 import           Data.Traversable (for)
+import           Filesystem
 import           Filesystem.Path.CurrentOS (FilePath, (</>))
 import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
@@ -82,6 +84,7 @@ instance M m => Git.RepositoryBase (LgRepository m) where
     data Tag (LgRepository m) = Tag
         { tagCommit :: CommitRef m }
 
+    data Context (LgRepository m) = Context (Repository (LgRepository m))
     data Options (LgRepository m) = Options
 
     facts = return Git.RepositoryFacts
@@ -106,6 +109,8 @@ instance M m => Git.RepositoryBase (LgRepository m) where
     createBlob   = lgCreateBlob
     createCommit = lgCreateCommit
     createTag    = undefined
+
+    deleteRepository = lgGet >>= liftIO . removeTree . repoPath
 
 lgParseOid :: M m => Text -> LgRepository m (Oid m)
 lgParseOid str
@@ -851,11 +856,49 @@ lgAllRefNames = listRefNames allRefsFlag
 
 --compareRef = c'git_reference_cmp
 
-lgFactory :: M m => RepositoryFactory (LgRepository m)
-lgFactory = RepositoryFactory
-    { openRepository  = openLgRepository
-    , runRepository   = runLgRepository
-    , closeRepository = closeLgRepository
+lgFactory :: M m => Git.RepositoryFactory (LgRepository m) m
+lgFactory = Git.RepositoryFactory
+    { Git.openRepository  = openLgRepository
+    , Git.runRepository   = runLgRepository
+    , Git.closeRepository = closeLgRepository
+    , Git.defaultOptions  = defaultLgOptions
     }
+
+openLgRepository :: M m => Git.RepositoryOptions (LgRepository m)
+                 -> m (Git.Context (LgRepository m))
+openLgRepository opts = do
+    let path = Git.repoPath opts
+    repo <- liftIO $ do
+        p <- isDirectory path
+        if not (Git.repoAutoCreate opts) || p
+            then openRepositoryWith path c'git_repository_open
+            else openRepositoryWith path
+                     (\x y -> c'git_repository_init x y
+                                  (fromBool (Git.repoIsBare opts)))
+    return (Context repo)
+  where
+    openRepositoryWith path fn = do
+        fptr <- alloca $ \ptr ->
+            case F.toText path of
+                Left p  -> error $ "Repository does not exist: " ++ T.unpack p
+                Right p -> withCStringable p $ \str -> do
+                    r <- fn ptr str
+                    when (r < 0) $
+                        error $ "Repository does not exist: " ++ T.unpack p
+                    ptr' <- peek ptr
+                    newForeignPtr p'git_repository_free ptr'
+        return Repository { repoOptions = opts
+                          , repoObj     = fptr }
+
+runLgRepository :: M m => Git.Context (LgRepository m)
+                -> LgRepository m a -> m a
+runLgRepository (Context repo) action =
+    runReaderT (lgRepositoryReaderT action) repo
+
+closeLgRepository :: M m => Git.Context (LgRepository m) -> m ()
+closeLgRepository = const (return ())
+
+defaultLgOptions :: Git.RepositoryOptions (LgRepository m)
+defaultLgOptions = Git.RepositoryOptions "" False False undefined
 
 -- Libgit2.hs

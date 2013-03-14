@@ -13,7 +13,6 @@ import           Control.Applicative
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Reader
 import           Data.ByteString
 import           Data.Dynamic
 import           Data.Stringable
@@ -43,6 +42,11 @@ import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
+type ObjPtr a = Maybe (ForeignPtr a)
+
+data Base m a b = Base { gitId  :: Maybe (Tagged a (Git.Oid (LgRepository m)))
+                       , gitObj :: ObjPtr b }
+
 addTracingBackend :: M m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
@@ -59,45 +63,6 @@ addTracingBackend = do
                     backend   <- traceBackend loosePtr'
                     odbBackendAdd repo backend 3
                     return ()
-
-openLgRepository :: M m => Git.RepositoryOptions (LgRepository m)
-                 -> m Repository
-openLgRepository opts = do
-    let path = Git.repoPath opts
-    p <- liftIO $ isDirectory path
-    if Git.repoAutoCreate opts || p
-        then liftIO $ openRepositoryWith path c'git_repository_open
-        else liftIO $ openRepositoryWith path
-                 (\x y -> c'git_repository_init x y
-                              (fromBool (Git.repoIsBare opts)))
-
-openRepositoryWith :: FilePath
-                   -> (Ptr (Ptr C'git_repository) -> CString -> IO CInt)
-                   -> IO Repository
-openRepositoryWith path fn = do
-    fptr <- alloca $ \ptr ->
-        case F.toText path of
-            Left p  -> error $ "Repository does not exist: " ++ T.unpack p
-            Right p -> withCStringable p $ \str -> do
-                r <- fn ptr str
-                when (r < 0) $
-                    error $ "Repository does not exist: " ++ T.unpack p
-                ptr' <- peek ptr
-                newForeignPtr p'git_repository_free ptr'
-    return Repository { repoPath = path
-                      , repoObj  = fptr }
-
-runLgRepository :: M m => LgRepository m a -> m a
-runLgRepository repo action =
-    runReaderT (lgRepositoryReaderT action) repo
-
-closeLgRepository :: M m => LgRepository m a -> m ()
-closeLgRepository _ = return ()
-
-type ObjPtr a = Maybe (ForeignPtr a)
-
-data Base m a b = Base { gitId  :: Maybe (Tagged a (Git.Oid (LgRepository m)))
-                       , gitObj :: ObjPtr b }
 
 coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
 coidPtrToOid coidptr = do
