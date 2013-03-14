@@ -181,11 +181,7 @@ resolveBlobRef :: Repository m => BlobRef m -> m (Blob m)
 resolveBlobRef (ByOid oid) = lookupBlob oid
 resolveBlobRef (Known obj) = return obj
 
-#if MIN_VERSION_conduit(1, 0, 0)
 type ByteSource m = Producer m ByteString
-#else
-type ByteSource m = GSource m ByteString
-#endif
 
 data BlobContents m = BlobString ByteString
                     | BlobStream (ByteSource m)
