@@ -22,23 +22,8 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
-ghFactory :: Text -> Maybe Text -> Git.RepositoryFactory Gh.GitHubRepository IO
-ghFactory owner token = Gh.ghFactory
-    { Git.openRepository  = Gh.openGhRepository
-    , Git.runRepository   = Gh.runGhRepository
-    , Git.closeRepository = Gh.closeGhRepository
-    , Git.defaultOptions  = Git.RepositoryOptions
-        { Git.repoPath       = undefined
-        , Git.repoIsBare     = True
-        , Git.repoAutoCreate = True
-        , Git.repoOptions = Gh.Options
-            { Gh.ghRepoOwner = Gh.GitHubUser owner
-            , Gh.ghRepoName  = undefined
-            , Gh.ghRepoToken = token
-            }
-        }
-    }
-  where
+ghFactory :: Text -> Maybe Text -> Git.RepositoryFactory Gh.GitHubRepository IO Gh.Repository
+ghFactory owner token = Gh.ghFactory (Gh.GitHubUser owner) undefined token
 
 main :: IO ()
 main = do

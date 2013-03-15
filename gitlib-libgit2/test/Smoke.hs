@@ -19,7 +19,8 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.Runner
 import           Test.Hspec.HUnit ()
 
-type LgRepoFactoryIO = Git.RepositoryFactory (Lg.LgRepository IO) IO
+type LgRepoFactoryIO =
+    Git.RepositoryFactory (Lg.LgRepository IO) IO Lg.Repository
 
 main :: IO ()
 main = do

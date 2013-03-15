@@ -19,7 +19,8 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.Runner
 import           Test.Hspec.HUnit ()
 
-type SampleRepoFactoryIO = Git.RepositoryFactory (Samp.SampleRepository IO) IO
+type SampleRepoFactoryIO =
+    Git.RepositoryFactory (Samp.SampleRepository IO) IO Samp.Repository
 
 main :: IO ()
 main = do

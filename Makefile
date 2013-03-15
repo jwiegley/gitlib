@@ -12,7 +12,7 @@ tests:
 	fi
 	perl -i -pe 's/^-- //;' gitlib-github/gitlib-github.cabal
 	for i in cmdline github libgit2 s3 ; do				\
-	    (cd gitlib-$$i ;						\
+	    (echo gitlib-$$i ; cd gitlib-$$i ;				\
 	     cabal clean > /dev/null ;					\
 	     cabal configure --enable-tests > /dev/null ;		\
 	     cabal build > /dev/null &&					\
@@ -21,7 +21,7 @@ tests:
 	     dist/build/smoke/smoke) ;					\
 	done
 	for i in test sample ; do					\
-	    (cd gitlib-$$i ;						\
+	    (echo gitlib-$$i ; cd gitlib-$$i ;				\
 	     cabal clean > /dev/null ;					\
 	     cabal configure --enable-tests > /dev/null ;		\
 	     cabal build) ;						\
