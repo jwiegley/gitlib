@@ -46,8 +46,8 @@ type F'git_odb_backend_exists_callback =
   Ptr C'git_odb_backend -> Ptr C'git_oid -> IO CInt
 type F'git_odb_backend_free_callback = Ptr C'git_odb_backend -> IO ()
 
-odbBackendAdd :: M m => Repository m -> Ptr C'git_odb_backend -> Int
-              -> IO (Either String (Repository m))
+odbBackendAdd :: Repository -> Ptr C'git_odb_backend -> Int
+              -> IO (Either String Repository)
 odbBackendAdd repo backend priority =
   withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \odbPtr -> do

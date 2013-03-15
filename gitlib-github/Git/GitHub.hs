@@ -85,7 +85,6 @@ instance Git.RepositoryBase GitHubRepository where
 
     data Tag GitHubRepository = Tag { tagCommit :: CommitRef }
 
-    data Context GitHubRepository = Context Repository
     data Options GitHubRepository = Options
         { ghRepoOwner :: GitHubOwner
         , ghRepoName  :: Text
@@ -793,41 +792,52 @@ ghDeleteRepository = do
                   (T.unpack name) (T.unpack repoName')
     either (failure . userError . show) return result
 
-doOpenGhRepository :: Git.RepositoryOptions GitHubRepository
+doOpenGhRepository :: Git.RepositoryOptions
+                   -> GitHubOwner
+                   -> Text
+                   -> Maybe Text
                    -> Github.Repo
                    -> IO Repository
-doOpenGhRepository opts repo = do
-    let ghOpts = Git.repoOptions opts
+doOpenGhRepository _ owner repoName token repo = do
     mgr <- newManager def
     return Repository { httpManager   = Just mgr
                       , gitHubRepo    = repo
-                      , gitHubOptions = ghOpts }
+                      , gitHubOptions = Options
+                          { ghRepoOwner = owner
+                          , ghRepoName  = repoName
+                          , ghRepoToken = token
+                          }
+                      }
 
-createGhRepository :: Git.RepositoryOptions GitHubRepository
+createGhRepository :: Git.RepositoryOptions
+                   -> GitHubOwner
+                   -> Text
                    -> Text
                    -> IO (Either Github.Error Repository)
-createGhRepository opts token =
-    let ghOpts   = Git.repoOptions opts
-        owner    = ghRepoOwner ghOpts
-        repoName = ghRepoName ghOpts
-        auth     = Github.GithubOAuth (T.unpack token)
+createGhRepository _ owner repoName token =
+    let auth     = Github.GithubOAuth (T.unpack token)
         newr     = (Github.newRepo (T.unpack repoName))
                    { Github.newRepoHasIssues = Just False
                    , Github.newRepoAutoInit  = Just True }
-    in either (return . Left) (confirmCreation ghOpts) =<<
+    in either (return . Left) confirmCreation =<<
        case owner of
            GitHubUser _ -> Github.createRepo auth newr
            GitHubOrganization name ->
                Github.createOrganizationRepo auth (T.unpack name) newr
   where
-    confirmCreation ghOpts _ = do
-        repo <- query (ghRepoOwner ghOpts) (ghRepoName ghOpts) (20 :: Int)
+    confirmCreation _ = do
+        repo <- query owner repoName (20 :: Int)
         flip (either (return . Left)) repo $ \r -> do
             mgr <- newManager def
             return $ Right $ Repository
                 { httpManager   = Just mgr
                 , gitHubRepo    = r
-                , gitHubOptions = ghOpts }
+                , gitHubOptions = Options
+                    { ghRepoOwner = owner
+                    , ghRepoName  = repoName
+                    , ghRepoToken = Just token
+                    }
+                }
 
     query owner repoName count = do
         -- Poll every five seconds for 100 seconds, waiting for the repository
@@ -849,46 +859,48 @@ doesRepoExist owner repoName =
         GitHubOrganization name -> do
             Github.organizationRepo (T.unpack name) (T.unpack repoName)
 
-openOrCreateGhRepository :: Git.RepositoryOptions GitHubRepository
+openOrCreateGhRepository :: Git.RepositoryOptions
+                         -> GitHubOwner
+                         -> Text
+                         -> Maybe Text
                          -> IO (Either Github.Error Repository)
-openOrCreateGhRepository opts = do
-    let ghOpts = Git.repoOptions opts
-    exists <- doesRepoExist (ghRepoOwner ghOpts) (ghRepoName ghOpts)
+openOrCreateGhRepository opts owner repoName token = do
+    exists <- doesRepoExist owner repoName
     case exists of
-        Left _ -> case ghRepoToken ghOpts of
-            Just tok -> createGhRepository opts tok
+        Left _ -> case token of
+            Just tok -> createGhRepository opts owner repoName tok
             Nothing  -> return (Left (Github.UserError
                                       "Authentication token not provided"))
-        Right r -> Right <$> doOpenGhRepository opts r
+        Right r -> Right <$> doOpenGhRepository opts owner repoName token r
 
-ghFactory :: Git.RepositoryFactory GitHubRepository IO
-ghFactory = Git.RepositoryFactory
-    { Git.openRepository  = openGhRepository
+ghFactory :: GitHubOwner
+          -> Text
+          -> Maybe Text
+          -> Git.RepositoryFactory GitHubRepository IO Repository
+ghFactory owner repoName token = Git.RepositoryFactory
+    { Git.openRepository  = \opts -> openGhRepository opts owner repoName token
     , Git.runRepository   = runGhRepository
     , Git.closeRepository = closeGhRepository
     , Git.defaultOptions  = defaultGhOptions
     }
 
-openGhRepository :: Git.RepositoryOptions GitHubRepository
-                 -> IO (Git.Context GitHubRepository)
-openGhRepository opts = do
-    repo <- openOrCreateGhRepository opts
-    either (throwIO . userError . show) (return . Context) repo
+openGhRepository :: Git.RepositoryOptions
+                 -> GitHubOwner
+                 -> Text
+                 -> Maybe Text
+                 -> IO Repository
+openGhRepository opts owner repoName token = do
+    openOrCreateGhRepository opts owner repoName token
+        >>= either (throwIO . userError . show) return
 
-runGhRepository :: Git.Context GitHubRepository
-                -> GitHubRepository a -> IO a
-runGhRepository (Context repo) action =
+runGhRepository :: Repository -> GitHubRepository a -> IO a
+runGhRepository repo action =
     runReaderT (ghRepositoryReaderT action) repo
 
-closeGhRepository :: Git.Context GitHubRepository -> IO ()
+closeGhRepository :: Repository -> IO ()
 closeGhRepository = const (return ())
 
-defaultGhOptions :: Git.RepositoryOptions GitHubRepository
-defaultGhOptions = Git.RepositoryOptions "" False False undefined
-
-ghOptions :: GitHubOwner -> Text -> Maybe Text
-          -> Git.RepositoryOptions GitHubRepository
-ghOptions owner repoName token =
-    defaultGhOptions { Git.repoOptions = Options owner repoName token }
+defaultGhOptions :: Git.RepositoryOptions
+defaultGhOptions = Git.RepositoryOptions "" False False
 
 -- GitHub.hs

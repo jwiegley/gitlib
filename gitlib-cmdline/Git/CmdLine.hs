@@ -83,8 +83,6 @@ instance Git.RepositoryBase CmdLineRepository where
     data Tag CmdLineRepository = CmdLineTag
         { cliTagCommit :: CommitRef }
 
-    data Context CmdLineRepository = Context Repository
-
     data Options CmdLineRepository = Options
 
     facts = return Git.RepositoryFacts
@@ -505,7 +503,7 @@ cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
     return $ CmdLineTag (Git.ByOid oid)
 
 data Repository = Repository
-    { repoOptions :: Git.RepositoryOptions CmdLineRepository
+    { repoOptions :: Git.RepositoryOptions
     }
 
 repoPath :: Repository -> TL.Text
@@ -557,7 +555,7 @@ instance Git.Treeish Commit where
     writeTree       = Git.defaultCommitWriteTree
     traverseEntries = Git.defaultCommitTraverseEntries
 
-cliFactory :: Git.RepositoryFactory CmdLineRepository IO
+cliFactory :: Git.RepositoryFactory CmdLineRepository IO Repository
 cliFactory = Git.RepositoryFactory
     { Git.openRepository  = openCmdLineRepository
     , Git.runRepository   = runCmdLineRepository
@@ -565,8 +563,7 @@ cliFactory = Git.RepositoryFactory
     , Git.defaultOptions  = defaultCmdLineOptions
     }
 
-openCmdLineRepository :: Git.RepositoryOptions CmdLineRepository
-                      -> IO (Git.Context CmdLineRepository)
+openCmdLineRepository :: Git.RepositoryOptions -> IO Repository
 openCmdLineRepository opts = do
     let path = Git.repoPath opts
     exists <- F.isDirectory path
@@ -578,17 +575,16 @@ openCmdLineRepository opts = do
                     run_ "git" $ ["--git-dir", TL.fromStrict p]
                               <> ["--bare" | Git.repoIsBare opts]
                               <> ["init"]
-            return (Context (Repository { repoOptions = opts }))
+            return Repository { repoOptions = opts }
 
-runCmdLineRepository :: Git.Context CmdLineRepository
-                     -> CmdLineRepository a -> IO a
-runCmdLineRepository (Context repo) action =
+runCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
+runCmdLineRepository repo action =
     runReaderT (cmdLineRepositoryReaderT action) repo
 
-closeCmdLineRepository :: Git.Context CmdLineRepository -> IO ()
+closeCmdLineRepository :: Repository -> IO ()
 closeCmdLineRepository = const (return ())
 
-defaultCmdLineOptions :: Git.RepositoryOptions CmdLineRepository
-defaultCmdLineOptions = Git.RepositoryOptions "" False False undefined
+defaultCmdLineOptions :: Git.RepositoryOptions
+defaultCmdLineOptions = Git.RepositoryOptions "" False False
 
 -- CmdLine.hs

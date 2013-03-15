@@ -35,7 +35,6 @@ instance M m => Git.RepositoryBase (SampleRepository m) where
     data Tree (SampleRepository m)    = Tree Void
     data Commit (SampleRepository m)  = Commit Void
     data Tag (SampleRepository m)     = Tag Void
-    data Context (SampleRepository m) = Context Repository
     data Options (SampleRepository m) = Options
 
     facts = return Git.RepositoryFacts
@@ -128,7 +127,7 @@ type Reference m = Git.Reference (SampleRepository m) (Commit m)
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
 
-sampleFactory :: M m => Git.RepositoryFactory (SampleRepository m) m
+sampleFactory :: M m => Git.RepositoryFactory (SampleRepository m) m Repository
 sampleFactory = Git.RepositoryFactory
     { Git.openRepository  = openSampleRepository
     , Git.runRepository   = runSampleRepository
@@ -136,19 +135,17 @@ sampleFactory = Git.RepositoryFactory
     , Git.defaultOptions  = defaultSampleOptions
     }
 
-openSampleRepository :: M m => Git.RepositoryOptions (SampleRepository m)
-                     -> m (Git.Context (SampleRepository m))
+openSampleRepository :: M m => Git.RepositoryOptions -> m Repository
 openSampleRepository opts = undefined
 
-runSampleRepository :: M m => Git.Context (SampleRepository m)
-                    -> SampleRepository m a -> m a
-runSampleRepository (Context repo) action =
+runSampleRepository :: M m => Repository -> SampleRepository m a -> m a
+runSampleRepository repo action =
     runReaderT (sampleRepositoryReaderT action) repo
 
-closeSampleRepository :: M m => Git.Context (SampleRepository m) -> m ()
+closeSampleRepository :: M m => Repository -> m ()
 closeSampleRepository = const (return ())
 
-defaultSampleOptions :: Git.RepositoryOptions (SampleRepository m)
-defaultSampleOptions = Git.RepositoryOptions F.empty False False undefined
+defaultSampleOptions :: Git.RepositoryOptions
+defaultSampleOptions = Git.RepositoryOptions F.empty False False
 
 -- Sample.hs

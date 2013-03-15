@@ -44,15 +44,17 @@ import           System.IO.Unsafe
 
 type ObjPtr a = Maybe (ForeignPtr a)
 
-data Base m a b = Base { gitId  :: Maybe (Tagged a (Git.Oid (LgRepository m)))
-                       , gitObj :: ObjPtr b }
+data Base m a b = Base
+    { gitId  :: Maybe (Tagged a (Git.Oid (LgRepository m)))
+    , gitObj :: ObjPtr b
+    }
 
 addTracingBackend :: M m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
     case F.toText (repoPath repo </> "objects") of
         Left p -> error $ "Object directory does not exist: " ++ T.unpack p
-        Right p ->
+        Right p -> do
             liftIO $ withCStringable p $ \objectsDir ->
                 alloca $ \loosePtr -> do
                     r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0

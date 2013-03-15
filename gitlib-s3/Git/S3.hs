@@ -377,11 +377,11 @@ foreign export ccall "odbS3BackendFreeCallback"
 foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-odbS3Backend :: S3Configuration NormalQuery
-                -> Configuration
-                -> Manager -> Text -> Text
-                -> IO (Ptr C'git_odb_backend)
-odbS3Backend s3config config manager bucket prefix = do
+odbS3Backend :: M m => S3Configuration NormalQuery
+             -> Configuration
+             -> Manager -> Text -> Text
+             -> m (Ptr C'git_odb_backend)
+odbS3Backend s3config config manager bucket prefix = liftIO $ do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
   readPrefixFun <-
     mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
@@ -413,7 +413,8 @@ odbS3Backend s3config config manager bucket prefix = do
     , configuration   = config'
     , s3configuration = s3config' }
 
-addS3Backend :: M m => Repository (LgRepository m)
+addS3Backend :: M m
+             => Repository
              -> Text -- ^ bucket
              -> Text -- ^ prefix
              -> Text -- ^ access key
@@ -421,10 +422,10 @@ addS3Backend :: M m => Repository (LgRepository m)
              -> Maybe Manager
              -> Maybe Text -- ^ mock address
              -> LogLevel
-             -> IO (Repository (LgRepository m))
+             -> m Repository
 addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
-    manager <- maybe (newManager def) return mmanager
-    odbS3   <- odbS3Backend
+    manager <- maybe (liftIO $ newManager def) return mmanager
+    odbS3   <- liftIO $ odbS3Backend
         (case mockAddr of
             Nothing   -> defServiceConfig
             Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
@@ -435,7 +436,7 @@ addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
         manager bucket prefix
-    odbBackendAdd repo odbS3 100
+    liftIO $ odbBackendAdd repo odbS3 100
     return repo
 
 -- S3.hs

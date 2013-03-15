@@ -28,7 +28,7 @@ import Test.Hspec.HUnit ()
 
 withNewRepository :: (Repository r, MonadBaseControl IO m, MonadIO m,
                       Example (m ()))
-                  => RepositoryFactory r m
+                  => RepositoryFactory r m c
                   -> FilePath -> r a -> m a
 withNewRepository factory path action = do
     liftIO $ do
@@ -54,7 +54,7 @@ sampleCommit tr sig =
 
 smokeTestSpec :: (Repository r, MonadIO r, MonadBaseControl IO m, MonadIO m,
                   Example (m ()))
-              => RepositoryFactory r m -> Spec
+              => RepositoryFactory r m c -> Spec
 smokeTestSpec pr = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"

@@ -44,7 +44,6 @@ class (Applicative m, Monad m, Failure GitException m,
     data Tree m
     data Commit m
     data Tag m
-    data Context m
     data Options m
 
     facts :: m RepositoryFacts
@@ -354,23 +353,24 @@ resolveCommitRef (Known obj) = return obj
 
 {- $tags -}
 
-data RepositoryOptions r = RepositoryOptions
+data RepositoryOptions = RepositoryOptions
     { repoPath       :: FilePath
     , repoIsBare     :: Bool
     , repoAutoCreate :: Bool
-    , repoOptions    :: Options r
     }
 
-data RepositoryFactory r m = RepositoryFactory
-    { openRepository  :: RepositoryOptions r -> m (Context r)
-    , runRepository   :: forall a. Context r -> r a -> m a
-    , closeRepository :: Context r -> m ()
-    , defaultOptions  :: RepositoryOptions r
+instance Default RepositoryOptions where
+    def = RepositoryOptions "" True True
+
+data RepositoryFactory r m c = RepositoryFactory
+    { openRepository  :: RepositoryOptions -> m c
+    , runRepository   :: forall a. c -> r a -> m a
+    , closeRepository :: c -> m ()
+    , defaultOptions  :: RepositoryOptions
     }
 
 withRepository' :: (Repository r, MonadBaseControl IO m, MonadIO m)
-                => RepositoryFactory r m
-                -> RepositoryOptions r -> r a -> m a
+                => RepositoryFactory r m c -> RepositoryOptions -> r a -> m a
 withRepository' factory opts action =
     Exc.bracket
         (openRepository factory opts)
@@ -378,10 +378,9 @@ withRepository' factory opts action =
         (flip (runRepository factory) action)
 
 withRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
-               => RepositoryFactory r m
-               -> FilePath -> r a -> m a
+               => RepositoryFactory r m c -> FilePath -> r a -> m a
 withRepository factory path action =
     withRepository' factory ((defaultOptions factory) { repoPath = path })
         action
 
--- Repository.hs
+-- Git.hs

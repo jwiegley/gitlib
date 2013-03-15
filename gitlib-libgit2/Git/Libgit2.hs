@@ -84,7 +84,6 @@ instance M m => Git.RepositoryBase (LgRepository m) where
     data Tag (LgRepository m) = Tag
         { tagCommit :: CommitRef m }
 
-    data Context (LgRepository m) = Context (Repository (LgRepository m))
     data Options (LgRepository m) = Options
 
     facts = return Git.RepositoryFacts
@@ -856,7 +855,7 @@ lgAllRefNames = listRefNames allRefsFlag
 
 --compareRef = c'git_reference_cmp
 
-lgFactory :: M m => Git.RepositoryFactory (LgRepository m) m
+lgFactory :: M m => Git.RepositoryFactory (LgRepository m) m Repository
 lgFactory = Git.RepositoryFactory
     { Git.openRepository  = openLgRepository
     , Git.runRepository   = runLgRepository
@@ -864,18 +863,15 @@ lgFactory = Git.RepositoryFactory
     , Git.defaultOptions  = defaultLgOptions
     }
 
-openLgRepository :: M m => Git.RepositoryOptions (LgRepository m)
-                 -> m (Git.Context (LgRepository m))
+openLgRepository :: M m => Git.RepositoryOptions -> m Repository
 openLgRepository opts = do
     let path = Git.repoPath opts
-    repo <- liftIO $ do
-        p <- isDirectory path
-        if not (Git.repoAutoCreate opts) || p
-            then openRepositoryWith path c'git_repository_open
-            else openRepositoryWith path
-                     (\x y -> c'git_repository_init x y
-                                  (fromBool (Git.repoIsBare opts)))
-    return (Context repo)
+    p <- liftIO $ isDirectory path
+    if not (Git.repoAutoCreate opts) || p
+        then liftIO $ openRepositoryWith path c'git_repository_open
+        else liftIO $ openRepositoryWith path
+                 (\x y -> c'git_repository_init x y
+                              (fromBool (Git.repoIsBare opts)))
   where
     openRepositoryWith path fn = do
         fptr <- alloca $ \ptr ->
@@ -890,15 +886,14 @@ openLgRepository opts = do
         return Repository { repoOptions = opts
                           , repoObj     = fptr }
 
-runLgRepository :: M m => Git.Context (LgRepository m)
-                -> LgRepository m a -> m a
-runLgRepository (Context repo) action =
+runLgRepository :: Repository -> LgRepository m a -> m a
+runLgRepository repo action =
     runReaderT (lgRepositoryReaderT action) repo
 
-closeLgRepository :: M m => Git.Context (LgRepository m) -> m ()
+closeLgRepository :: M m => Repository -> m ()
 closeLgRepository = const (return ())
 
-defaultLgOptions :: Git.RepositoryOptions (LgRepository m)
-defaultLgOptions = Git.RepositoryOptions "" False False undefined
+defaultLgOptions :: Git.RepositoryOptions
+defaultLgOptions = Git.RepositoryOptions "" False False
 
 -- Libgit2.hs

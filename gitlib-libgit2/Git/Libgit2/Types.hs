@@ -26,20 +26,20 @@ import           Prelude hiding (FilePath)
 
 type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
 
-data Repository m = Repository
-    { repoOptions :: Git.RepositoryOptions m
+data Repository = Repository
+    { repoOptions :: Git.RepositoryOptions
     , repoObj     :: ForeignPtr C'git_repository }
 
 repoPath = Git.repoPath . repoOptions
 
-instance Eq (Repository (LgRepository m)) where
+instance Eq Repository where
   x == y = repoPath x == repoPath y && repoObj x == repoObj y
 
-instance Show (Repository (LgRepository m)) where
+instance Show Repository where
   show x = "Repository " <> toString (repoPath x)
 
 newtype LgRepository m a = LgRepository
-    { lgRepositoryReaderT :: ReaderT (Repository (LgRepository m)) m a }
+    { lgRepositoryReaderT :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO)
 
 instance MonadTrans LgRepository where
@@ -60,10 +60,9 @@ type CommitRef m = Git.CommitRef (LgRepository m)
 
 type Reference m = Git.Reference (LgRepository m) (Commit m)
 
-type Context m   = Git.Context (LgRepository m)
 type Options m   = Git.Options (LgRepository m)
 
-lgGet :: Monad m => LgRepository m (Repository (LgRepository m))
+lgGet :: Monad m => LgRepository m Repository
 lgGet = LgRepository ask
 
 -- Types.hs
