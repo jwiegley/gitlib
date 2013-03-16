@@ -11,6 +11,5 @@
 ./vendor/general-prelude
 ./vendor/github
 ./vendor/stringable
-./vendor/aws
 ./vendor/rest-client
 ./git-monitor
