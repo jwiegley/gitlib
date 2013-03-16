@@ -21,7 +21,7 @@ import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
 import qualified Data.Text as T (unpack)
-import qualified Data.Text.Lazy as TL (unpack, toStrict, init)
+import qualified Data.Text.Lazy as TL (pack, unpack, toStrict, init)
 import           Data.Time.Clock (UTCTime, getCurrentTime)
 import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
@@ -43,8 +43,8 @@ instance Read FilePath
 data Options = Options
     { verbose    :: Bool
     , debug      :: Bool
-    , gitDir     :: FilePath
-    , workingDir :: FilePath
+    , gitDir     :: String
+    , workingDir :: String
     , interval   :: Int
     , resume     :: Bool
     }
@@ -53,10 +53,11 @@ options :: Parser Options
 options = Options
     <$> switch (short 'v' <> long "verbose" <> help "Display info")
     <*> switch (short 'D' <> long "debug" <> help "Display debug")
-    <*> option (long "git-dir" <> value ".git"
-                <> help "Git repository to store snapshots in (def: \".git\")")
-    <*> option (short 'd' <> long "work-dir" <> value ""
-                <> help "The working tree to snapshot (def: \".\")")
+    <*> strOption
+        (long "git-dir" <> value ".git"
+         <> help "Git repository to store snapshots in (def: \".git\")")
+    <*> strOption (short 'd' <> long "work-dir" <> value ""
+                   <> help "The working tree to snapshot (def: \".\")")
     <*> option (short 'i' <> long "interval" <> value 60
                 <> help "Snapshot each N seconds")
     <*> switch (short 'r' <> long "resume" <> value False
@@ -83,13 +84,15 @@ doMain opts = do
         (,) <$> (TL.init <$> run "git" ["config", "user.name"])
             <*> (TL.init <$> run "git" ["config", "user.email"])
 
-    isDir <- isDirectory (gitDir opts)
+    let gDir = fromText (TL.pack (gitDir opts))
+    isDir <- isDirectory gDir
     gd    <- if isDir
-             then return (gitDir opts)
+             then return gDir
              else shelly $ silently $
                   fromText . TL.init <$> run "git" ["rev-parse", "--git-dir"]
 
-    let wd = if null (workingDir opts) then parent gd else "."
+    let wDir = fromText (TL.pack (workingDir opts))
+        wd   = if null wDir then parent gd else wDir
 
     -- Make sure we're in a known branch, and if so, let it begin
     forever $ withRepository lgFactory gd $ do
