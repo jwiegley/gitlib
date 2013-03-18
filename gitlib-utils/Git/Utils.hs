@@ -33,7 +33,7 @@ import           Git
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
-oid :: Treeish t => t -> TreeRepository t Text
+oid :: Repository m => Tree m -> m Text
 oid t = renderObjOid <$> writeTree t
 
 createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
@@ -82,8 +82,7 @@ treeBlobEntries tree =
 commitTreeEntry :: Repository m
                 => Commit m
                 -> FilePath
-                -> TreeRepository (Tree m)
-                      (Maybe (TreeEntry (TreeRepository (Tree m))))
+                -> m (Maybe (TreeEntry m))
 commitTreeEntry c path = flip lookupEntry path =<< resolveTreeRef (commitTree c)
 
 copyOid :: (Repository m, Repository (t m), MonadTrans t)
@@ -196,11 +195,10 @@ commitHistoryFirstParent c =
 data PinnedEntry m = PinnedEntry
     { pinnedOid    :: Oid m
     , pinnedCommit :: Commit m
-    , pinnedEntry  :: TreeEntry (TreeRepository (Tree m))
+    , pinnedEntry  :: TreeEntry m
     }
 
-identifyEntry :: Repository m => Commit m -> TreeEntry (TreeRepository (Tree m))
-              -> m (PinnedEntry m)
+identifyEntry :: Repository m => Commit m -> TreeEntry m -> m (PinnedEntry m)
 identifyEntry co x = do
     oid <- case x of
         BlobEntry oid _ -> return (unTagged oid)

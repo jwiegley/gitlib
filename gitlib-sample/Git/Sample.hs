@@ -28,13 +28,8 @@ import qualified Git as Git
 
 data Void
 
-type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
-
-instance M m => Git.RepositoryBase (SampleRepository m) where
+instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     data Oid (SampleRepository m)     = Oid Void
-    data Tree (SampleRepository m)    = Tree Void
-    data Commit (SampleRepository m)  = Commit Void
-    data Tag (SampleRepository m)     = Tag Void
     data Options (SampleRepository m) = Options
 
     facts = return Git.RepositoryFacts
@@ -73,30 +68,6 @@ instance Eq (Git.Oid (SampleRepository m)) where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
 type TreeEntry m = Git.TreeEntry (SampleRepository m)
-
-instance M m => Git.Treeish (Tree m) where
-    type TreeRepository (Tree m) = SampleRepository m
-
-    modifyTree      = undefined
-    writeTree       = undefined
-    traverseEntries = undefined
-
-instance M m => Git.Commitish (Commit m) where
-    type CommitRepository (Commit m) = SampleRepository m
-    commitOid       = undefined
-    commitParents   = undefined
-    commitTree      = undefined
-    commitAuthor    = undefined
-    commitCommitter = undefined
-    commitLog       = undefined
-    commitEncoding  = undefined
-
-instance M m => Git.Treeish (Commit m) where
-    type TreeRepository (Commit m) = SampleRepository m
-
-    modifyTree      = Git.defaultCommitModifyTree
-    writeTree       = Git.defaultCommitWriteTree
-    traverseEntries = Git.defaultCommitTraverseEntries
 
 data Repository = Repository Void
 
@@ -128,7 +99,8 @@ type Reference m = Git.Reference (SampleRepository m) (Commit m)
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
 
-sampleFactory :: M m => Git.RepositoryFactory (SampleRepository m) m Repository
+sampleFactory :: Git.MonadGit m
+              => Git.RepositoryFactory (SampleRepository m) m Repository
 sampleFactory = Git.RepositoryFactory
     { Git.openRepository  = openSampleRepository
     , Git.runRepository   = runSampleRepository
@@ -136,14 +108,15 @@ sampleFactory = Git.RepositoryFactory
     , Git.defaultOptions  = defaultSampleOptions
     }
 
-openSampleRepository :: M m => Git.RepositoryOptions -> m Repository
+openSampleRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
 openSampleRepository opts = undefined
 
-runSampleRepository :: M m => Repository -> SampleRepository m a -> m a
+runSampleRepository :: Git.MonadGit m
+                    => Repository -> SampleRepository m a -> m a
 runSampleRepository repo action =
     runReaderT (sampleRepositoryReaderT action) repo
 
-closeSampleRepository :: M m => Repository -> m ()
+closeSampleRepository :: Git.MonadGit m => Repository -> m ()
 closeSampleRepository = const (return ())
 
 defaultSampleOptions :: Git.RepositoryOptions

@@ -38,14 +38,12 @@ data RepositoryFacts = RepositoryFacts
 
 type MonadGit m = (Failure Git.GitException m, MonadIO m, Applicative m)
 
--- | 'RepositoryBase' is the central point of contact between user code and
+-- | 'Repository' is the central point of contact between user code and
 -- Git data objects.  Every object must belong to some repository.
 class (Applicative m, Monad m, Failure GitException m,
-       Eq (Oid m), Ord (Oid m), Show (Oid m)) => RepositoryBase m where
+       Eq (Oid m), Ord (Oid m), Show (Oid m)) => Repository m where
     data Oid m
-    data Tree m
-    data Commit m
-    data Tag m
+    data TreeData m
     data Options m
 
     facts :: m RepositoryFacts
@@ -219,54 +217,47 @@ commitEntry = CommitEntry . commitOid
 -- Minimal complete definition: 'modifyTree'.  Note that for some treeish
 -- things, like Tags, it should always be an error to attempt to modify the
 -- tree in any way.
-class RepositoryBase (TreeRepository t) => Treeish t where
-    type TreeRepository t :: * -> *
+data Tree m = Tree
+    { modifyTree :: FilePath    -- path within the tree
+                 -> Bool        -- create subtree's leading up to path?
+                 -> (Maybe (TreeEntry m) -> m (Maybe (TreeEntry m)))
+                 -> m (Maybe (TreeEntry m))
 
-    modifyTree :: t           -- the tree to "modify"
-               -> FilePath    -- path within the tree
-               -> Bool        -- create subtree's leading up to path?
-               -> (Maybe (TreeEntry (TreeRepository t))
-                   -> TreeRepository t (Maybe (TreeEntry (TreeRepository t))))
-               -> TreeRepository t (Maybe (TreeEntry (TreeRepository t)))
+    , lookupEntry      :: FilePath -> m (Maybe (TreeEntry m))
+    , putTreeEntry     :: FilePath -> TreeEntry m -> m ()
+    , putBlob'         :: FilePath -> BlobOid m -> BlobKind -> m ()
+    , putBlob          :: FilePath -> BlobOid m -> m ()
+    , putTree          :: FilePath -> TreeRef m -> m ()
+    , putCommit        :: FilePath -> CommitOid m -> m ()
+    , dropFromTree     :: FilePath -> m ()
+    , writeTree        :: m (TreeOid m)
+    , traverseEntries  :: forall a. (FilePath -> TreeEntry m -> m a) -> m [a]
+    , traverseEntries_ :: forall a. (FilePath -> TreeEntry m -> m a) -> m ()
+    , getTreeData      :: TreeData m
+    }
 
-    lookupEntry :: t -> FilePath
-                 -> TreeRepository t (Maybe (TreeEntry (TreeRepository t)))
-    lookupEntry t path = modifyTree t path False return
-
-    putTreeEntry :: t -> FilePath -> TreeEntry (TreeRepository t)
-                 -> TreeRepository t ()
-    putTreeEntry t path = void . modifyTree t path True . const . return . Just
-
-    putBlob' :: t -> FilePath -> BlobOid (TreeRepository t) -> BlobKind
-             -> TreeRepository t ()
-    putBlob' t path b kind = putTreeEntry t path (BlobEntry b kind)
-
-    putBlob :: t -> FilePath -> BlobOid (TreeRepository t)
-            -> TreeRepository t ()
-    putBlob t path b = putBlob' t path b PlainBlob
-
-    putTree :: t -> FilePath -> TreeRef (TreeRepository t)
-            -> TreeRepository t ()
-    putTree t path tr = putTreeEntry t path (TreeEntry tr)
-
-    putCommit :: t -> FilePath -> CommitOid (TreeRepository t)
-              -> TreeRepository t ()
-    putCommit t path c = putTreeEntry t path (CommitEntry c)
-
-    dropFromTree :: t -> FilePath -> TreeRepository t ()
-    dropFromTree t path =
-        void (modifyTree t path False (const (return Nothing)))
-
-    writeTree :: t -> TreeRepository t (TreeOid (TreeRepository t))
-
-    traverseEntries :: t -> (FilePath -> TreeEntry (TreeRepository t)
-                             -> TreeRepository t b)
-                    -> TreeRepository t [b]
-
-    traverseEntries_ :: t -> (FilePath -> TreeEntry (TreeRepository t)
-                              -> TreeRepository t b)
-                     -> TreeRepository t ()
-    traverseEntries_ = (void .) . traverseEntries_
+instance Repository m => Default (Tree m) where
+    def = let tr = Tree
+                { modifyTree = undefined
+                , lookupEntry = \path -> modifyTree tr path False return
+                , putTreeEntry =
+                       \path ent ->
+                           void $ modifyTree tr path True
+                               (const (return (Just ent)))
+                , putBlob' =
+                       \path b kind -> putTreeEntry tr path (BlobEntry b kind)
+                , putBlob = \path b -> putBlob' tr path b PlainBlob
+                , putTree = \path tr' -> putTreeEntry tr path (TreeEntry tr')
+                , putCommit = \path c -> putTreeEntry tr path (CommitEntry c)
+                , dropFromTree =
+                       \path ->
+                           void $ modifyTree tr path False
+                               (const (return Nothing))
+                , writeTree = undefined
+                , traverseEntries = undefined
+                , traverseEntries_ = void . traverseEntries tr
+                }
+          in tr
 
 treeRef :: Tree m -> TreeRef m
 treeRef = Known
@@ -278,33 +269,6 @@ treeRefOid (Known x) = writeTree x
 resolveTreeRef :: Repository m => TreeRef m -> m (Tree m)
 resolveTreeRef (ByOid oid) = lookupTree oid
 resolveTreeRef (Known obj) = return obj
-
-type Repository m = (RepositoryBase m,
-                     m ~ TreeRepository (Tree m),
-                     m ~ CommitRepository (Commit m),
-                     Treeish (Tree m),
-                     Commitish (Commit m))
-
-defaultCommitModifyTree ::
-    (Repository m, m ~ TreeRepository t, m ~ CommitRepository t,
-     Commitish t, Treeish t)
-    => t -> FilePath -> Bool -> (Maybe (TreeEntry m) -> m (Maybe (TreeEntry m)))
-    -> m (Maybe (TreeEntry m))
-defaultCommitModifyTree c path createIfNotExist f =
-    Git.commitTree' c >>= \t -> Git.modifyTree t path createIfNotExist f
-
-defaultCommitWriteTree ::
-    (Repository m, m ~ TreeRepository t, m ~ CommitRepository t,
-     Commitish t, Treeish t)
-    => t -> m (TreeOid m)
-defaultCommitWriteTree = commitTree' >=> writeTree
-
-defaultCommitTraverseEntries ::
-    (Repository m, m ~ TreeRepository t, m ~ CommitRepository t,
-     Commitish t, Treeish t)
-    => t -> (FilePath -> TreeEntry (TreeRepository t)
-             -> TreeRepository t b) -> m [b]
-defaultCommitTraverseEntries c f = commitTree' c >>= flip traverseEntries f
 
 {- $commits -}
 data Signature = Signature
@@ -322,22 +286,31 @@ instance Default Signature where
                     , utctDayTime = secondsToDiffTime 0 }
         }
 
-class (RepositoryBase (CommitRepository c), Treeish c) => Commitish c where
-    type CommitRepository c :: * -> *
+data Commit m = Commit
+    { commitOid       :: CommitOid m
+    , commitParents   :: [CommitRef m]
+    , commitTree      :: TreeRef m
+    , commitTree'     :: m (Tree m)
+    , commitAuthor    :: Signature
+    , commitCommitter :: Signature
+    , commitLog       :: Text
+    , commitEncoding  :: Text
+    }
 
-    commitOid     :: c -> CommitOid (CommitRepository c)
-    commitParents :: c -> [CommitRef (CommitRepository c)]
-    commitTree    :: c -> TreeRef (CommitRepository c)
-
-    commitTree' :: c -> CommitRepository c (Tree (CommitRepository c))
-    commitTree' c = case commitTree c of
-        ByOid oid -> lookupTree oid
-        Known obj -> return obj
-
-    commitAuthor    :: c -> Signature
-    commitCommitter :: c -> Signature
-    commitLog       :: c -> Text
-    commitEncoding  :: c -> Text
+instance Repository m => Default (Commit m) where
+    def = let c = Commit
+                { commitOid       = undefined
+                , commitParents   = undefined
+                , commitTree      = undefined
+                , commitAuthor    = undefined
+                , commitCommitter = undefined
+                , commitLog       = undefined
+                , commitEncoding  = undefined
+                , commitTree'     = case commitTree c of
+                    ByOid oid -> lookupTree oid
+                    Known obj -> return obj
+                }
+          in c
 
 commitRef :: Commit m -> CommitRef m
 commitRef = Known
@@ -354,6 +327,8 @@ resolveCommitRef (ByOid oid) = lookupCommit oid
 resolveCommitRef (Known obj) = return obj
 
 {- $tags -}
+
+data Tag m = Tag { tagCommit :: CommitRef m }
 
 data RepositoryOptions = RepositoryOptions
     { repoPath       :: FilePath

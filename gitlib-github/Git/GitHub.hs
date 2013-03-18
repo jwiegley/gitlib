@@ -75,24 +75,12 @@ data GitHubOptions = GitHubOptions
     , ghRepoToken :: Maybe Text
     } deriving (Show, Eq)
 
-instance Git.MonadGit m => Git.RepositoryBase (GitHubRepository m) where
-    data Oid (GitHubRepository m) = Oid { getOid :: ByteString }
-
-    data Tree (GitHubRepository m) = GitHubTree
+instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
+    data Oid (GitHubRepository m)      = Oid { getOid :: ByteString }
+    data TreeData (GitHubRepository m) = TreeData
         { ghTreeOid      :: IORef (Maybe (TreeOid m))
         , ghTreeContents :: IORef (HashMap Text (TreeEntry m))
         }
-
-    data Commit (GitHubRepository m) = GitHubCommit
-        { ghCommitOid       :: Maybe (CommitOid m)
-        , ghCommitAuthor    :: Git.Signature
-        , ghCommitCommitter :: Maybe Git.Signature
-        , ghCommitMessage   :: Text
-        , ghCommitTree      :: TreeRef m
-        , ghCommitParents   :: [CommitRef m]
-        }
-
-    data Tag (GitHubRepository m) = Tag { tagCommit :: CommitRef m }
 
     data Options (GitHubRepository m) = Options GitHubOptions
 
@@ -361,24 +349,40 @@ instance ToJSON (GitHubTreeEntryProxy m) where
                         , "mode" .= ghpTreeEntryMode entry
                         , "sha"  .= ghpTreeEntrySha entry ]
 
+ghMakeTree :: Git.MonadGit m
+           => IORef (Maybe (TreeOid m))
+           -> IORef (HashMap Text (TreeEntry m))
+           -> GitHubRepository m (Tree m)
+ghMakeTree oid contents = do
+    let tr = def
+            { Git.modifyTree      = ghModifyTree tr
+            , Git.writeTree       = ghWriteTree tr
+            , Git.traverseEntries = ghTraverseEntries tr
+            , Git.getTreeData     = TreeData oid contents
+            }
+    return tr
+
 ghNewTree :: Git.MonadGit m => GitHubRepository m (Tree m)
-ghNewTree = GitHubTree <$> (liftIO $ newIORef Nothing)
-                       <*> (liftIO $ newIORef HashMap.empty)
+ghNewTree = do
+    oid      <- liftIO $ newIORef Nothing
+    contents <- liftIO $ newIORef HashMap.empty
+    ghMakeTree oid contents
 
 ghLookupTree :: Git.MonadGit m
              => TreeOid m -> GitHubRepository m (Tree m)
 ghLookupTree oid = do
     treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderObjOid oid) ()
-    oid' <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
-    subtree' <- subtree treeProxy
-    GitHubTree <$> (liftIO $ newIORef (Just (Tagged oid')))
-               <*> (liftIO $ newIORef subtree')
+    oid'      <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
+    subtree'  <- subtree treeProxy
+    oid       <- liftIO $ newIORef (Just (Tagged oid'))
+    contents  <- liftIO $ newIORef subtree'
+    ghMakeTree oid contents
   where
     subtree tp =
-        HashMap.fromList <$>
-        mapM (\entry -> (,) <$> pure (ghpTreeEntryPath entry)
-                           <*> proxyToTreeEntry entry)
-             (ghpTreeContents tp)
+        HashMap.fromList
+            <$> mapM (\entry -> (,) <$> pure (ghpTreeEntryPath entry)
+                                    <*> proxyToTreeEntry entry)
+                     (ghpTreeContents tp)
 
 doLookupTreeEntry :: Git.MonadGit m
                   => Tree m -> [Text]
@@ -390,15 +394,19 @@ doLookupTreeEntry t (name:names) = do
   -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
   -- {})@, and if not we'll have Nothing.
 
-  y <- liftIO $ HashMap.lookup name <$> readIORef (ghTreeContents t)
+  y <- liftIO $ HashMap.lookup name
+           <$> readIORef (ghTreeContents (Git.getTreeData t))
   if null names
       then return y
       else case y of
-      Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
-      Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-      Just (Git.TreeEntry t')   -> do t'' <- Git.resolveTreeRef t'
-                                      doLookupTreeEntry t'' names
-      _ -> return Nothing
+          Just (Git.BlobEntry {})   ->
+              failure Git.TreeCannotTraverseBlob
+          Just (Git.CommitEntry {}) ->
+              failure Git.TreeCannotTraverseCommit
+          Just (Git.TreeEntry t')   -> do
+              t'' <- Git.resolveTreeRef t'
+              doLookupTreeEntry t'' names
+          _ -> return Nothing
 
 doModifyTree :: Git.MonadGit m
              => Tree m
@@ -431,7 +439,7 @@ doModifyTree t (name:names) createIfNotExist f = do
         -- assumed to always be changed, as we have no reliable method of
         -- testing object equality that is not O(n).
         ze <- f y
-        liftIO $ modifyIORef (ghTreeContents t) $
+        liftIO $ modifyIORef (ghTreeContents (Git.getTreeData t)) $
             case ze of
                 Nothing -> HashMap.delete name
                 Just z' -> HashMap.insert name z'
@@ -451,9 +459,10 @@ doModifyTree t (name:names) createIfNotExist f = do
                 st <- Git.resolveTreeRef st'
                 ze <- doModifyTree st names createIfNotExist f
                 liftIO $ do
-                    modifyIORef (ghTreeOid t) (const Nothing)
-                    stc <- readIORef (ghTreeContents st)
-                    modifyIORef (ghTreeContents t) $
+                    modifyIORef (ghTreeOid (Git.getTreeData t))
+                        (const Nothing)
+                    stc <- readIORef (ghTreeContents (Git.getTreeData st))
+                    modifyIORef (ghTreeContents (Git.getTreeData t)) $
                         if HashMap.null stc
                         then HashMap.delete name
                         else HashMap.insert name (Git.treeEntry st)
@@ -474,7 +483,7 @@ splitPath path = T.splitOn "/" text
 
 ghWriteTree :: Git.MonadGit m => Tree m -> GitHubRepository m (TreeOid m)
 ghWriteTree tree = do
-    contents <- liftIO $ readIORef (ghTreeContents tree)
+    contents <- liftIO $ readIORef (ghTreeContents (Git.getTreeData tree))
     if HashMap.size contents > 0
         then do
         contents'  <- HashMap.traverseWithKey treeEntryToProxy contents
@@ -571,14 +580,16 @@ instance Git.MonadGit m => ToJSON (GitHubCommitProxy m) where
                       [ "committer" .= fromJust (ghpCommitCommitter c) |
                                        isJust (ghpCommitCommitter c) ]
 
-proxyToCommit :: GitHubCommitProxy m -> Commit m
-proxyToCommit cp = GitHubCommit
-    { ghCommitOid       = Just (Tagged (textToOid (ghpCommitOid cp)))
-    , ghCommitAuthor    = ghpCommitAuthor cp
-    , ghCommitCommitter = ghpCommitCommitter cp
-    , ghCommitMessage   = ghpCommitMessage cp
-    , ghCommitTree      = Git.ByOid (Tagged (runGhpOid (ghpCommitTree cp)))
-    , ghCommitParents   = map (Git.ByOid . Tagged . runGhpOid)
+proxyToCommit :: Git.MonadGit m => GitHubCommitProxy m -> Commit m
+proxyToCommit cp = def
+    { Git.commitOid       = Tagged (textToOid (ghpCommitOid cp))
+    , Git.commitAuthor    = ghpCommitAuthor cp
+    , Git.commitCommitter = case ghpCommitCommitter cp of
+        Nothing -> ghpCommitAuthor cp
+        Just x  -> x
+    , Git.commitLog       = ghpCommitMessage cp
+    , Git.commitTree      = Git.ByOid (Tagged (runGhpOid (ghpCommitTree cp)))
+    , Git.commitParents   = map (Git.ByOid . Tagged . runGhpOid)
                               (ghpCommitParents cp)
     }
 
@@ -605,8 +616,8 @@ ghCreateCommit parents tree author committer message ref = do
 
     let commit = proxyToCommit commit'
     when (isJust ref) $
-        void (ghUpdateRef (fromJust ref)
-              (Git.RefObj (Git.ByOid (fromJust (ghCommitOid commit)))))
+        void $ ghUpdateRef (fromJust ref) $
+            Git.RefObj (Git.ByOid (Git.commitOid commit))
 
     return commit
 
@@ -751,29 +762,6 @@ instance MonadTrans GitHubRepository where
 
 ghGet :: Git.MonadGit m => GitHubRepository m Repository
 ghGet = GitHubRepository ask
-
-instance Git.MonadGit m => Git.Treeish (Tree m) where
-    type TreeRepository (Tree m) = GitHubRepository m
-    modifyTree      = ghModifyTree
-    writeTree       = ghWriteTree
-    traverseEntries = ghTraverseEntries
-
-instance Git.MonadGit m => Git.Commitish (Commit m) where
-    type CommitRepository (Commit m) = GitHubRepository m
-    commitOid       = fromJust . ghCommitOid
-    commitParents   = ghCommitParents
-    commitTree      = ghCommitTree
-    commitAuthor    = ghCommitAuthor
-    commitCommitter = \c -> fromMaybe (ghCommitAuthor c) (ghCommitCommitter c)
-    commitLog       = ghCommitMessage
-    commitEncoding  = const "utf-8"
-
-instance Git.MonadGit m => Git.Treeish (Commit m) where
-    type TreeRepository (Commit m) = GitHubRepository m
-
-    modifyTree      = Git.defaultCommitModifyTree
-    writeTree       = Git.defaultCommitWriteTree
-    traverseEntries = Git.defaultCommitTraverseEntries
 
 -- dropRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository m a
 --                -> IO (Either Github.Error a)

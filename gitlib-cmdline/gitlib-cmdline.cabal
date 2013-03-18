@@ -22,6 +22,7 @@ Library
     , gitlib
     , gitlib-utils
     , conduit              >= 0.5.5
+    , data-default         >= 0.5.1
     , failure              >= 0.2.0.1
     , old-locale           >= 1.0.0.4
     , parsec               >= 3.1.3

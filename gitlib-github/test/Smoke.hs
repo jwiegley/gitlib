@@ -1,3 +1,5 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-wrong-do-bind #-}
@@ -22,16 +24,16 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
-ghFactory :: Text -> Maybe Text -> Git.RepositoryFactory Gh.GitHubRepository IO Gh.Repository
+ghFactory :: Git.MonadGit m
+          => Text
+          -> Maybe Text
+          -> Git.RepositoryFactory (Gh.GitHubRepository m) m Gh.Repository
 ghFactory owner token = Gh.ghFactory (Gh.GitHubUser owner) undefined token
 
 main :: IO ()
 main = do
     owner <- T.pack <$> getEnv "GITHUB_OWNER"
     token <- T.pack <$> getEnv "GITHUB_TOKEN"
-    summary <- hspecWith (defaultConfig { configVerbose = True })
-                        (Git.smokeTestSpec (ghFactory owner (Just token)))
-    when (summaryFailures summary > 0) $ exitFailure
-    return ()
+    hspec (Git.smokeTestSpec (ghFactory owner (Just token)))
 
 -- Smoke.hs ends here
