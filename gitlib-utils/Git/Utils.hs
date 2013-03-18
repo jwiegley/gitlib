@@ -86,31 +86,30 @@ commitTreeEntry :: Repository m
                       (Maybe (TreeEntry (TreeRepository (Tree m))))
 commitTreeEntry c path = flip lookupEntry path =<< resolveTreeRef (commitTree c)
 
-copyOid :: (Repository m1, Repository m2) => Oid m1 -> m1 (m2 (Oid m2))
-copyOid = return . parseOid . renderOid
+copyOid :: (Repository m, Repository (t m), MonadTrans t)
+        => Oid m -> t m (Oid (t m))
+copyOid oid = parseOid (renderOid oid)
 
-copyBlob :: (Repository m1, Repository m2) => BlobRef m1 -> m1 (m2 (BlobOid m2))
+copyBlob :: (Repository m, Repository (t m), MonadTrans t)
+         => BlobRef m -> t m (BlobOid (t m))
 copyBlob blobr = do
     let oid = unTagged (blobRefOid blobr)
     trace ("copyBlob " ++ show oid) $ return ()
-    return $ do
-        oid2    <- parseOid (renderOid oid)
-        exists2 <- existsObject oid2
-        trace ("copyBlob2 " ++ show oid2 ++ " exists " ++ show exists2) $ return ()
-        if exists2
-            then return (Tagged oid2)
-            else do
-                bs2 <- blobToByteString =<< resolveBlobRef (ByOid (Tagged oid2))
-                createBlob (BlobString bs2)
+    oid2    <- parseOid (renderOid oid)
+    exists2 <- existsObject oid2
+    trace ("copyBlob2 " ++ show oid2 ++ " exists " ++ show exists2) $ return ()
+    if exists2
+        then return (Tagged oid2)
+        else do
+            bs2 <- blobToByteString =<< resolveBlobRef (ByOid (Tagged oid2))
+            createBlob (BlobString bs2)
 
-copyTreeEntry :: (Repository m1, Repository m2)
-              => TreeEntry m1 -> m1 (m2 (TreeEntry m2))
+copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
+              => TreeEntry m -> t m (TreeEntry (t m))
 copyTreeEntry (BlobEntry oid kind) = do
     trace ("copyBlobEntry " ++ T.unpack (renderObjOid oid)) $ return ()
-    blob2act <- copyBlob (ByOid oid)
-    return $ do
-        blob2oid <- blob2act
-        return $ BlobEntry blob2oid kind
+    blob2oid <- copyBlob (ByOid oid)
+    return $ BlobEntry blob2oid kind
 
 -- copyTreeEntry (TreeEntry tr) = do
 --     tree2act <- copyTree tr
@@ -121,16 +120,16 @@ copyTreeEntry (BlobEntry oid kind) = do
 
 copyTreeEntry (CommitEntry oid) = do
     trace ("copyCommitEntry " ++ T.unpack (renderObjOid oid)) $ return ()
-    return $ do
-        oid2 <- parseOid (renderObjOid oid)
-        return $ CommitEntry (Tagged oid2)
+    oid2 <- parseOid (renderObjOid oid)
+    return $ CommitEntry (Tagged oid2)
 
-copyTree :: (Repository m1, Repository m2) => TreeRef m1 -> m1 (m2 (Tree m2))
+copyTree :: (Repository m, Repository (t m), MonadTrans t)
+         => TreeRef m -> t m (Tree (t m))
 copyTree tr = do
-    oid      <- unTagged <$> treeRefOid tr
+    oid      <- unTagged <$> (lift $ treeRefOid tr)
     trace ("copyTree " ++ T.unpack (renderOid oid)) $ return ()
-    tree     <- resolveTreeRef tr
-    entries  <- traverseEntries tree (curry return)
+    tree     <- lift $ resolveTreeRef tr
+    entries  <- lift $ traverseEntries tree (curry return)
     entries2 <- foldM (\acc (fp,ent) -> do
                            trace ("copyTreeEntry " ++ show fp) $ return ()
                            case ent of
@@ -138,61 +137,54 @@ copyTree tr = do
                                _ -> do
                                    ent2 <- copyTreeEntry ent
                                    return $ (fp, ent2):acc) [] entries
-    return $ do
-        oid2    <- parseOid (renderOid oid)
-        exists2 <- existsObject oid2
-        trace ("copyTree2 " ++ T.unpack (renderOid oid2) ++ " exists " ++ show exists2) $ return ()
-        if exists2
-            then lookupTree (Tagged oid2)
-            else do
-                tree2 <- newTree
-                forM_ entries2 $ \(fp,getEnt2) -> do
-                    ent2 <- getEnt2
-                    putTreeEntry tree2 fp ent2
-                writeTree tree2
-                return tree2
+    oid2    <- parseOid (renderOid oid)
+    exists2 <- existsObject oid2
+    trace ("copyTree2 " ++ T.unpack (renderOid oid2) ++ " exists " ++ show exists2) $ return ()
+    if exists2
+        then lookupTree (Tagged oid2)
+        else do
+            tree2 <- newTree
+            forM_ entries2 $ \(fp,ent2) -> do
+                putTreeEntry tree2 fp ent2
+            writeTree tree2
+            return tree2
 
-copyCommit :: (Repository m1, Repository m2)
-           => CommitRef m1
+copyCommit :: (Repository m, Repository (t m), MonadTrans t)
+           => CommitRef m
            -> Maybe Text
-           -> m1 (m2 (Commit m2))
+           -> t m (Commit (t m))
 copyCommit cr mref = do
     let oid = unTagged (commitRefOid cr)
-    commit      <- resolveCommitRef cr
+    commit   <- lift $ resolveCommitRef cr
     trace ("copyCommit " ++ T.unpack (renderOid oid) ++ " " ++ show (commitLog commit)) $ return ()
-    tree2act    <- copyTree (commitTree commit)
-    parents2act <- mapM (flip copyCommit Nothing) (commitParents commit)
-    return $ do
-        oid2    <- parseOid (renderOid oid)
-        exists2 <- existsObject oid2
-        trace ("copyCommit2 " ++ T.unpack (renderOid oid2) ++ " exists " ++ show exists2) $ return ()
-        if exists2
-            then lookupCommit (Tagged oid2)
-            else do
-                tree2    <- tree2act
-                parents2 <- mapM id parents2act
-                createCommit
-                    (map commitRef parents2)
-                    (treeRef tree2)
-                    (commitAuthor commit)
-                    (commitCommitter commit)
-                    (commitLog commit)
-                    mref
+    tree2    <- copyTree (commitTree commit)
+    parents2 <- mapM (flip copyCommit Nothing) (commitParents commit)
+    oid2     <- parseOid (renderOid oid)
+    exists2  <- existsObject oid2
+    trace ("copyCommit2 " ++ T.unpack (renderOid oid2) ++ " exists " ++ show exists2) $ return ()
+    if exists2
+        then lookupCommit (Tagged oid2)
+        else do
+            createCommit
+                (map commitRef parents2)
+                (treeRef tree2)
+                (commitAuthor commit)
+                (commitCommitter commit)
+                (commitLog commit)
+                mref
 
-genericPushRef :: (Repository m1, Repository m2)
-               => Reference m1 (Commit m1)
+genericPushRef :: (Repository m, Repository (t m), MonadTrans t)
+               => Reference m (Commit m)
                -> Text
-               -> m1 (m2 (Maybe (Reference m2 (Commit m2))))
+               -> t m (Maybe (Reference (t m) (Commit (t m))))
 genericPushRef ref remoteRefName = do
     let name = refName ref
-    mcr <- resolveRef name
+    mcr <- lift $ resolveRef name
     case mcr of
-        Nothing -> return (return Nothing)
+        Nothing -> return Nothing
         Just cr -> do
-            commit2act <- copyCommit cr (Just remoteRefName)
-            lift $ do
-                commit2 <- commit2act
-                return . Just . Reference name . commitRefTarget $ commit2
+            commit2 <- copyCommit cr (Just remoteRefName)
+            return . Just . Reference name . commitRefTarget $ commit2
 
 commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =

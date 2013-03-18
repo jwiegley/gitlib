@@ -17,6 +17,7 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Data.Conduit
 import           Data.Function
@@ -46,45 +47,45 @@ import           Text.Parsec.Combinator
 import           Text.Parsec.Prim
 import           Text.Parsec.Text.Lazy ()
 
-type Oid       = Git.Oid CmdLineRepository
+type Oid m       = Git.Oid (CmdLineRepository m)
 
-type BlobOid   = Git.BlobOid CmdLineRepository
-type TreeOid   = Git.TreeOid CmdLineRepository
-type CommitOid = Git.CommitOid CmdLineRepository
-type TagOid    = Git.TagOid CmdLineRepository
+type BlobOid m   = Git.BlobOid (CmdLineRepository m)
+type TreeOid m   = Git.TreeOid (CmdLineRepository m)
+type CommitOid m = Git.CommitOid (CmdLineRepository m)
+type TagOid m    = Git.TagOid (CmdLineRepository m)
 
-type Blob      = Git.Blob CmdLineRepository
-type Tree      = Git.Tree CmdLineRepository
-type TreeEntry = Git.TreeEntry CmdLineRepository
-type Commit    = Git.Commit CmdLineRepository
-type Tag       = Git.Tag CmdLineRepository
+type Blob m      = Git.Blob (CmdLineRepository m)
+type Tree m      = Git.Tree (CmdLineRepository m)
+type TreeEntry m = Git.TreeEntry (CmdLineRepository m)
+type Commit m    = Git.Commit (CmdLineRepository m)
+type Tag m       = Git.Tag (CmdLineRepository m)
 
-type TreeRef   = Git.TreeRef CmdLineRepository
-type CommitRef = Git.CommitRef CmdLineRepository
+type TreeRef m   = Git.TreeRef (CmdLineRepository m)
+type CommitRef m = Git.CommitRef (CmdLineRepository m)
 
-type Reference = Git.Reference CmdLineRepository Commit
+type Reference m = Git.Reference (CmdLineRepository m) (Commit m)
 
-instance Git.RepositoryBase CmdLineRepository where
-    data Oid CmdLineRepository = Oid { getOid :: TL.Text }
+instance Git.MonadGit m => Git.RepositoryBase (CmdLineRepository m) where
+    data Oid (CmdLineRepository m) = Oid { getOid :: TL.Text }
 
-    data Tree CmdLineRepository = CmdLineTree
-        { cliTreeOid      :: IORef (Maybe TreeOid)
-        , cliTreeContents :: IORef (HashMap Text TreeEntry)
+    data Tree (CmdLineRepository m) = CmdLineTree
+        { cliTreeOid      :: IORef (Maybe (TreeOid m))
+        , cliTreeContents :: IORef (HashMap Text (TreeEntry m))
         }
 
-    data Commit CmdLineRepository = CmdLineCommit
-        { cliCommitOid       :: Maybe CommitOid
+    data Commit (CmdLineRepository m) = CmdLineCommit
+        { cliCommitOid       :: Maybe (CommitOid m)
         , cliCommitAuthor    :: Git.Signature
         , cliCommitCommitter :: Maybe Git.Signature
         , cliCommitMessage   :: Text
-        , cliCommitTree      :: TreeRef
-        , cliCommitParents   :: [CommitRef]
+        , cliCommitTree      :: (TreeRef m)
+        , cliCommitParents   :: [CommitRef m]
         }
 
-    data Tag CmdLineRepository = CmdLineTag
-        { cliTagCommit :: CommitRef }
+    data Tag (CmdLineRepository m) = CmdLineTag
+        { cliTagCommit :: CommitRef m }
 
-    data Options CmdLineRepository = Options
+    data Options (CmdLineRepository m) = Options
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
@@ -114,68 +115,71 @@ instance Git.RepositoryBase CmdLineRepository where
     deleteRepository =
         cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions
 
-instance Show (Git.Oid CmdLineRepository) where
+instance Show (Git.Oid (CmdLineRepository m)) where
     show (Oid x) = show x
 
-instance Ord (Git.Oid CmdLineRepository) where
+instance Ord (Git.Oid (CmdLineRepository m)) where
     compare (Oid l) (Oid r) = compare l r
 
-instance Eq (Git.Oid CmdLineRepository) where
+instance Eq (Git.Oid (CmdLineRepository m)) where
     Oid l == Oid r = l == r
 
-instance MonadBase IO CmdLineRepository where
-    liftBase = liftIO
-
-instance MonadUnsafeIO CmdLineRepository where
-    unsafeLiftIO = return . unsafePerformIO
-
-instance MonadThrow CmdLineRepository where
-    monadThrow = throw
-
-doRunGit :: (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
-         -> CmdLineRepository a
+doRunGit :: Git.MonadGit m
+         => (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
+         -> CmdLineRepository m a
 doRunGit f args act = do
     repo <- cliGet
     shellyNoDir $ silently $ do
         act
         f "git" $ ["--git-dir", repoPath repo] <> args
 
-runGit :: [TL.Text] -> CmdLineRepository TL.Text
+runGit :: Git.MonadGit m
+       => [TL.Text] -> CmdLineRepository m TL.Text
 runGit = flip (doRunGit run) (return ())
 
-runGit_ :: [TL.Text] -> CmdLineRepository ()
+runGit_ :: Git.MonadGit m
+        => [TL.Text] -> CmdLineRepository m ()
 runGit_ = flip (doRunGit run_) (return ())
 
 cliPushRefDirectly ::
-    Git.Repository r
-    => Reference -> Text -> Text
-    -> CmdLineRepository (r (Maybe (Git.Reference r (Git.Commit r))))
+    (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
+     Git.Repository (t (CmdLineRepository m)), MonadTrans t)
+    => Reference m -> Text -> Text
+    -> t (CmdLineRepository m)
+        (Maybe (Git.Reference (t (CmdLineRepository m))
+                (Git.Commit (t (CmdLineRepository m)))))
 cliPushRefDirectly ref remoteNameOrURI remoteRefName = do
-    repo <- cliGet
+    repo <- lift $ cliGet
     r <- shellyNoDir $ silently $ errExit False $ do
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "push", TL.fromStrict remoteNameOrURI
                      , TL.concat [ TL.fromStrict (Git.refName ref)
                                  , ":", TL.fromStrict remoteRefName ] ]
         lastExitCode
-    return $ if r == 0
-             then Git.lookupRef (Git.refName ref)
-             else return Nothing
+    if r == 0
+        then Git.lookupRef (Git.refName ref)
+        else return Nothing
 
-cliPushRef :: Git.Repository r
-           => Reference -> Maybe Text -> Text
-           -> CmdLineRepository (r (Maybe (Git.Reference r (Git.Commit r))))
+cliPushRef :: (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
+               Git.Repository (t (CmdLineRepository m)), MonadTrans t)
+           => Reference m -> Maybe Text -> Text
+           -> t (CmdLineRepository m)
+               (Maybe (Git.Reference (t (CmdLineRepository m))
+                       (Git.Commit (t (CmdLineRepository m)))))
 cliPushRef ref remoteNameOrURI remoteRefName =
-    maybe (Git.genericPushRef ref remoteRefName)
-        (flip (cliPushRefDirectly ref) remoteRefName) remoteNameOrURI
+    case remoteNameOrURI of
+        Nothing  -> Git.genericPushRef ref remoteRefName
+        Just uri -> cliPushRefDirectly ref uri remoteRefName
 
-cliLookupBlob :: BlobOid -> CmdLineRepository Blob
+cliLookupBlob :: Git.MonadGit m
+              => BlobOid m -> CmdLineRepository m (Blob m)
 cliLookupBlob oid@(Tagged (Oid sha)) =
     Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict <$>
         runGit ["cat-file", "-p", sha]
 
-cliDoCreateBlob :: Git.BlobContents CmdLineRepository -> Bool
-                -> CmdLineRepository BlobOid
+cliDoCreateBlob :: Git.MonadGit m
+                => Git.BlobContents (CmdLineRepository m) -> Bool
+                -> CmdLineRepository m (BlobOid m)
 cliDoCreateBlob b persist = do
     Tagged . Oid . TL.init <$>
         (Git.blobContentsToByteString b
@@ -183,18 +187,21 @@ cliDoCreateBlob b persist = do
              doRunGit run (["hash-object"] <> ["-w" | persist] <> ["--stdin"]) $
                  setStdin (TL.fromStrict (T.decodeUtf8 (bs))))
 
-cliHashContents :: Git.BlobContents CmdLineRepository
-                -> CmdLineRepository BlobOid
+cliHashContents :: Git.MonadGit m
+                => Git.BlobContents (CmdLineRepository m)
+                -> CmdLineRepository m (BlobOid m)
 cliHashContents b = cliDoCreateBlob b False
 
-cliCreateBlob :: Git.BlobContents CmdLineRepository -> CmdLineRepository BlobOid
+cliCreateBlob :: Git.MonadGit m
+              => Git.BlobContents (CmdLineRepository m)
+              -> CmdLineRepository m (BlobOid m)
 cliCreateBlob b = cliDoCreateBlob b True
 
-cliNewTree :: CmdLineRepository Tree
+cliNewTree :: Git.MonadGit m => CmdLineRepository m (Tree m)
 cliNewTree = CmdLineTree <$> (liftIO $ newIORef Nothing)
                          <*> (liftIO $ newIORef HashMap.empty)
 
-cliLookupTree :: TreeOid -> CmdLineRepository Tree
+cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
 cliLookupTree oid@(Tagged (Oid sha)) = do
     contents <- runGit ["ls-tree", "-z", sha]
     oidRef   <- liftIO $ newIORef (Just oid)
@@ -219,7 +226,8 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")
 
-doLookupTreeEntry :: Tree -> [Text] -> CmdLineRepository (Maybe TreeEntry)
+doLookupTreeEntry :: Git.MonadGit m => Tree m -> [Text]
+                  -> CmdLineRepository m (Maybe (TreeEntry m))
 doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
 doLookupTreeEntry t (name:names) = do
   -- Lookup the current name in this tree.  If it doesn't exist, and there are
@@ -237,11 +245,13 @@ doLookupTreeEntry t (name:names) = do
                                       doLookupTreeEntry t'' names
       _ -> return Nothing
 
-doModifyTree :: Tree
+doModifyTree :: Git.MonadGit m
+             => Tree m
              -> [Text]
              -> Bool
-             -> (Maybe TreeEntry -> CmdLineRepository (Maybe TreeEntry))
-             -> CmdLineRepository (Maybe TreeEntry)
+             -> (Maybe (TreeEntry m)
+                 -> CmdLineRepository m (Maybe (TreeEntry m)))
+             -> CmdLineRepository m (Maybe (TreeEntry m))
 doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
     -- Lookup the current name in this tree.  If it doesn't exist, and there
@@ -294,9 +304,11 @@ doModifyTree t (name:names) createIfNotExist f = do
                         else HashMap.insert name (Git.treeEntry st)
                 return ze
 
-cliModifyTree :: Tree -> FilePath -> Bool
-             -> (Maybe TreeEntry -> CmdLineRepository (Maybe TreeEntry))
-             -> CmdLineRepository (Maybe TreeEntry)
+cliModifyTree :: Git.MonadGit m
+              => Tree m -> FilePath -> Bool
+              -> (Maybe (TreeEntry m)
+                  -> CmdLineRepository m (Maybe (TreeEntry m)))
+              -> CmdLineRepository m (Maybe (TreeEntry m))
 cliModifyTree tree = doModifyTree tree . splitPath
 
 splitPath :: FilePath -> [Text]
@@ -305,7 +317,8 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
-cliWriteTree :: Tree -> CmdLineRepository TreeOid
+cliWriteTree :: Git.MonadGit m
+             => Tree m -> CmdLineRepository m (TreeOid m)
 cliWriteTree tree = do
     contents <- liftIO $ readIORef (cliTreeContents tree)
     rendered <- mapM renderLine (HashMap.toList contents)
@@ -331,8 +344,10 @@ cliWriteTree tree = do
             , TL.fromStrict (Git.renderObjOid treeOid), "\t"
             , TL.fromStrict path ]
 
-cliTraverseEntries :: Tree -> (FilePath -> TreeEntry -> CmdLineRepository b)
-                   -> CmdLineRepository [b]
+cliTraverseEntries :: Git.MonadGit m
+                   => Tree m
+                   -> (FilePath -> TreeEntry m -> CmdLineRepository m b)
+                   -> CmdLineRepository m [b]
 cliTraverseEntries tree f = do
     Tagged (Oid sha) <- Git.writeTree tree
     contents <- runGit ["ls-tree", "-t", "-r", "-z", sha]
@@ -362,7 +377,8 @@ parseCliTime =
 formatCliTime :: UTCTime -> Text
 formatCliTime = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
 
-cliLookupCommit :: CommitOid -> CmdLineRepository Commit
+cliLookupCommit :: Git.MonadGit m
+                => CommitOid m -> CmdLineRepository m (Commit m)
 cliLookupCommit oid@(Tagged (Oid sha)) = do
     output <- runGit ["cat-file", "-p", sha]
     case parse parseOutput "" output of
@@ -392,9 +408,10 @@ cliLookupCommit oid@(Tagged (Oid sha)) = do
             <*> (fromJust . parseTime defaultTimeLocale "%s %z"
                  <$> manyTill anyChar newline)
 
-cliCreateCommit :: [CommitRef] -> TreeRef
-               -> Git.Signature -> Git.Signature -> Text -> Maybe Text
-               -> CmdLineRepository Commit
+cliCreateCommit :: Git.MonadGit m
+                => [CommitRef m] -> TreeRef m
+                -> Git.Signature -> Git.Signature -> Text -> Maybe Text
+                -> CmdLineRepository m (Commit m)
 cliCreateCommit parents tree author committer message ref = do
     treeOid <- Git.treeRefOid tree
     let parentOids = map Git.commitRefOid parents
@@ -437,7 +454,8 @@ data CliReference = CliReference
     { referenceRef    :: Text
     , referenceObject :: CliObjectRef } deriving Show
 
-cliShowRef :: Maybe Text -> CmdLineRepository (Maybe [(TL.Text,TL.Text)])
+cliShowRef :: Git.MonadGit m
+           => Maybe Text -> CmdLineRepository m (Maybe [(TL.Text,TL.Text)])
 cliShowRef mrefName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
@@ -451,12 +469,13 @@ cliShowRef mrefName = do
                            $ TL.lines rev
                  else Nothing
 
-nameAndShaToRef :: TL.Text -> TL.Text -> Reference
+nameAndShaToRef :: TL.Text -> TL.Text -> Reference m
 nameAndShaToRef name sha =
     Git.Reference (TL.toStrict name)
                   (Git.RefObj (Git.ByOid (Tagged (Oid sha))))
 
-cliLookupRef :: Text -> CmdLineRepository (Maybe Reference)
+cliLookupRef :: Git.MonadGit m
+             => Text -> CmdLineRepository m (Maybe (Reference m))
 cliLookupRef refName = do
     xs <- cliShowRef (Just refName)
     let name = TL.fromStrict refName
@@ -464,8 +483,9 @@ cliLookupRef refName = do
     return $ maybe Nothing (Just . uncurry nameAndShaToRef .
                             \sha -> (name,sha)) ref
 
-cliUpdateRef :: Text -> Git.RefTarget CmdLineRepository Commit
-             -> CmdLineRepository Reference
+cliUpdateRef :: Git.MonadGit m
+             => Text -> Git.RefTarget (CmdLineRepository m) (Commit m)
+             -> CmdLineRepository m (Reference m)
 cliUpdateRef refName refObj@(Git.RefObj commitRef) = do
     let Tagged (Oid sha) = Git.commitRefOid commitRef
     runGit_ ["update-ref", TL.fromStrict refName, sha]
@@ -475,17 +495,19 @@ cliUpdateRef refName refObj@(Git.RefSymbolic targetName) = do
     runGit_ ["symbolic-ref", TL.fromStrict refName, TL.fromStrict targetName]
     return (Git.Reference refName refObj)
 
-cliDeleteRef :: Text -> CmdLineRepository ()
+cliDeleteRef :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliDeleteRef refName = runGit_ ["update-ref", "-d", TL.fromStrict refName]
 
-cliAllRefs :: CmdLineRepository [Reference]
+cliAllRefs :: Git.MonadGit m
+           => CmdLineRepository m [Reference m]
 cliAllRefs = do
     mxs <- cliShowRef Nothing
     return $ case mxs of
         Nothing -> []
         Just xs -> map (uncurry nameAndShaToRef) xs
 
-cliResolveRef :: Text -> CmdLineRepository (Maybe CommitRef)
+cliResolveRef :: Git.MonadGit m
+              => Text -> CmdLineRepository m (Maybe (CommitRef m))
 cliResolveRef refName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
@@ -499,8 +521,9 @@ cliResolveRef refName = do
 -- cliLookupTag :: TagOid -> CmdLineRepository Tag
 -- cliLookupTag oid = undefined
 
-cliCreateTag :: CommitOid -> Git.Signature -> Text -> Text
-             -> CmdLineRepository Tag
+cliCreateTag :: Git.MonadGit m
+             => CommitOid m -> Git.Signature -> Text -> Text
+             -> CmdLineRepository m (Tag m)
 cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
     doRunGit run_ ["mktag"] $ setStdin $ TL.unlines $
         [ "object " <> sha
@@ -520,38 +543,48 @@ data Repository = Repository
 repoPath :: Repository -> TL.Text
 repoPath = toTextIgnore . Git.repoPath . repoOptions
 
-newtype CmdLineRepository a = CmdLineRepository
-    { cmdLineRepositoryReaderT :: ReaderT Repository IO a }
+newtype CmdLineRepository m a = CmdLineRepository
+    { cmdLineRepositoryReaderT :: ReaderT Repository m a }
 
-instance Functor CmdLineRepository where
+instance Functor m => Functor (CmdLineRepository m) where
     fmap f (CmdLineRepository x) = CmdLineRepository (fmap f x)
 
-instance Applicative CmdLineRepository where
+instance Applicative m => Applicative (CmdLineRepository m) where
     pure = CmdLineRepository . pure
     CmdLineRepository f <*> CmdLineRepository x = CmdLineRepository (f <*> x)
 
-instance Monad CmdLineRepository where
+instance Monad m => Monad (CmdLineRepository m) where
     return = CmdLineRepository . return
     CmdLineRepository m >>= f =
         CmdLineRepository (m >>= cmdLineRepositoryReaderT . f)
 
-instance MonadIO CmdLineRepository where
+instance MonadIO m => MonadIO (CmdLineRepository m) where
     liftIO m = CmdLineRepository (liftIO m)
 
-instance Exception e => Failure e CmdLineRepository where
-    failure = liftIO . throwIO
+instance (Monad m, MonadIO m, Applicative m)
+         => MonadBase IO (CmdLineRepository m) where
+    liftBase = liftIO
 
-cliGet :: CmdLineRepository Repository
+instance Monad m => MonadUnsafeIO (CmdLineRepository m) where
+    unsafeLiftIO = return . unsafePerformIO
+
+instance Monad m => MonadThrow (CmdLineRepository m) where
+    monadThrow = throw
+
+instance MonadTrans CmdLineRepository where
+    lift = CmdLineRepository . ReaderT . const
+
+cliGet :: Monad m => CmdLineRepository m Repository
 cliGet = CmdLineRepository ask
 
-instance Git.Treeish Tree where
-    type TreeRepository Tree = CmdLineRepository
+instance Git.MonadGit m => Git.Treeish (Tree m) where
+    type TreeRepository (Tree m) = CmdLineRepository m
     modifyTree      = cliModifyTree
     writeTree       = cliWriteTree
     traverseEntries = cliTraverseEntries
 
-instance Git.Commitish Commit where
-    type CommitRepository Commit = CmdLineRepository
+instance Git.MonadGit m => Git.Commitish (Commit m) where
+    type CommitRepository (Commit m) = CmdLineRepository m
     commitOid       = fromJust . cliCommitOid
     commitParents   = cliCommitParents
     commitTree      = cliCommitTree
@@ -560,13 +593,14 @@ instance Git.Commitish Commit where
     commitLog       = cliCommitMessage
     commitEncoding  = const "utf-8"
 
-instance Git.Treeish Commit where
-    type TreeRepository Commit = CmdLineRepository
+instance Git.MonadGit m => Git.Treeish (Commit m) where
+    type TreeRepository (Commit m) = CmdLineRepository m
     modifyTree      = Git.defaultCommitModifyTree
     writeTree       = Git.defaultCommitWriteTree
     traverseEntries = Git.defaultCommitTraverseEntries
 
-cliFactory :: Git.RepositoryFactory CmdLineRepository IO Repository
+cliFactory :: Git.MonadGit m
+           => Git.RepositoryFactory (CmdLineRepository m) m Repository
 cliFactory = Git.RepositoryFactory
     { Git.openRepository  = openCmdLineRepository
     , Git.runRepository   = runCmdLineRepository
@@ -574,10 +608,11 @@ cliFactory = Git.RepositoryFactory
     , Git.defaultOptions  = defaultCmdLineOptions
     }
 
-openCmdLineRepository :: Git.RepositoryOptions -> IO Repository
+openCmdLineRepository :: Git.MonadGit m
+                      => Git.RepositoryOptions -> m Repository
 openCmdLineRepository opts = do
     let path = Git.repoPath opts
-    exists <- F.isDirectory path
+    exists <- liftIO $ F.isDirectory path
     case F.toText path of
         Left e -> failure (Git.BackendError e)
         Right p -> do
@@ -588,11 +623,13 @@ openCmdLineRepository opts = do
                               <> ["init"]
             return Repository { repoOptions = opts }
 
-runCmdLineRepository :: Repository -> CmdLineRepository a -> IO a
+runCmdLineRepository :: Git.MonadGit m
+                     => Repository -> CmdLineRepository m a -> m a
 runCmdLineRepository repo action =
     runReaderT (cmdLineRepositoryReaderT action) repo
 
-closeCmdLineRepository :: Repository -> IO ()
+closeCmdLineRepository :: Git.MonadGit m
+                       => Repository -> m ()
 closeCmdLineRepository = const (return ())
 
 defaultCmdLineOptions :: Git.RepositoryOptions

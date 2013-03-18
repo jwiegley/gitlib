@@ -36,6 +36,8 @@ data RepositoryFacts = RepositoryFacts
     { hasSymbolicReferences :: Bool
     } deriving Show
 
+type MonadGit m = (Failure Git.GitException m, MonadIO m, Applicative m)
+
 -- | 'RepositoryBase' is the central point of contact between user code and
 -- Git data objects.  Every object must belong to some repository.
 class (Applicative m, Monad m, Failure GitException m,
@@ -81,11 +83,11 @@ class (Applicative m, Monad m, Failure GitException m,
                 then resolveRef name'
                 else failure (ReferenceLookupFailed name)
 
-    pushRef :: Repository m2
+    pushRef :: (MonadGit m, MonadGit (t m), Repository (t m), MonadTrans t)
             => Reference m (Commit m)
             -> Maybe Text
             -> Text
-            -> m (m2 (Maybe (Reference m2 (Commit m2))))
+            -> t m (Maybe (Reference (t m) (Commit (t m))))
 
     -- Lookup
     lookupCommit :: CommitOid m -> m (Commit m)

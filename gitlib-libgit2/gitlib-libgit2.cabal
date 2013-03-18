@@ -56,6 +56,7 @@ Library
         , text-icu             >= 0.6.3
         , time                 >= 1.4
         , transformers         >= 0.3.0.0
+        , transformers-base    >= 0.4.1
         , unordered-containers >= 0.2.3
     exposed-modules:
         Git.Libgit2

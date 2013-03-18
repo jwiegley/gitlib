@@ -14,17 +14,18 @@ import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Exception
 import           Control.Failure
+import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
+import           Data.Conduit
 import           Data.Monoid
 import           Data.Stringable
 import           Filesystem.Path.CurrentOS (FilePath)
 import           Foreign.ForeignPtr
 import qualified Git
 import           Prelude hiding (FilePath)
-
-type M m = (Failure Git.GitException m, MonadIO m, Applicative m)
+import           System.IO.Unsafe
 
 data Repository = Repository
     { repoOptions :: Git.RepositoryOptions
@@ -41,6 +42,17 @@ instance Show Repository where
 newtype LgRepository m a = LgRepository
     { lgRepositoryReaderT :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO)
+
+instance (Monad m, MonadIO m, Applicative m)
+         => MonadBase IO (LgRepository m) where
+    liftBase = liftIO
+
+instance Monad m => MonadUnsafeIO (LgRepository m) where
+    unsafeLiftIO = return . unsafePerformIO
+
+instance Monad m => MonadThrow (LgRepository m) where
+    -- monadThrow :: Exception e => e -> m a
+    monadThrow = throw
 
 instance MonadTrans LgRepository where
     lift = LgRepository . ReaderT . const

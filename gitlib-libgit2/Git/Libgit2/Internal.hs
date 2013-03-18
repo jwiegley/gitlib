@@ -49,7 +49,7 @@ data Base m a b = Base
     , gitObj :: ObjPtr b
     }
 
-addTracingBackend :: M m => LgRepository m ()
+addTracingBackend :: Git.MonadGit m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
     case F.toText (repoPath repo </> "objects") of
@@ -74,7 +74,7 @@ coidPtrToOid coidptr = do
     return fptr
 
 lookupObject'
-  :: M m
+  :: Git.MonadGit m
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)

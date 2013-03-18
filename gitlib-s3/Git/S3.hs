@@ -191,7 +191,7 @@ coidToJSON :: ForeignPtr C'git_oid -> Y.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $ \oid ->
                     Y.toJSON <$> oidToStr oid
 
-instance M m => Y.ToJSON (Git.Reference (LgRepository m) (Commit m)) where
+instance Git.MonadGit m => Y.ToJSON (Git.Reference (LgRepository m) (Commit m)) where
   toJSON (Git.Reference name (Git.RefSymbolic target)) =
       object [ "symbolic" .= name
              , "target"   .= target ]
@@ -224,14 +224,14 @@ readRefs be = do
 
     else return Nothing
 
-writeRefs :: M m => Ptr C'git_odb_backend -> RefMap m -> IO ()
+writeRefs :: Git.MonadGit m => Ptr C'git_odb_backend -> RefMap m -> IO ()
 writeRefs be refs = do
   let payload = Y.encode refs
   odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
   void $ runResourceT $
     putFileS3 odbS3 "refs.yml" (sourceLbs (BL.fromChunks [payload]))
 
-mirrorRefsFromS3 :: M m => Ptr C'git_odb_backend -> LgRepository m ()
+mirrorRefsFromS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsFromS3 be = do
     repo <- lgGet
     refs <- liftIO $ readRefs be
@@ -254,7 +254,7 @@ mirrorRefsFromS3 be = do
             Nothing -> return 0
         when (r < 0) $ throwIO Git.RepositoryInvalid
 
-mirrorRefsToS3 :: M m => Ptr C'git_odb_backend -> LgRepository m ()
+mirrorRefsToS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsToS3 be = do
     odbS3 <- liftIO $ peek (castPtr be :: Ptr OdbS3Backend)
     names <- Git.allRefNames
@@ -377,7 +377,7 @@ foreign export ccall "odbS3BackendFreeCallback"
 foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-odbS3Backend :: M m => S3Configuration NormalQuery
+odbS3Backend :: Git.MonadGit m => S3Configuration NormalQuery
              -> Configuration
              -> Manager -> Text -> Text
              -> m (Ptr C'git_odb_backend)
@@ -413,7 +413,7 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
     , configuration   = config'
     , s3configuration = s3config' }
 
-addS3Backend :: M m
+addS3Backend :: Git.MonadGit m
              => Repository
              -> Text -- ^ bucket
              -> Text -- ^ prefix

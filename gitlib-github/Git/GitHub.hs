@@ -1,9 +1,11 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
@@ -18,6 +20,7 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Data.Aeson hiding (Success)
 import           Data.Attempt
@@ -50,46 +53,48 @@ import           System.IO.Unsafe
 import           System.Locale (defaultTimeLocale)
 import           Text.Shakespeare.Text (st)
 
-type Oid       = Git.Oid GitHubRepository
+type Oid m       = Git.Oid (GitHubRepository m)
 
-type BlobOid   = Git.BlobOid GitHubRepository
-type TreeOid   = Git.TreeOid GitHubRepository
-type CommitOid = Git.CommitOid GitHubRepository
+type BlobOid m   = Git.BlobOid (GitHubRepository m)
+type TreeOid m   = Git.TreeOid (GitHubRepository m)
+type CommitOid m = Git.CommitOid (GitHubRepository m)
 
-type Blob      = Git.Blob GitHubRepository
-type Tree      = Git.Tree GitHubRepository
-type TreeEntry = Git.TreeEntry GitHubRepository
-type Commit    = Git.Commit GitHubRepository
+type Blob m      = Git.Blob (GitHubRepository m)
+type Tree m      = Git.Tree (GitHubRepository m)
+type TreeEntry m = Git.TreeEntry (GitHubRepository m)
+type Commit m    = Git.Commit (GitHubRepository m)
 
-type TreeRef   = Git.TreeRef GitHubRepository
-type CommitRef = Git.CommitRef GitHubRepository
+type TreeRef m   = Git.TreeRef (GitHubRepository m)
+type CommitRef m = Git.CommitRef (GitHubRepository m)
 
-type Reference = Git.Reference GitHubRepository Commit
+type Reference m = Git.Reference (GitHubRepository m) (Commit m)
 
-instance Git.RepositoryBase GitHubRepository where
-    data Oid GitHubRepository = Oid { getOid :: ByteString }
+data GitHubOptions = GitHubOptions
+    { ghRepoOwner :: GitHubOwner
+    , ghRepoName  :: Text
+    , ghRepoToken :: Maybe Text
+    } deriving (Show, Eq)
 
-    data Tree GitHubRepository = GitHubTree
-        { ghTreeOid      :: IORef (Maybe TreeOid)
-        , ghTreeContents :: IORef (HashMap Text TreeEntry)
+instance Git.MonadGit m => Git.RepositoryBase (GitHubRepository m) where
+    data Oid (GitHubRepository m) = Oid { getOid :: ByteString }
+
+    data Tree (GitHubRepository m) = GitHubTree
+        { ghTreeOid      :: IORef (Maybe (TreeOid m))
+        , ghTreeContents :: IORef (HashMap Text (TreeEntry m))
         }
 
-    data Commit GitHubRepository = GitHubCommit
-        { ghCommitOid       :: Maybe CommitOid
+    data Commit (GitHubRepository m) = GitHubCommit
+        { ghCommitOid       :: Maybe (CommitOid m)
         , ghCommitAuthor    :: Git.Signature
         , ghCommitCommitter :: Maybe Git.Signature
         , ghCommitMessage   :: Text
-        , ghCommitTree      :: TreeRef
-        , ghCommitParents   :: [CommitRef]
+        , ghCommitTree      :: TreeRef m
+        , ghCommitParents   :: [CommitRef m]
         }
 
-    data Tag GitHubRepository = Tag { tagCommit :: CommitRef }
+    data Tag (GitHubRepository m) = Tag { tagCommit :: CommitRef m }
 
-    data Options GitHubRepository = Options
-        { ghRepoOwner :: GitHubOwner
-        , ghRepoName  :: Text
-        , ghRepoToken :: Maybe Text
-        }
+    data Options (GitHubRepository m) = Options GitHubOptions
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = False }
@@ -122,24 +127,14 @@ data GitHubBlob = GitHubBlob
     , ghBlobSha      :: Text
     , ghBlobSize     :: Int } deriving Show
 
-instance Show (Git.Oid GitHubRepository) where
+instance Git.MonadGit m => Show (Git.Oid (GitHubRepository m)) where
     show = T.unpack . Git.renderOid
 
-instance Ord (Git.Oid GitHubRepository) where
+instance Ord (Git.Oid (GitHubRepository m)) where
     compare (Oid l) (Oid r) = compare l r
 
-instance Eq (Git.Oid GitHubRepository) where
+instance Eq (Git.Oid (GitHubRepository m)) where
     Oid l == Oid r = l == r
-
-instance MonadBase IO GitHubRepository where
-    liftBase = liftIO
-
-instance MonadUnsafeIO GitHubRepository where
-    unsafeLiftIO = return . unsafePerformIO
-
-instance MonadThrow GitHubRepository where
-    -- monadThrow :: Exception e => e -> m a
-    monadThrow = throw
 
 -- jww (2012-12-26): If no name mangling scheme is provided, assume it is
 -- "type name prefix"
@@ -152,8 +147,9 @@ instance FromJSON GitHubBlob where
                                     <*> v .: "size"
   parseJSON _ = mzero
 
-ghRestfulEx :: (ToJSON a, FromJSON b) => Text -> Text -> a -> RESTful ()
-            -> GitHubRepository b
+ghRestfulEx :: (ToJSON a, FromJSON b, Git.MonadGit m)
+            => Text -> Text -> a -> RESTful ()
+            -> GitHubRepository m b
 ghRestfulEx method url arg act = do
     gh        <- ghGet
     urlPrefix <- ghPrefix
@@ -164,9 +160,10 @@ ghRestfulEx method url arg act = do
                     addHeader "Authorization" ("token " <> t)
                     addHeader "Content-type" "application/json")
               (restfulJsonEx arg [st|#{method} #{urlPrefix}/#{url}|] act)
-    attempt failure return result
+    attempt (failure . Git.BackendError . T.pack . show) return result
 
-ghRestful :: (ToJSON a, FromJSON b) => Text -> Text -> a -> GitHubRepository b
+ghRestful :: (ToJSON a, FromJSON b, Git.MonadGit m)
+          => Text -> Text -> a -> GitHubRepository m b
 ghRestful method url arg = do
     gh        <- ghGet
     urlPrefix <- ghPrefix
@@ -177,9 +174,9 @@ ghRestful method url arg = do
                     addHeader "Authorization" ("token " <> t)
                     addHeader "Content-type" "application/json")
               (restfulJson arg [st|#{method} #{urlPrefix}/#{url}|])
-    attempt failure return result
+    attempt (failure . Git.BackendError . T.pack . show) return result
 
-ghLookupBlob :: BlobOid -> GitHubRepository Blob
+ghLookupBlob :: Git.MonadGit m => BlobOid m -> GitHubRepository m (Blob m)
 ghLookupBlob oid = do
     -- jww (2013-01-12): Split out GET to its own argument, using StdMethod
     -- from http-types.  Also, use a type class for this argument, to be added
@@ -213,36 +210,40 @@ instance ToJSON Content where
 instance Default Content where
   def = Content B.empty "utf-8"
 
-data GitHubOidProxy = GitHubOidProxy { runGhpOid :: Oid } deriving Show
+data GitHubOidProxy m = GitHubOidProxy
+    { runGhpOid :: Oid m
+    }
 
-instance FromJSON GitHubOidProxy where
+instance FromJSON (GitHubOidProxy m) where
   parseJSON (Object v) =
       GitHubOidProxy . Oid <$>
       (unsafePerformIO . unhex . T.encodeUtf8 <$> v .: "sha")
   parseJSON _ = mzero
 
-instance ToJSON GitHubOidProxy where
+instance ToJSON (GitHubOidProxy m) where
   toJSON (GitHubOidProxy (Oid sha)) = object ["sha" .= show sha]
 
-textToOid :: Text -> Oid
+textToOid :: Text -> Oid m
 textToOid = Oid . unsafePerformIO . unhex . T.encodeUtf8
 
-oidToText :: Oid -> Text
+oidToText :: Git.MonadGit m => Oid m -> Text
 oidToText = T.pack . show
 
-ghCreateBlob :: Git.BlobContents GitHubRepository -> GitHubRepository BlobOid
+ghCreateBlob :: Git.MonadGit m
+             => Git.BlobContents (GitHubRepository m)
+             -> GitHubRepository m (BlobOid m)
 ghCreateBlob (Git.BlobString content) =
     Tagged . runGhpOid
         <$> ghRestful "POST" "git/blobs"
                       (Content (B64.encode content) "base64")
 ghCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
 
-data GitHubTreeProxy = GitHubTreeProxy
+data GitHubTreeProxy m = GitHubTreeProxy
     { ghpTreeOid      :: Maybe Text
-    , ghpTreeContents :: [GitHubTreeEntryProxy]
+    , ghpTreeContents :: [GitHubTreeEntryProxy m]
     } deriving Show
 
-instance FromJSON GitHubTreeProxy where
+instance FromJSON (GitHubTreeProxy m) where
   parseJSON (Object v) =
       -- jww (2013-02-06): The GitHub API supports using the "base_tree"
       -- parameter for doing incremental updates based on existing trees.
@@ -252,19 +253,19 @@ instance FromJSON GitHubTreeProxy where
                       <*> v .: "tree"
   parseJSON _ = mzero
 
-instance ToJSON GitHubTreeProxy where
+instance ToJSON (GitHubTreeProxy m) where
   toJSON (GitHubTreeProxy _ contents) = object [ "tree" .= contents ]
 
-data GitHubTreeEntryProxy = GitHubTreeEntryProxy
+data GitHubTreeEntryProxy m = GitHubTreeEntryProxy
     { ghpTreeEntryType    :: Text
     , ghpTreeEntryPath    :: Text
     , ghpTreeEntryMode    :: Text
     , ghpTreeEntrySize    :: Int
     , ghpTreeEntrySha     :: Text
-    , ghpTreeEntrySubtree :: Maybe TreeRef
+    , ghpTreeEntrySubtree :: Maybe (TreeRef m)
     }
 
-instance Show GitHubTreeEntryProxy where
+instance Show (GitHubTreeEntryProxy m) where
     show x = Prelude.unlines
         [ "GitHubTreeEntryProxy {"
         , "  ghpTreeEntryType    = " ++ show (ghpTreeEntryType x)
@@ -275,7 +276,9 @@ instance Show GitHubTreeEntryProxy where
         , "}"
         ]
 
-treeEntryToProxy :: Text -> TreeEntry -> GitHubRepository GitHubTreeEntryProxy
+treeEntryToProxy :: Git.MonadGit m
+                 => Text -> TreeEntry m
+                 -> GitHubRepository m (GitHubTreeEntryProxy m)
 treeEntryToProxy name (Git.BlobEntry oid kind) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "blob"
@@ -289,6 +292,7 @@ treeEntryToProxy name (Git.BlobEntry oid kind) =
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
         }
+
 treeEntryToProxy name (Git.CommitEntry oid) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "commit"
@@ -298,6 +302,7 @@ treeEntryToProxy name (Git.CommitEntry oid) =
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
         }
+
 treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "tree"
@@ -307,6 +312,7 @@ treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Just ref
         }
+
 treeEntryToProxy name (Git.TreeEntry ref@(Git.Known tree)) = do
     oid <- Git.writeTree tree
     return GitHubTreeEntryProxy
@@ -318,7 +324,8 @@ treeEntryToProxy name (Git.TreeEntry ref@(Git.Known tree)) = do
         , ghpTreeEntrySubtree = Just ref
         }
 
-proxyToTreeEntry :: GitHubTreeEntryProxy -> GitHubRepository TreeEntry
+proxyToTreeEntry :: Git.MonadGit m
+                 => GitHubTreeEntryProxy m -> GitHubRepository m (TreeEntry m)
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "blob" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)
     return $ Git.BlobEntry (Tagged oid) $
@@ -338,7 +345,7 @@ proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "tree" }) = do
 
 proxyToTreeEntry _ = error "Unexpected tree entry type from GitHub"
 
-instance FromJSON GitHubTreeEntryProxy where
+instance FromJSON (GitHubTreeEntryProxy m) where
   parseJSON (Object v) =
       GitHubTreeEntryProxy <$> v .: "type"
                            <*> v .: "path"
@@ -348,17 +355,18 @@ instance FromJSON GitHubTreeEntryProxy where
                            <*> pure Nothing
   parseJSON _ = mzero
 
-instance ToJSON GitHubTreeEntryProxy where
+instance ToJSON (GitHubTreeEntryProxy m) where
   toJSON entry = object [ "type" .= ghpTreeEntryType entry
                         , "path" .= ghpTreeEntryPath entry
                         , "mode" .= ghpTreeEntryMode entry
                         , "sha"  .= ghpTreeEntrySha entry ]
 
-ghNewTree :: GitHubRepository Tree
+ghNewTree :: Git.MonadGit m => GitHubRepository m (Tree m)
 ghNewTree = GitHubTree <$> (liftIO $ newIORef Nothing)
                        <*> (liftIO $ newIORef HashMap.empty)
 
-ghLookupTree :: TreeOid -> GitHubRepository Tree
+ghLookupTree :: Git.MonadGit m
+             => TreeOid m -> GitHubRepository m (Tree m)
 ghLookupTree oid = do
     treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderObjOid oid) ()
     oid' <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
@@ -372,7 +380,9 @@ ghLookupTree oid = do
                            <*> proxyToTreeEntry entry)
              (ghpTreeContents tp)
 
-doLookupTreeEntry :: Tree -> [Text] -> GitHubRepository (Maybe TreeEntry)
+doLookupTreeEntry :: Git.MonadGit m
+                  => Tree m -> [Text]
+                  -> GitHubRepository m (Maybe (TreeEntry m))
 doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
 doLookupTreeEntry t (name:names) = do
   -- Lookup the current name in this tree.  If it doesn't exist, and there are
@@ -390,11 +400,13 @@ doLookupTreeEntry t (name:names) = do
                                       doLookupTreeEntry t'' names
       _ -> return Nothing
 
-doModifyTree :: Tree
+doModifyTree :: Git.MonadGit m
+             => Tree m
              -> [Text]
              -> Bool
-             -> (Maybe TreeEntry -> GitHubRepository (Maybe TreeEntry))
-             -> GitHubRepository (Maybe TreeEntry)
+             -> (Maybe (TreeEntry m)
+                 -> GitHubRepository m (Maybe (TreeEntry m)))
+             -> GitHubRepository m (Maybe (TreeEntry m))
 doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
     -- Lookup the current name in this tree.  If it doesn't exist, and there
@@ -447,9 +459,11 @@ doModifyTree t (name:names) createIfNotExist f = do
                         else HashMap.insert name (Git.treeEntry st)
                 return ze
 
-ghModifyTree :: Tree -> FilePath -> Bool
-             -> (Maybe TreeEntry -> GitHubRepository (Maybe TreeEntry))
-             -> GitHubRepository (Maybe TreeEntry)
+ghModifyTree :: Git.MonadGit m
+             => Tree m -> FilePath -> Bool
+             -> (Maybe (TreeEntry m)
+                 -> GitHubRepository m (Maybe (TreeEntry m)))
+             -> GitHubRepository m (Maybe (TreeEntry m))
 ghModifyTree tree = doModifyTree tree . splitPath
 
 splitPath :: FilePath -> [Text]
@@ -458,7 +472,7 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
-ghWriteTree :: Tree -> GitHubRepository TreeOid
+ghWriteTree :: Git.MonadGit m => Tree m -> GitHubRepository m (TreeOid m)
 ghWriteTree tree = do
     contents <- liftIO $ readIORef (ghTreeContents tree)
     if HashMap.size contents > 0
@@ -471,8 +485,10 @@ ghWriteTree tree = do
 
         else failure (Git.TreeCreateFailed "Attempt to create an empty tree")
 
-ghTraverseEntries :: Tree -> (FilePath -> TreeEntry -> GitHubRepository b)
-                  -> GitHubRepository [b]
+ghTraverseEntries :: Git.MonadGit m
+                  => Tree m
+                  -> (FilePath -> TreeEntry m -> GitHubRepository m b)
+                  -> GitHubRepository m [b]
 ghTraverseEntries tree f = do
     oid <- Git.writeTree tree
     treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderObjOid oid
@@ -514,14 +530,14 @@ instance ToJSON Git.Signature where
              , "email" .= email
              , "date"  .= formatGhTime date ]
 
-data GitHubCommitProxy = GitHubCommitProxy
+data GitHubCommitProxy m = GitHubCommitProxy
     { ghpCommitOid       :: Text
     , ghpCommitAuthor    :: Git.Signature
     , ghpCommitCommitter :: Maybe Git.Signature
     , ghpCommitMessage   :: Text
-    , ghpCommitTree      :: GitHubOidProxy
-    , ghpCommitParents   :: [GitHubOidProxy]
-    } deriving Show
+    , ghpCommitTree      :: GitHubOidProxy m
+    , ghpCommitParents   :: [GitHubOidProxy m]
+    }
 
 -- The strange thing about commits is that converting them to JSON does not use
 -- the "sha" key for the trees and parents:
@@ -535,7 +551,7 @@ data GitHubCommitProxy = GitHubCommitProxy
 --   "parents": [
 --     { "sha": "7d1b31e74ee336d15cbd21741bc88a537ed063a0" }
 --   ] }
-instance FromJSON GitHubCommitProxy where
+instance FromJSON (GitHubCommitProxy m) where
   parseJSON (Object v) =
       GitHubCommitProxy <$> v .: "sha"
                         <*> v .: "author"
@@ -545,7 +561,7 @@ instance FromJSON GitHubCommitProxy where
                         <*> v .: "parents"
   parseJSON _ = mzero
 
-instance ToJSON GitHubCommitProxy where
+instance Git.MonadGit m => ToJSON (GitHubCommitProxy m) where
   toJSON c = object $ [ "author"    .= ghpCommitAuthor c
                       , "message"   .= ghpCommitMessage c
                       , "tree"      .= oidToText (runGhpOid (ghpCommitTree c))
@@ -555,7 +571,7 @@ instance ToJSON GitHubCommitProxy where
                       [ "committer" .= fromJust (ghpCommitCommitter c) |
                                        isJust (ghpCommitCommitter c) ]
 
-proxyToCommit :: GitHubCommitProxy -> Commit
+proxyToCommit :: GitHubCommitProxy m -> Commit m
 proxyToCommit cp = GitHubCommit
     { ghCommitOid       = Just (Tagged (textToOid (ghpCommitOid cp)))
     , ghCommitAuthor    = ghpCommitAuthor cp
@@ -566,14 +582,15 @@ proxyToCommit cp = GitHubCommit
                               (ghpCommitParents cp)
     }
 
-ghLookupCommit :: CommitOid -> GitHubRepository Commit
+ghLookupCommit :: Git.MonadGit m => CommitOid m -> GitHubRepository m (Commit m)
 ghLookupCommit oid = do
     cp <- ghRestful "GET" ("git/commits/" <> Git.renderObjOid oid) ()
     return (proxyToCommit cp)
 
-ghCreateCommit :: [CommitRef] -> TreeRef
+ghCreateCommit :: Git.MonadGit m
+               => [CommitRef m] -> TreeRef m
                -> Git.Signature -> Git.Signature -> Text -> Maybe Text
-               -> GitHubRepository Commit
+               -> GitHubRepository m (Commit m)
 ghCreateCommit parents tree author committer message ref = do
     treeOid <- Git.treeRefOid tree
     commit' <- ghRestful "POST" "git/commits" $ GitHubCommitProxy
@@ -636,23 +653,27 @@ instance ToJSON GitHubDirectRef where
                       , "sha"   .= directRefSha c
                       , "force" .= directRefForce c ]
 
-ghRefToReference :: GitHubReference -> GitHubRepository Reference
+ghRefToReference :: Git.MonadGit m
+                 => GitHubReference -> GitHubRepository m (Reference m)
 ghRefToReference ref = do
     oid <- Git.parseOid (objectRefSha (referenceObject ref))
     return (Git.Reference (referenceName ref)
                           (Git.RefObj (Git.ByOid (Tagged oid))))
 
-ghLookupRef :: Text -> GitHubRepository (Maybe Reference)
+ghLookupRef :: Git.MonadGit m
+            => Text -> GitHubRepository m (Maybe (Reference m))
 ghLookupRef refName =
     -- jww (2013-02-14): Need to test whether or not the ref exists
     Just <$> (ghRefToReference =<< ghRestful "GET" ("git/" <> refName) ())
 
-ghAllRefs :: GitHubRepository [Reference]
+ghAllRefs :: Git.MonadGit m
+          => GitHubRepository m [Reference m]
 ghAllRefs =
     mapM ghRefToReference =<< ghRestful "GET" "git/refs" ()
 
-ghCreateRef :: Text -> Git.RefTarget GitHubRepository Commit
-            -> GitHubRepository Reference
+ghCreateRef :: Git.MonadGit m
+            => Text -> Git.RefTarget (GitHubRepository m) (Commit m)
+            -> GitHubRepository m (Reference m)
 ghCreateRef refName (Git.RefObj commitRef) = do
     let oid = Git.commitRefOid commitRef
     ghRefToReference
@@ -663,8 +684,9 @@ ghCreateRef refName (Git.RefObj commitRef) = do
 ghCreateRef _ (Git.RefSymbolic _) =
     error "Not supported"
 
-ghUpdateRef :: Text -> Git.RefTarget GitHubRepository Commit
-            -> GitHubRepository Reference
+ghUpdateRef :: Git.MonadGit m
+            => Text -> Git.RefTarget (GitHubRepository m) (Commit m)
+            -> GitHubRepository m (Reference m)
 ghUpdateRef refName (Git.RefObj commitRef) = do
     let oid = Git.commitRefOid commitRef
     ghRefToReference =<<
@@ -674,7 +696,7 @@ ghUpdateRef refName (Git.RefObj commitRef) = do
 ghUpdateRef _ (Git.RefSymbolic _) =
     error "Not supported"
 
-ghDeleteRef :: Text -> GitHubRepository ()
+ghDeleteRef :: Git.MonadGit m => Text -> GitHubRepository m ()
 ghDeleteRef ref = ghRestful "DELETE" ("git/" <> ref) ref
 
 data GitHubOwner = GitHubUser Text
@@ -684,10 +706,10 @@ data GitHubOwner = GitHubUser Text
 data Repository = Repository
     { httpManager   :: Maybe Manager
     , gitHubRepo    :: Github.Repo
-    , gitHubOptions :: Git.Options GitHubRepository
+    , gitHubOptions :: GitHubOptions
     }
 
-ghPrefix :: GitHubRepository Text
+ghPrefix :: Git.MonadGit m => GitHubRepository m Text
 ghPrefix = do
     repo <- ghGet
     let owner = case ghRepoOwner (gitHubOptions repo) of
@@ -696,37 +718,48 @@ ghPrefix = do
         name  = Github.repoName (gitHubRepo repo)
     return [st|https://api.github.com/repos/#{owner}/#{name}|]
 
-newtype GitHubRepository a = GitHubRepository
-    { ghRepositoryReaderT :: ReaderT Repository IO a }
+newtype GitHubRepository m a = GitHubRepository
+    { ghRepositoryReaderT :: ReaderT Repository m a }
 
-instance Functor GitHubRepository where
+instance Functor m => Functor (GitHubRepository m) where
     fmap f (GitHubRepository x) = GitHubRepository (fmap f x)
 
-instance Applicative GitHubRepository where
+instance Applicative m => Applicative (GitHubRepository m) where
     pure = GitHubRepository . pure
     GitHubRepository f <*> GitHubRepository x = GitHubRepository (f <*> x)
 
-instance Monad GitHubRepository where
+instance Monad m => Monad (GitHubRepository m) where
     return = GitHubRepository . return
     GitHubRepository m >>= f = GitHubRepository (m >>= ghRepositoryReaderT . f)
 
-instance MonadIO GitHubRepository where
+instance MonadIO m => MonadIO (GitHubRepository m) where
     liftIO m = GitHubRepository (liftIO m)
 
-instance Exception e => Failure e GitHubRepository where
-    failure = liftIO . throwIO
+instance (Monad m, MonadIO m, Applicative m)
+         => MonadBase IO (GitHubRepository m) where
+    liftBase = liftIO
 
-ghGet :: GitHubRepository Repository
+instance Monad m => MonadUnsafeIO (GitHubRepository m) where
+    unsafeLiftIO = return . unsafePerformIO
+
+instance Monad m => MonadThrow (GitHubRepository m) where
+    -- monadThrow :: Exception e => e -> m a
+    monadThrow = throw
+
+instance MonadTrans GitHubRepository where
+    lift = GitHubRepository . ReaderT . const
+
+ghGet :: Git.MonadGit m => GitHubRepository m Repository
 ghGet = GitHubRepository ask
 
-instance Git.Treeish Tree where
-    type TreeRepository Tree = GitHubRepository
+instance Git.MonadGit m => Git.Treeish (Tree m) where
+    type TreeRepository (Tree m) = GitHubRepository m
     modifyTree      = ghModifyTree
     writeTree       = ghWriteTree
     traverseEntries = ghTraverseEntries
 
-instance Git.Commitish Commit where
-    type CommitRepository Commit = GitHubRepository
+instance Git.MonadGit m => Git.Commitish (Commit m) where
+    type CommitRepository (Commit m) = GitHubRepository m
     commitOid       = fromJust . ghCommitOid
     commitParents   = ghCommitParents
     commitTree      = ghCommitTree
@@ -735,14 +768,14 @@ instance Git.Commitish Commit where
     commitLog       = ghCommitMessage
     commitEncoding  = const "utf-8"
 
-instance Git.Treeish Commit where
-    type TreeRepository Commit = GitHubRepository
+instance Git.MonadGit m => Git.Treeish (Commit m) where
+    type TreeRepository (Commit m) = GitHubRepository m
 
     modifyTree      = Git.defaultCommitModifyTree
     writeTree       = Git.defaultCommitWriteTree
     traverseEntries = Git.defaultCommitTraverseEntries
 
--- dropRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository a
+-- dropRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository m a
 --                -> IO (Either Github.Error a)
 -- dropRepository owner repoName token action =
 --     let repoName' = if ".git" `T.isSuffixOf` repoName
@@ -764,7 +797,7 @@ instance Git.Treeish Commit where
 --              Left e -> return (Left e)
 --              Right r -> Right <$> withOpenGhRepository r action)
 
-ghDeleteRepository :: GitHubRepository ()
+ghDeleteRepository :: Git.MonadGit m => GitHubRepository m ()
 ghDeleteRepository = do
     repo <- ghGet
     let ghOpts    = gitHubOptions repo
@@ -780,7 +813,7 @@ ghDeleteRepository = do
     result <- liftIO $ Github.deleteRepo
                   (Github.GithubOAuth (T.unpack (fromJust token)))
                   (T.unpack name) (T.unpack repoName')
-    either (failure . userError . show) return result
+    either (failure . Git.BackendError . T.pack . show) return result
 
 doOpenGhRepository :: Git.RepositoryOptions
                    -> GitHubOwner
@@ -792,7 +825,7 @@ doOpenGhRepository _ owner repoName token repo = do
     mgr <- newManager def
     return Repository { httpManager   = Just mgr
                       , gitHubRepo    = repo
-                      , gitHubOptions = Options
+                      , gitHubOptions = GitHubOptions
                           { ghRepoOwner = owner
                           , ghRepoName  = repoName
                           , ghRepoToken = token
@@ -822,7 +855,7 @@ createGhRepository _ owner repoName token =
             return $ Right $ Repository
                 { httpManager   = Just mgr
                 , gitHubRepo    = r
-                , gitHubOptions = Options
+                , gitHubOptions = GitHubOptions
                     { ghRepoOwner = owner
                     , ghRepoName  = repoName
                     , ghRepoToken = Just token
@@ -863,10 +896,11 @@ openOrCreateGhRepository opts owner repoName token = do
                                       "Authentication token not provided"))
         Right r -> Right <$> doOpenGhRepository opts owner repoName token r
 
-ghFactory :: GitHubOwner
+ghFactory :: Git.MonadGit m
+          => GitHubOwner
           -> Text
           -> Maybe Text
-          -> Git.RepositoryFactory GitHubRepository IO Repository
+          -> Git.RepositoryFactory (GitHubRepository m) m Repository
 ghFactory owner repoName token = Git.RepositoryFactory
     { Git.openRepository  = \opts -> openGhRepository opts owner repoName token
     , Git.runRepository   = runGhRepository
@@ -874,20 +908,21 @@ ghFactory owner repoName token = Git.RepositoryFactory
     , Git.defaultOptions  = defaultGhOptions
     }
 
-openGhRepository :: Git.RepositoryOptions
+openGhRepository :: Git.MonadGit m
+                 => Git.RepositoryOptions
                  -> GitHubOwner
                  -> Text
                  -> Maybe Text
-                 -> IO Repository
+                 -> m Repository
 openGhRepository opts owner repoName token = do
-    openOrCreateGhRepository opts owner repoName token
+    liftIO $ openOrCreateGhRepository opts owner repoName token
         >>= either (throwIO . userError . show) return
 
-runGhRepository :: Repository -> GitHubRepository a -> IO a
+runGhRepository :: Repository -> GitHubRepository m a -> m a
 runGhRepository repo action =
     runReaderT (ghRepositoryReaderT action) repo
 
-closeGhRepository :: Repository -> IO ()
+closeGhRepository :: Git.MonadGit m => Repository -> m ()
 closeGhRepository = const (return ())
 
 defaultGhOptions :: Git.RepositoryOptions
