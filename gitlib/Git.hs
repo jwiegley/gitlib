@@ -357,7 +357,7 @@ withRepository' factory opts action =
 withRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
                => RepositoryFactory r m c -> FilePath -> r a -> m a
 withRepository factory path action =
-    withRepository' factory ((defaultOptions factory) { repoPath = path })
-        action
+    withRepository' factory
+        ((defaultOptions factory) { repoPath = path }) action
 
 -- Git.hs

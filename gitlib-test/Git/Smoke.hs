@@ -11,6 +11,7 @@ module Git.Smoke where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Base
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Control
@@ -276,26 +277,17 @@ smokeTestSpec pr = describe "Smoke tests" $ do
       ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
-              Nothing -> return Nothing
-              Just ref -> liftBaseWith $ \_ ->
+              Nothing  -> return Nothing
+              Just ref -> control' $ \run ->
                   withRepository pr "/tmp/gitlib/.git" $
-                      restoreM $ pushRef ref (Just "file:///tmp/gitlib/.git")
+                      run $ pushRef ref (Just "file:///tmp/gitlib/.git")
                           "refs/heads/master"
       liftIO $ do
           let name = refName <$> ref
           Prelude.putStrLn $ "refTarget: " ++ show name
           name @?= Just "refs/heads/master"
 
-  -- it "pushRef test using genericPushRef" $ do
-  --     ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
-  --         ref <- lookupRef "refs/heads/master"
-  --         case ref of
-  --             Just r  -> do
-  --                 withRepository pr "/tmp/gitlib/.git" $
-  --                     pushRef r Nothing "refs/heads/master"
-  --             Nothing -> return Nothing
-  --     liftIO $ Prelude.putStrLn $ "refTarget: " ++ show (refName <$> ref)
-  --     let name = refName <$> ref
-  --     liftIO $ name @?= Just "refs/heads/master"
+  where
+    control' f = liftWith f >>= restoreT . return
 
 -- Main.hs ends here
