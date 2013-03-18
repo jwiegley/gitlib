@@ -20,9 +20,10 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
-import qualified Data.Text as T (unpack)
+import qualified Data.Text as T (pack, unpack)
 import qualified Data.Text.Lazy as TL (pack, unpack, toStrict, init)
 import           Data.Time.Clock (UTCTime, getCurrentTime)
+import           Data.Time.Format (formatTime)
 import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
@@ -33,6 +34,7 @@ import           Options.Applicative
 import           Prelude hiding (FilePath, null)
 import           Shelly (toTextIgnore, fromText, silently, shelly, run)
 import           System.IO (stderr)
+import           System.Locale (defaultTimeLocale)
 import           System.Log.Formatter (tfLogFormatter)
 import           System.Log.Handler (setFormatter)
 import           System.Log.Handler.Simple (streamHandler)
@@ -96,7 +98,7 @@ doMain opts = do
 
     -- Make sure we're in a known branch, and if so, let it begin
     forever $ withRepository lgFactory gd $ do
-        infoL $ "Saving snapshots in " ++ fileStr gd
+        infoL $ "Saving snapshots under " ++ fileStr gd
         infoL $ "Working tree: " ++ fileStr wd
         ref <- lookupRef "HEAD"
         void $ case ref of
@@ -171,10 +173,11 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
                           , signatureEmail = email
                           , signatureWhen  = now
                           }
-                    msg = "Snapshot"
+                    msg = "Snapshot at "
+                       ++ formatTime defaultTimeLocale "%F %T %Z" now
 
                 c <- createCommit [commitRef sc] (treeRef str)
-                                  sig sig msg (Just sref)
+                                  sig sig (T.pack msg) (Just sref)
                 infoL $ "Commit "
                      ++ (T.unpack . renderObjOid . commitOid $ c)
                 return c

@@ -26,6 +26,7 @@ Executable git-monitor
                  , gitlib-utils         >= 1.0.1
                  , gitlib-libgit2       >= 1.0.1
                  , hslogger             >= 1.2
+                 , old-locale           >= 1.0.0.4
                  , optparse-applicative >= 0.5.2.1
                  , shelly               >= 0.14
                  , system-fileio        >= 0.3.11
