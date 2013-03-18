@@ -24,10 +24,6 @@ import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
 main :: IO ()
-main = do
-    summary <- hspecWith (defaultConfig { configVerbose = True })
-                        (Git.smokeTestSpec Cli.cliFactory)
-    when (summaryFailures summary > 0) $ exitFailure
-    return ()
+main = hspec $ Git.smokeTestSpec Cli.cliFactory
 
 -- Smoke.hs ends here

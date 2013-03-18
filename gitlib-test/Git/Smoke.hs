@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-wrong-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
@@ -270,16 +271,27 @@ smokeTestSpec pr = describe "Smoke tests" $ do
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 
-  -- it "pushRef test" $ do
-  --     push <- withExistingRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
-  --         ref <- lookupRef "refs/heads/master"
-  --         case ref of
-  --             Just r  -> pushRef r ("origin","") "refs/heads/master"
-  --             Nothing -> return Nothing
-  --     ref <- withExistingRepository pr "/tmp/gitlib/.git"
-  --                (push :: r (Maybe (Reference r (Commit r))))
-  --     liftIO $ Prelude.putStrLn $ "refTarget: " ++ show (refTarget <$> ref)
-  --     let name = refName <$> ref
-  --     liftIO $ name @?= Just "refs/heads/master"
+  it "pushRef test using a Git URI" $ do
+      push <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+          ref <- lookupRef "refs/heads/master"
+          case ref of
+              Just r  -> pushRef r (Just "file:///tmp/gitlib/.git")
+                             "refs/heads/master"
+              Nothing -> return (return Nothing)
+      ref <- withRepository pr "/tmp/gitlib/.git" push
+      liftIO $ Prelude.putStrLn $ "refTarget: " ++ show (refName <$> ref)
+      let name = refName <$> ref
+      liftIO $ name @?= Just "refs/heads/master"
+
+  it "pushRef test using genericPushRef" $ do
+      push <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+          ref <- lookupRef "refs/heads/master"
+          case ref of
+              Just r  -> pushRef r Nothing "refs/heads/master"
+              Nothing -> return (return Nothing)
+      ref <- withRepository pr "/tmp/gitlib/.git" push
+      liftIO $ Prelude.putStrLn $ "refTarget: " ++ show (refName <$> ref)
+      let name = refName <$> ref
+      liftIO $ name @?= Just "refs/heads/master"
 
 -- Main.hs ends here

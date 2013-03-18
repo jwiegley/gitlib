@@ -47,6 +47,7 @@ instance M m => Git.RepositoryBase (SampleRepository m) where
     updateRef    = undefined
     deleteRef    = undefined
     resolveRef   = undefined
+    pushRef      = undefined
     allRefNames  = undefined
     lookupCommit = undefined
     lookupTree   = undefined

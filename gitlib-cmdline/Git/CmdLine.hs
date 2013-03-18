@@ -32,6 +32,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
+import           Data.Tuple
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -96,6 +97,7 @@ instance Git.RepositoryBase CmdLineRepository where
     updateRef    = cliUpdateRef
     deleteRef    = cliDeleteRef
     resolveRef   = cliResolveRef
+    pushRef      = cliPushRef
     allRefs      = cliAllRefs
     lookupCommit = cliLookupCommit
     lookupTree   = cliLookupTree
@@ -144,31 +146,28 @@ runGit = flip (doRunGit run) (return ())
 runGit_ :: [TL.Text] -> CmdLineRepository ()
 runGit_ = flip (doRunGit run_) (return ())
 
-instance Git.RepositoryLink CmdLineRepository CmdLineRepository where
-    -- jww (2013-03-09): If 'remoteName' is not yet a remote in the given
-    -- repository, create it using remoteUri.
-    pushRef ref (remoteName,remoteUri) remoteRefName = do
-        repo <- cliGet
-        r <- shellyNoDir $ silently $ errExit False $ do
-            run_ "git" $ [ "--git-dir", repoPath repo ]
-                      <> [ "push", TL.fromStrict remoteName
-                         , TL.concat [ TL.fromStrict (Git.refName ref)
-                                     , ":", TL.fromStrict remoteRefName ] ]
-            lastExitCode
-        return <$>
-            if r == 0
-            then cliLookupRef $ T.concat
-                 [ "refs/remotes/"
-                 , remoteName
-                 , "/"
-                 , if "refs/heads/" `T.isPrefixOf` Git.refName ref
-                   then T.drop 11 (Git.refName ref)
-                   else Git.refName ref
-                 ]
-            else return Nothing
+cliPushRefDirectly ::
+    Git.Repository r
+    => Reference -> Text -> Text
+    -> CmdLineRepository (r (Maybe (Git.Reference r (Git.Commit r))))
+cliPushRefDirectly ref remoteNameOrURI remoteRefName = do
+    repo <- cliGet
+    r <- shellyNoDir $ silently $ errExit False $ do
+        run_ "git" $ [ "--git-dir", repoPath repo ]
+                  <> [ "push", TL.fromStrict remoteNameOrURI
+                     , TL.concat [ TL.fromStrict (Git.refName ref)
+                                 , ":", TL.fromStrict remoteRefName ] ]
+        lastExitCode
+    return $ if r == 0
+             then Git.lookupRef (Git.refName ref)
+             else return Nothing
 
-instance Git.Repository m => Git.RepositoryLink CmdLineRepository m where
-    pushRef = Git.genericPushRef
+cliPushRef :: Git.Repository r
+           => Reference -> Maybe Text -> Text
+           -> CmdLineRepository (r (Maybe (Git.Reference r (Git.Commit r))))
+cliPushRef ref remoteNameOrURI remoteRefName =
+    maybe (Git.genericPushRef ref remoteRefName)
+        (flip (cliPushRefDirectly ref) remoteRefName) remoteNameOrURI
 
 cliLookupBlob :: BlobOid -> CmdLineRepository Blob
 cliLookupBlob oid@(Tagged (Oid sha)) =
@@ -216,7 +215,7 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
                             "100755" -> Git.ExecutableBlob
                             "120000" -> Git.SymlinkBlob
                             _        -> Git.UnknownBlob
-            "commit" -> Git.CommitEntry (Git.ByOid (Tagged (Oid sha)))
+            "commit" -> Git.CommitEntry (Tagged (Oid sha))
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")
 
@@ -321,8 +320,7 @@ cliWriteTree tree = do
                                   Git.SymlinkBlob    -> "120000"
                                   Git.UnknownBlob    -> "100000"
                            , " blob ", sha, "\t", TL.fromStrict path ]
-    renderLine (path, Git.CommitEntry cref) = do
-        let coid = Git.commitRefOid cref
+    renderLine (path, Git.CommitEntry coid) = do
         return $ TL.concat [ "160000 commit "
                            , TL.fromStrict (Git.renderObjOid coid), "\t"
                            , TL.fromStrict path ]
@@ -353,7 +351,7 @@ cliTraverseEntries tree f = do
                             "100755" -> Git.ExecutableBlob
                             "120000" -> Git.SymlinkBlob
                             _        -> Git.UnknownBlob
-            "commit" -> Git.CommitEntry (Git.ByOid (Tagged (Oid sha)))
+            "commit" -> Git.CommitEntry (Tagged (Oid sha))
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")
 
@@ -368,8 +366,7 @@ cliLookupCommit :: CommitOid -> CmdLineRepository Commit
 cliLookupCommit oid@(Tagged (Oid sha)) = do
     output <- runGit ["cat-file", "-p", sha]
     case parse parseOutput "" output of
-        Left e -> do liftIO $ putStrLn $ "Commit parse failed: " ++ show e
-                     failure Git.CommitLookupFailed
+        Left e  -> failure $ Git.CommitLookupFailed (T.pack (show e))
         Right c -> return c
   where
     parseOutput = do
@@ -440,22 +437,32 @@ data CliReference = CliReference
     { referenceRef    :: Text
     , referenceObject :: CliObjectRef } deriving Show
 
-makeRef :: [TL.Text] -> Reference
-makeRef [sha,name] =
-    Git.Reference (TL.toStrict name)
-                  (Git.RefObj (Git.ByOid (Tagged (Oid sha))))
-makeRef _ = error "Impossible"
-
-cliLookupRef :: Text -> CmdLineRepository (Maybe Reference)
-cliLookupRef refName = do
+cliShowRef :: Maybe Text -> CmdLineRepository (Maybe [(TL.Text,TL.Text)])
+cliShowRef mrefName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
         rev <- run "git" $ [ "--git-dir", repoPath repo
-                           , "show-ref", TL.fromStrict refName ]
+                           , "show-ref" ]
+                       <> [ TL.fromStrict (fromJust mrefName)
+                          | isJust mrefName ]
         ec  <- lastExitCode
         return $ if ec == 0
-                 then Just (makeRef (TL.words rev))
+                 then Just $ map ((\(x:y:[]) -> (y,x)) . TL.words)
+                           $ TL.lines rev
                  else Nothing
+
+nameAndShaToRef :: TL.Text -> TL.Text -> Reference
+nameAndShaToRef name sha =
+    Git.Reference (TL.toStrict name)
+                  (Git.RefObj (Git.ByOid (Tagged (Oid sha))))
+
+cliLookupRef :: Text -> CmdLineRepository (Maybe Reference)
+cliLookupRef refName = do
+    xs <- cliShowRef (Just refName)
+    let name = TL.fromStrict refName
+        ref  = maybe Nothing (lookup name) xs
+    return $ maybe Nothing (Just . uncurry nameAndShaToRef .
+                            \sha -> (name,sha)) ref
 
 cliUpdateRef :: Text -> Git.RefTarget CmdLineRepository Commit
              -> CmdLineRepository Reference
@@ -472,7 +479,11 @@ cliDeleteRef :: Text -> CmdLineRepository ()
 cliDeleteRef refName = runGit_ ["update-ref", "-d", TL.fromStrict refName]
 
 cliAllRefs :: CmdLineRepository [Reference]
-cliAllRefs = map (makeRef . TL.words) . TL.lines <$> runGit ["show-ref"]
+cliAllRefs = do
+    mxs <- cliShowRef Nothing
+    return $ case mxs of
+        Nothing -> []
+        Just xs -> map (uncurry nameAndShaToRef) xs
 
 cliResolveRef :: Text -> CmdLineRepository (Maybe CommitRef)
 cliResolveRef refName = do

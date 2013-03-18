@@ -102,6 +102,7 @@ instance Git.RepositoryBase GitHubRepository where
     updateRef        = ghUpdateRef
     deleteRef        = ghDeleteRef
     allRefs          = ghAllRefs
+    pushRef          = undefined -- ghPushRef
     lookupCommit     = ghLookupCommit
     lookupTree       = ghLookupTree
     lookupBlob       = ghLookupBlob
@@ -288,7 +289,7 @@ treeEntryToProxy name (Git.BlobEntry oid kind) =
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
         }
-treeEntryToProxy name (Git.CommitEntry (Git.ByOid oid)) =
+treeEntryToProxy name (Git.CommitEntry oid) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "commit"
         , ghpTreeEntryPath    = name
@@ -297,17 +298,6 @@ treeEntryToProxy name (Git.CommitEntry (Git.ByOid oid)) =
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
         }
-treeEntryToProxy name (Git.CommitEntry (Git.Known commit)) = do
-    let oid = Git.commitOid commit
-    return GitHubTreeEntryProxy
-        { ghpTreeEntryType    = "commit"
-        , ghpTreeEntryPath    = name
-        , ghpTreeEntryMode    = "160000"
-        , ghpTreeEntrySize    = (-1)
-        , ghpTreeEntrySha     = Git.renderObjOid oid
-        , ghpTreeEntrySubtree = Nothing
-        }
-
 treeEntryToProxy name (Git.TreeEntry ref@(Git.ByOid oid)) =
     return GitHubTreeEntryProxy
         { ghpTreeEntryType    = "tree"
@@ -340,7 +330,7 @@ proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "blob" }) = do
 
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "commit" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)
-    return $ Git.CommitEntry (Git.ByOid (Tagged oid))
+    return $ Git.CommitEntry  (Tagged oid)
 
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "tree" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)

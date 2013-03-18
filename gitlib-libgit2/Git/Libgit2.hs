@@ -301,7 +301,7 @@ entryToTreeEntry entry = do
            | typ == c'GIT_OBJ_TREE ->
              return $ Git.TreeEntry (Git.ByOid (Tagged (Oid oid)))
            | typ == c'GIT_OBJ_COMMIT ->
-             return $ Git.CommitEntry (Git.ByOid (Tagged (Oid oid)))
+             return $ Git.CommitEntry (Tagged (Oid oid))
            | otherwise -> error "Unexpected"
 
 doLookupTreeEntry :: M m
@@ -460,8 +460,7 @@ doModifyTree t (name:names) createIfNotExist f = do
                     Git.ExecutableBlob -> 0o100755
                     Git.SymlinkBlob    -> 0o120000
                     Git.UnknownBlob    -> 0o100000)
-    treeEntryToOid (Git.CommitEntry cr) = do
-        let coid = Git.commitRefOid cr
+    treeEntryToOid (Git.CommitEntry coid) = do
         return (Just (unTagged coid), 0o160000)
     treeEntryToOid (Git.TreeEntry tr) = do
         oid <- Git.treeRefOid tr

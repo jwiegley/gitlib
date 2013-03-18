@@ -81,6 +81,12 @@ class (Applicative m, Monad m, Failure GitException m,
                 then resolveRef name'
                 else failure (ReferenceLookupFailed name)
 
+    pushRef :: Repository m2
+            => Reference m (Commit m)
+            -> Maybe Text
+            -> Text
+            -> m (m2 (Maybe (Reference m2 (Commit m2))))
+
     -- Lookup
     lookupCommit :: CommitOid m -> m (Commit m)
     lookupTree   :: TreeOid m -> m (Tree m)
@@ -99,12 +105,6 @@ class (Applicative m, Monad m, Failure GitException m,
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
 
     deleteRepository :: m ()
-
-class (Repository m1, Repository m2) => RepositoryLink m1 m2 where
-    pushRef :: Reference m1 (Commit m1)
-            -> (Text,Text)
-            -> Text
-            -> m1 (m2 (Maybe (Reference m2 (Commit m2))))
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
@@ -129,7 +129,7 @@ data GitException = BackendError Text
                   | TreeUpdateFailed
                   | TreeWalkFailed
                   | CommitCreateFailed
-                  | CommitLookupFailed
+                  | CommitLookupFailed Text
                   | ReferenceCreateFailed
                   | ReferenceDeleteFailed Text
                   | RefCannotCreateFromPartialOid
@@ -201,16 +201,16 @@ instance Eq (BlobContents m) where
 data TreeEntry m = BlobEntry   { blobEntryOid  :: BlobOid m
                                , blobEntryKind :: BlobKind }
                  | TreeEntry   { treeEntryRef :: TreeRef m }
-                 | CommitEntry { commitEntryRef :: CommitRef m }
+                 | CommitEntry { commitEntryRef :: CommitOid m }
 
-blobEntry :: RepositoryBase m => BlobOid m -> BlobKind -> TreeEntry m
+blobEntry :: Repository m => BlobOid m -> BlobKind -> TreeEntry m
 blobEntry = BlobEntry
 
-treeEntry :: RepositoryBase m => Tree m -> TreeEntry m
+treeEntry :: Repository m => Tree m -> TreeEntry m
 treeEntry = TreeEntry . treeRef
 
-commitEntry :: RepositoryBase m => Commit m -> TreeEntry m
-commitEntry = CommitEntry . commitRef
+commitEntry :: Repository m => Commit m -> TreeEntry m
+commitEntry = CommitEntry . commitOid
 
 -- | A 'Tree' is anything that is "treeish".
 --
@@ -247,7 +247,7 @@ class RepositoryBase (TreeRepository t) => Treeish t where
             -> TreeRepository t ()
     putTree t path tr = putTreeEntry t path (TreeEntry tr)
 
-    putCommit :: t -> FilePath -> CommitRef (TreeRepository t)
+    putCommit :: t -> FilePath -> CommitOid (TreeRepository t)
               -> TreeRepository t ()
     putCommit t path c = putTreeEntry t path (CommitEntry c)
 
