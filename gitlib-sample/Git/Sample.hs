@@ -29,33 +29,34 @@ import qualified Git as Git
 data Void
 
 instance Git.MonadGit m => Git.Repository (SampleRepository m) where
-    data Oid (SampleRepository m)     = Oid Void
-    data Options (SampleRepository m) = Options
+    data Oid (SampleRepository m)      = Oid Void
+    data TreeData (SampleRepository m) = Void
+    data Options (SampleRepository m)  = Options
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
-    parseOid     = undefined
-    renderOid    = undefined
-    lookupRef    = undefined
-    createRef    = undefined
-    updateRef    = undefined
-    deleteRef    = undefined
-    resolveRef   = undefined
-    pushRef      = undefined
-    allRefNames  = undefined
-    lookupCommit = undefined
-    lookupTree   = undefined
-    lookupBlob   = undefined
-    lookupTag    = undefined
-    lookupObject = undefined
-    existsObject = undefined
-    newTree      = undefined
-    hashContents = undefined
-    createBlob   = undefined
-    createCommit = undefined
-    createTag    = undefined
-
+    parseOid         = undefined
+    renderOid        = undefined
+    lookupRef        = undefined
+    createRef        = undefined
+    updateRef        = undefined
+    deleteRef        = undefined
+    resolveRef       = undefined
+    pushRef          = undefined
+    allRefNames      = undefined
+    lookupCommit     = undefined
+    lookupTree       = undefined
+    lookupBlob       = undefined
+    lookupTag        = undefined
+    lookupObject     = undefined
+    existsObject     = undefined
+    traverseCommits  = undefined
+    newTree          = undefined
+    hashContents     = undefined
+    createBlob       = undefined
+    createCommit     = undefined
+    createTag        = undefined
     deleteRepository = undefined
 
 instance Show (Git.Oid (SampleRepository m)) where

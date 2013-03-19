@@ -71,15 +71,7 @@ class (Applicative m, Monad m, Failure GitException m,
     allRefNames = map refName <$> allRefs
 
     resolveRef :: Text -> m (Maybe (CommitRef m))
-    resolveRef name = lookupRef name >>= \ref ->
-        case ref of
-            Nothing -> return Nothing
-            Just (Reference { refTarget = RefObj x }) ->
-                return (Just x)
-            Just (Reference { refTarget = RefSymbolic name' }) ->
-                if name /= name'
-                then resolveRef name'
-                else failure (ReferenceLookupFailed name)
+    resolveRef name = lookupRef name >>= referenceToRef (Just name)
 
     pushRef :: (MonadTrans t, MonadGit m, MonadGit (t m),
                 Repository m, Repository (t m))
@@ -324,6 +316,20 @@ commitRefOid (Known x) = commitOid x
 resolveCommitRef :: Repository m => CommitRef m -> m (Commit m)
 resolveCommitRef (ByOid oid) = lookupCommit oid
 resolveCommitRef (Known obj) = return obj
+
+referenceToRef :: Repository m
+               => Maybe Text
+               -> Maybe (Reference m (Commit m))
+               -> m (Maybe (CommitRef m))
+referenceToRef mname mref =
+    case mref of
+        Nothing -> return Nothing
+        Just ref@(Reference { refTarget = RefObj x }) ->
+            return (Just x)
+        Just ref@(Reference { refTarget = RefSymbolic name' }) ->
+            if fromMaybe name' mname /= name'
+            then resolveRef name'
+            else failure (ReferenceLookupFailed (refName ref))
 
 {- $tags -}
 
