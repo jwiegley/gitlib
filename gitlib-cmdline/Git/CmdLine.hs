@@ -83,24 +83,25 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     parseOid = return . Oid . TL.fromStrict
     renderOid (Oid x) = TL.toStrict x
 
-    lookupRef    = cliLookupRef
-    createRef    = cliUpdateRef
-    updateRef    = cliUpdateRef
-    deleteRef    = cliDeleteRef
-    resolveRef   = cliResolveRef
-    pushRef      = cliPushRef
-    allRefs      = cliAllRefs
-    lookupCommit = cliLookupCommit
-    lookupTree   = cliLookupTree
-    lookupBlob   = cliLookupBlob
-    lookupTag    = error "Not defined CmdLineRepository.cliLookupTag"
-    lookupObject = error "Not defined CmdLineRepository.cliLookupObject"
-    existsObject = cliExistsObject
-    newTree      = cliNewTree
-    hashContents = cliHashContents
-    createBlob   = cliCreateBlob
-    createCommit = cliCreateCommit
-    createTag    = cliCreateTag
+    lookupRef       = cliLookupRef
+    createRef       = cliUpdateRef
+    updateRef       = cliUpdateRef
+    deleteRef       = cliDeleteRef
+    resolveRef      = cliResolveRef
+    pushRef         = cliPushRef
+    allRefs         = cliAllRefs
+    lookupCommit    = cliLookupCommit
+    lookupTree      = cliLookupTree
+    lookupBlob      = cliLookupBlob
+    lookupTag       = error "Not defined CmdLineRepository.cliLookupTag"
+    lookupObject    = error "Not defined CmdLineRepository.cliLookupObject"
+    existsObject    = cliExistsObject
+    traverseCommits = cliTraverseCommits
+    newTree         = cliNewTree
+    hashContents    = cliHashContents
+    createBlob      = cliCreateBlob
+    createCommit    = cliCreateCommit
+    createTag       = cliCreateTag
 
     deleteRepository =
         cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions
@@ -189,6 +190,18 @@ cliExistsObject (Oid sha) = do
                      , "cat-file", "-e", sha ]
         ec <- lastExitCode
         return (ec == 0)
+
+cliTraverseCommits :: Git.MonadGit m
+                   => (CommitRef m -> CmdLineRepository m a)
+                   -> Reference m
+                   -> CmdLineRepository m [a]
+cliTraverseCommits f ref = do
+    shas <- doRunGit run [ "--no-pager", "log"
+                         , "--format=%H", TL.fromStrict (Git.refName ref) ]
+            $ return ()
+    mapM (\sha -> f =<< (Git.ByOid . Tagged
+                         <$> Git.parseOid (TL.toStrict sha)))
+        (TL.lines shas)
 
 cliMakeTree :: Git.MonadGit m
             => IORef (Maybe (TreeOid m))

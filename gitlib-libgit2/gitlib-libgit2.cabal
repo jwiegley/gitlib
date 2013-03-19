@@ -42,11 +42,11 @@ Library
         , conduit              >= 0.5.5
         , containers           >= 0.4.2
         , data-default         >= 0.5.0
-        , either               >= 3.0.3
         , failure              >= 0.2.0.1
         , hex                  >= 0.1.2
-        , lens                 >= 3.7
+        , lifted-base          >= 0.2.0.2
         , monad-control        >= 0.3.2
+        , monad-loops          >= 0.3.3.0
         , parallel-io          >= 0.3.2.1
         , pointless-fun        >= 1.1.0.1
         , stringable           >= 0.1.1

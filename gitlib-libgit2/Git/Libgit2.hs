@@ -24,10 +24,13 @@ module Git.Libgit2
 import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Exception
+import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Loops
 import           Control.Monad.Trans.Reader
+import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Default
@@ -78,26 +81,27 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
-    parseOid     = lgParseOid
-    renderOid    = lgRenderOid
-    lookupRef    = lgLookupRef
-    createRef    = lgUpdateRef
-    updateRef    = lgUpdateRef
-    deleteRef    = lgDeleteRef
-    resolveRef   = lgResolveRef
-    allRefNames  = lgAllRefNames
-    pushRef      = undefined -- lgPushRef
-    lookupCommit = lgLookupCommit 40
-    lookupTree   = lgLookupTree 40
-    lookupBlob   = lgLookupBlob
-    lookupTag    = undefined
-    lookupObject = lgLookupObject
-    existsObject = lgExistsObject
-    newTree      = lgNewTree
-    hashContents = lgHashContents
-    createBlob   = lgCreateBlob
-    createCommit = lgCreateCommit
-    createTag    = undefined
+    parseOid        = lgParseOid
+    renderOid       = lgRenderOid
+    lookupRef       = lgLookupRef
+    createRef       = lgUpdateRef
+    updateRef       = lgUpdateRef
+    deleteRef       = lgDeleteRef
+    resolveRef      = lgResolveRef
+    allRefNames     = lgAllRefNames
+    pushRef         = undefined -- lgPushRef
+    lookupCommit    = lgLookupCommit 40
+    lookupTree      = lgLookupTree 40
+    lookupBlob      = lgLookupBlob
+    lookupTag       = undefined
+    lookupObject    = lgLookupObject
+    existsObject    = lgExistsObject
+    traverseCommits = lgTraverseCommits
+    newTree         = lgNewTree
+    hashContents    = lgHashContents
+    createBlob      = lgCreateBlob
+    createCommit    = lgCreateCommit
+    createTag       = undefined
 
     deleteRepository = lgGet >>= liftIO . removeTree . repoPath
 
@@ -571,6 +575,35 @@ lgExistsObject oid = do
                     c'git_odb_free ptr
                     return (Just (r == 0))
     maybe (failure Git.RepositoryInvalid) return result
+
+lgTraverseCommits :: Git.MonadGit m
+                  => (CommitRef m -> LgRepository m a)
+                  -> Reference m
+                  -> LgRepository m [a]
+lgTraverseCommits f ref = do
+    repo <- lgGet
+    refs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
+        alloca $ \pptr ->
+            Exc.bracket
+                (do r <- c'git_revwalk_new pptr repoPtr
+                    when (r < 0) $
+                        failure (Git.BackendError "Could not create revwalker")
+                    peek pptr)
+                c'git_revwalk_free
+                doWalk
+    mapM f refs
+  where
+    doWalk walker = do
+        withCStringable (Git.refName ref) $ \rname -> do
+            r2 <- c'git_revwalk_push_ref walker rname
+            when (r2 < 0) $
+                failure (Git.BackendError "Could not push ref on revwalker")
+        alloca $ \coidPtr -> do
+            c'git_revwalk_sorting walker
+                (fromIntegral ((1 :: Int) .|. (4 :: Int)))
+            whileM ((==) <$> pure 0
+                         <*> c'git_revwalk_next coidPtr walker)
+                (Git.ByOid . Tagged . Oid <$> coidPtrToOid coidPtr)
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.

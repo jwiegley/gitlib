@@ -97,6 +97,11 @@ class (Applicative m, Monad m, Failure GitException m,
     lookupObject :: Text -> m (Object m)
     existsObject :: Oid m -> m Bool
 
+    traverseCommits :: forall a.
+                       (CommitRef m -> m a) -> Reference m (Commit m) -> m [a]
+    traverseCommits_ :: (CommitRef m -> m ()) -> Reference m (Commit m) -> m ()
+    traverseCommits_ = (void .) . traverseCommits
+
     -- Object creation
     newTree :: m (Tree m)
     hashContents :: BlobContents m -> m (BlobOid m)
@@ -233,7 +238,7 @@ data Tree m = Tree
     , dropFromTree     :: FilePath -> m ()
     , writeTree        :: m (TreeOid m)
     , traverseEntries  :: forall a. (FilePath -> TreeEntry m -> m a) -> m [a]
-    , traverseEntries_ :: forall a. (FilePath -> TreeEntry m -> m a) -> m ()
+    , traverseEntries_ :: (FilePath -> TreeEntry m -> m ()) -> m ()
     , getTreeData      :: !(TreeData m)
     }
 
