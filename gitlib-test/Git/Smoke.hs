@@ -11,7 +11,6 @@ module Git.Smoke where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Base
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Control
@@ -278,8 +277,8 @@ smokeTestSpec pr = describe "Smoke tests" $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
               Nothing  -> return Nothing
-              Just ref -> control' $ \run ->
-                  withRepository pr "/tmp/gitlib/.git" $
+              Just ref -> do
+                  control' $ \run -> withRepository pr "/tmp/gitlib/.git" $
                       run $ pushRef ref (Just "file:///tmp/gitlib/.git")
                           "refs/heads/master"
       liftIO $ do

@@ -81,7 +81,8 @@ class (Applicative m, Monad m, Failure GitException m,
                 then resolveRef name'
                 else failure (ReferenceLookupFailed name)
 
-    pushRef :: (MonadGit m, MonadGit (t m), Repository (t m), MonadTrans t)
+    pushRef :: (MonadGit m, MonadGit (t m),
+                Repository m, Repository (t m), MonadTrans t)
             => Reference m (Commit m)
             -> Maybe Text
             -> Text
@@ -256,6 +257,7 @@ instance Repository m => Default (Tree m) where
                 , writeTree = undefined
                 , traverseEntries = undefined
                 , traverseEntries_ = void . traverseEntries tr
+                , getTreeData = undefined
                 }
           in tr
 
