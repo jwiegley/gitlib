@@ -237,31 +237,38 @@ data Tree m = Tree
     , getTreeData      :: TreeData m
     }
 
-instance Repository m => Default (Tree m) where
-    def = let tr = mkTree tr in tr
-      where
-        mkTree tr = Tree
-            { modifyTree = error "Not defined 'Tree.modifyTree'"
-            , lookupEntry = \path -> modifyTree tr path False return
-            , putTreeEntry =
-                   \path ent ->
-                       void $ modifyTree tr path True
-                           (const (return (Just ent)))
-            , putBlob' =
-                   \path b kind -> putTreeEntry tr path (BlobEntry b kind)
-            , putBlob = \path b -> putBlob' tr path b PlainBlob
-            , putTree = \path tr' -> putTreeEntry tr path (TreeEntry tr')
-            , putCommit = \path c -> putTreeEntry tr path (CommitEntry c)
-            , dropFromTree =
-                   \path ->
-                       void $ modifyTree tr path False
-                           (const (return Nothing))
-            , writeTree = error "Not defined 'Tree.writeTree'"
-            , traverseEntries =
-                error "Not defined 'Tree.traverseEntries'"
-            , traverseEntries_ = void . traverseEntries tr
-            , getTreeData = error "Not defined 'Tree.getTreeData'"
-            }
+mkTree :: Repository m
+       => (Tree m
+           -> FilePath           -- path within the tree
+           -> Bool               -- create subtree's leading up to path?
+           -> (Maybe (TreeEntry m) -> m (Maybe (TreeEntry m)))
+           -> m (Maybe (TreeEntry m)))
+       -> (Tree m -> m (TreeOid m))
+       -> (forall a. Tree m -> (FilePath -> TreeEntry m -> m a) -> m [a])
+       -> TreeData m
+       -> Tree m
+mkTree modifyTree' writeTree' traverseEntries' treeData =
+    let tr = specialize tr in tr
+  where
+    specialize tr = tr
+        { modifyTree       = modifyTree' tr
+        , lookupEntry      = \path -> modifyTree' tr path False return
+        , putTreeEntry     = \path ent ->
+                                 void $ modifyTree' tr path True
+                                     (const (return (Just ent)))
+        , putBlob'         = \path b kind ->
+                                 putTreeEntry tr path (BlobEntry b kind)
+        , putBlob          = \path b -> putBlob' tr path b PlainBlob
+        , putTree          = \path tr' -> putTreeEntry tr path (TreeEntry tr')
+        , putCommit        = \path c -> putTreeEntry tr path (CommitEntry c)
+        , dropFromTree     = \path ->
+                                 void $ modifyTree' tr path False
+                                     (const (return Nothing))
+        , writeTree        = writeTree' tr
+        , traverseEntries  = traverseEntries' tr
+        , traverseEntries_ = void . traverseEntries' tr
+        , getTreeData      = treeData
+        }
 
 treeRef :: Tree m -> TreeRef m
 treeRef = Known
@@ -305,13 +312,13 @@ instance Repository m => Default (Commit m) where
     def = let c = mkCommit c in c
       where
         mkCommit c = Commit
-            { commitOid       = error "Not defined 'Commit.commitOid'"
-            , commitParents   = error "Not defined 'Commit.commitParents'"
-            , commitTree      = error "Not defined 'Commit.commitTree'"
-            , commitAuthor    = error "Not defined 'Commit.commitAuthor'"
-            , commitCommitter = error "Not defined 'Commit.commitCommitter'"
-            , commitLog       = error "Not defined 'Commit.commitLog'"
-            , commitEncoding  = error "Not defined 'Commit.commitEncoding'"
+            { commitOid       = error "Not defined: Commit.commitOid"
+            , commitParents   = error "Not defined: Commit.commitParents"
+            , commitTree      = error "Not defined: Commit.commitTree"
+            , commitAuthor    = error "Not defined: Commit.commitAuthor"
+            , commitCommitter = error "Not defined: Commit.commitCommitter"
+            , commitLog       = error "Not defined: Commit.commitLog"
+            , commitEncoding  = error "Not defined: Commit.commitEncoding"
             , commitTree'     = case commitTree c of
                 ByOid oid -> lookupTree oid
                 Known obj -> return obj

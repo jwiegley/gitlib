@@ -229,15 +229,10 @@ lgMakeTree :: Git.MonadGit m
            => IORef (Base m (Tree m) C'git_tree)
            -> IORef (HashMap Text (Tree m))
            -> ForeignPtr C'git_treebuilder
-           -> LgRepository m (Tree m)
+           -> Tree m
 lgMakeTree info updates contents = do
-    let tr = def
-            { Git.modifyTree      = lgModifyTree tr
-            , Git.writeTree       = lgWriteTree tr
-            , Git.traverseEntries = lgTraverseEntries tr
-            , Git.getTreeData     = TreeData info updates contents
-            }
-    return tr
+    Git.mkTree lgModifyTree lgWriteTree lgTraverseEntries $
+        TreeData info updates contents
 
 -- | Create a new, empty tree.
 --
@@ -255,10 +250,9 @@ lgNewTree = do
 
     if r < 0
         then failure (Git.TreeCreateFailed "Failed to create new tree builder")
-        else do
-        upds <- liftIO $ newIORef HashMap.empty
-        info <- liftIO $ newIORef (Base Nothing Nothing)
-        lgMakeTree info upds fptr
+        else lgMakeTree <$> liftIO (newIORef (Base Nothing Nothing))
+                        <*> liftIO (newIORef HashMap.empty)
+                        <*> pure fptr
 
 lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) (Oid m)
              -> LgRepository m (Tree m)
@@ -284,7 +278,7 @@ lgLookupTree len oid = do
                       info <- liftIO $ newIORef (Base (Just (Tagged (Oid coid)))
                                                      (Just obj))
                       return (info,upds,fptr)
-    lgMakeTree info upds fptr
+    return $ lgMakeTree info upds fptr
 
 entryToTreeEntry :: Git.MonadGit m => Ptr C'git_tree_entry -> IO (TreeEntry m)
 entryToTreeEntry entry = do

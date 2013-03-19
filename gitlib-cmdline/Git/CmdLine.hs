@@ -200,24 +200,14 @@ cliExistsObject (Oid sha) = do
 cliMakeTree :: Git.MonadGit m
             => IORef (Maybe (TreeOid m))
             -> IORef (HashMap Text (TreeEntry m))
-            -> CmdLineRepository m (Tree m)
-cliMakeTree oid contents = do
-    trace "In cliMakeTree!" $ return ()
-    return (specialize def)
-  where
-    specialize tr = tr
-        { Git.modifyTree      = cliModifyTree (specialize tr)
-        , Git.writeTree       = cliWriteTree (specialize tr)
-        , Git.traverseEntries = cliTraverseEntries (specialize tr)
-        , Git.getTreeData     = TreeData oid contents
-        }
+            -> Tree m
+cliMakeTree oid contents =
+    Git.mkTree cliModifyTree cliWriteTree cliTraverseEntries $
+        TreeData oid contents
 
 cliNewTree :: Git.MonadGit m => CmdLineRepository m (Tree m)
-cliNewTree = do
-    trace "In cliNewTree!" $ return ()
-    oid      <- liftIO $ newIORef Nothing
-    contents <- liftIO $ newIORef HashMap.empty
-    cliMakeTree oid contents
+cliNewTree = cliMakeTree <$> liftIO (newIORef Nothing)
+                         <*> liftIO (newIORef HashMap.empty)
 
 cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
 cliLookupTree oid@(Tagged (Oid sha)) = do
@@ -228,7 +218,7 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
     contentsRef <- liftIO $ newIORef $ HashMap.fromList $
                    map parseLine (L.init (TL.splitOn "\NUL" contents))
     trace "In cliLookupTree!" $ return ()
-    cliMakeTree oidRef contentsRef
+    return $ cliMakeTree oidRef contentsRef
   where
     parseLine line =
         let [prefix,path] = TL.splitOn "\t" line
@@ -277,6 +267,7 @@ doModifyTree :: Git.MonadGit m
              -> CmdLineRepository m (Maybe (TreeEntry m))
 doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
+    trace "In doModifyTree!" $ return ()
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
     -- Tree and descend into it.  Otherwise, if it exists we'll have @Just

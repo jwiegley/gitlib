@@ -353,21 +353,14 @@ instance ToJSON (GitHubTreeEntryProxy m) where
 ghMakeTree :: Git.MonadGit m
            => IORef (Maybe (TreeOid m))
            -> IORef (HashMap Text (TreeEntry m))
-           -> GitHubRepository m (Tree m)
+           -> Tree m
 ghMakeTree oid contents = do
-    let tr = def
-            { Git.modifyTree      = ghModifyTree tr
-            , Git.writeTree       = ghWriteTree tr
-            , Git.traverseEntries = ghTraverseEntries tr
-            , Git.getTreeData     = TreeData oid contents
-            }
-    return tr
+    Git.mkTree ghModifyTree ghWriteTree ghTraverseEntries $
+        TreeData oid contents
 
 ghNewTree :: Git.MonadGit m => GitHubRepository m (Tree m)
-ghNewTree = do
-    oid      <- liftIO $ newIORef Nothing
-    contents <- liftIO $ newIORef HashMap.empty
-    ghMakeTree oid contents
+ghNewTree = ghMakeTree <$> liftIO (newIORef Nothing)
+                       <*> liftIO (newIORef HashMap.empty)
 
 ghLookupTree :: Git.MonadGit m
              => TreeOid m -> GitHubRepository m (Tree m)
@@ -375,9 +368,8 @@ ghLookupTree oid = do
     treeProxy <- ghRestful "GET" ("git/trees/" <> Git.renderObjOid oid) ()
     oid'      <- Git.parseOid (fromJust (ghpTreeOid treeProxy))
     subtree'  <- subtree treeProxy
-    oid       <- liftIO $ newIORef (Just (Tagged oid'))
-    contents  <- liftIO $ newIORef subtree'
-    ghMakeTree oid contents
+    ghMakeTree <$> liftIO (newIORef (Just (Tagged oid')))
+               <*> liftIO (newIORef subtree')
   where
     subtree tp =
         HashMap.fromList
