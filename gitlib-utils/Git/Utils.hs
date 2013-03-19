@@ -212,9 +212,9 @@ genericPushRef ref remoteRefName = do
     fastForward <- case mrref of
         Just rref -> do
             mrsha <- referenceSha rref
-            case mrsha of
-                Nothing   -> return True
-                Just rsha -> return $ rsha `elem` commits1
+            return $ case mrsha of
+                Nothing   -> True
+                Just rsha -> rsha `elem` commits1
         Nothing -> return True
     if not fastForward
         then return False
@@ -234,9 +234,8 @@ genericPushRef ref remoteRefName = do
                     Just rh -> do
                         let sha = renderObjOid (commitRefOid rh)
                         if HashMap.member sha seen
-                            then do
-                                updateRef remoteRefName (RefObj cref)
-                                return True
+                            then do updateRef remoteRefName (RefObj cref)
+                                    return True
                             else return False
             _ -> return False
   where
