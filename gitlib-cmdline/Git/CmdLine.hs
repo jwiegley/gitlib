@@ -18,6 +18,7 @@ import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Data.Conduit
 import           Data.Default
@@ -581,21 +582,26 @@ instance Monad m => MonadThrow (CmdLineRepository m) where
 instance MonadTrans CmdLineRepository where
     lift = CmdLineRepository . ReaderT . const
 
+instance MonadTransControl CmdLineRepository where
+    newtype StT CmdLineRepository a =
+        StCmdLineRepository {unCmdLineRepository :: StT (ReaderT Repository) a}
+    liftWith = defaultLiftWith CmdLineRepository cmdLineRepositoryReaderT StCmdLineRepository
+    restoreT = defaultRestoreT CmdLineRepository unCmdLineRepository
+
 cliGet :: Monad m => CmdLineRepository m Repository
 cliGet = CmdLineRepository ask
 
 cliFactory :: Git.MonadGit m
            => Git.RepositoryFactory (CmdLineRepository m) m Repository
 cliFactory = Git.RepositoryFactory
-    { Git.openRepository  = openCmdLineRepository
-    , Git.runRepository   = runCmdLineRepository
-    , Git.closeRepository = closeCmdLineRepository
-    , Git.defaultOptions  = defaultCmdLineOptions
+    { Git.openRepository  = openCliRepository
+    , Git.runRepository   = runCliRepository
+    , Git.closeRepository = closeCliRepository
+    , Git.defaultOptions  = defaultCliOptions
     }
 
-openCmdLineRepository :: Git.MonadGit m
-                      => Git.RepositoryOptions -> m Repository
-openCmdLineRepository opts = do
+openCliRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
+openCliRepository opts = do
     let path = Git.repoPath opts
     exists <- liftIO $ F.isDirectory path
     case F.toText path of
@@ -608,16 +614,14 @@ openCmdLineRepository opts = do
                               <> ["init"]
             return Repository { repoOptions = opts }
 
-runCmdLineRepository :: Git.MonadGit m
-                     => Repository -> CmdLineRepository m a -> m a
-runCmdLineRepository repo action =
+runCliRepository :: Git.MonadGit m => Repository -> CmdLineRepository m a -> m a
+runCliRepository repo action =
     runReaderT (cmdLineRepositoryReaderT action) repo
 
-closeCmdLineRepository :: Git.MonadGit m
-                       => Repository -> m ()
-closeCmdLineRepository = const (return ())
+closeCliRepository :: Git.MonadGit m => Repository -> m ()
+closeCliRepository = const (return ())
 
-defaultCmdLineOptions :: Git.RepositoryOptions
-defaultCmdLineOptions = Git.RepositoryOptions "" False False
+defaultCliOptions :: Git.RepositoryOptions
+defaultCliOptions = Git.RepositoryOptions "" False False
 
--- CmdLine.hs
+-- Cli.hs

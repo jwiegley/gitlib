@@ -14,6 +14,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Control
+import Data.Default
 import Data.List (sort)
 import Data.Proxy
 import Data.Tagged
@@ -22,6 +23,7 @@ import Filesystem (removeTree, isDirectory)
 import Filesystem.Path.CurrentOS
 import Git
 import Git.Utils
+import qualified Git.CmdLine as Cli
 import Prelude hiding (FilePath, putStr)
 import Test.HUnit
 import Test.Hspec (Spec, Example, describe, it, hspec)
@@ -54,8 +56,8 @@ sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (Repository r, MonadIO r, MonadIO m, MonadBaseControl IO m,
-                  MonadBaseControl m r, Example (m ()))
+smokeTestSpec :: (Repository r, MonadGit r, MonadGit m, MonadBaseControl IO m,
+                  Example (m ()))
               => RepositoryFactory r m c -> Spec
 smokeTestSpec pr = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
@@ -272,13 +274,31 @@ smokeTestSpec pr = describe "Smoke tests" $ do
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 
+  -- it "pushRef test using a Git URI" $ do
+  --     ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+  --         mref <- lookupRef "refs/heads/master"
+  --         case mref of
+  --             Nothing  -> return Nothing
+  --             Just ref -> do
+  --                 control' $ \run -> withRepository pr "/tmp/gitlib/.git" $
+  --                     run $ pushRef ref (Just "file:///tmp/gitlib/.git")
+  --                         "refs/heads/master"
+  --     liftIO $ do
+  --         let name = refName <$> ref
+  --         Prelude.putStrLn $ "refTarget: " ++ show name
+  --         name @?= Just "refs/heads/master"
+
   it "pushRef test using a Git URI" $ do
-      ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+      repo <- Cli.openCliRepository
+                  (def { repoPath = "/Users/johnw/src/fpco/gitlib/.git" })
+      ref  <- Cli.runCliRepository repo $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
               Nothing  -> return Nothing
               Just ref -> do
-                  control' $ \run -> withRepository pr "/tmp/gitlib/.git" $
+                  repo2 <- Cli.openCliRepository
+                               (def { repoPath = "/tmp/gitlib/.git" })
+                  control' $ \run -> Cli.runCliRepository repo2 $
                       run $ pushRef ref (Just "file:///tmp/gitlib/.git")
                           "refs/heads/master"
       liftIO $ do

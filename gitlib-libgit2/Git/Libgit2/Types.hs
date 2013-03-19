@@ -6,6 +6,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 module Git.Libgit2.Types where
@@ -17,6 +18,7 @@ import           Control.Failure
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Data.Conduit
 import           Data.Monoid
@@ -56,6 +58,12 @@ instance Monad m => MonadThrow (LgRepository m) where
 
 instance MonadTrans LgRepository where
     lift = LgRepository . ReaderT . const
+
+instance MonadTransControl LgRepository where
+    newtype StT LgRepository a =
+        StLgRepository {unLgRepository :: StT (ReaderT Repository) a}
+    liftWith = defaultLiftWith LgRepository lgRepositoryReaderT StLgRepository
+    restoreT = defaultRestoreT LgRepository unLgRepository
 
 type Oid m       = Git.Oid (LgRepository m)
 

@@ -46,6 +46,7 @@ Library
         , failure              >= 0.2.0.1
         , hex                  >= 0.1.2
         , lens                 >= 3.7
+        , monad-control        >= 0.3.2
         , parallel-io          >= 0.3.2.1
         , pointless-fun        >= 1.1.0.1
         , stringable           >= 0.1.1
