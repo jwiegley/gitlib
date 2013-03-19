@@ -21,6 +21,7 @@ import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Data.Aeson hiding (Success)
 import           Data.Attempt
@@ -759,6 +760,22 @@ instance Monad m => MonadThrow (GitHubRepository m) where
 
 instance MonadTrans GitHubRepository where
     lift = GitHubRepository . ReaderT . const
+
+instance MonadTransControl GitHubRepository where
+    newtype StT GitHubRepository a = StGitHubRepository
+        { unGitHubRepository :: StT (ReaderT Repository) a
+        }
+    liftWith = defaultLiftWith GitHubRepository
+                   ghRepositoryReaderT StGitHubRepository
+    restoreT = defaultRestoreT GitHubRepository unGitHubRepository
+
+instance (MonadIO m, MonadBaseControl IO m)
+         => MonadBaseControl IO (GitHubRepository m) where
+    newtype StM (GitHubRepository m) a = StMT
+        { unStMT :: ComposeSt GitHubRepository m a
+        }
+    liftBaseWith = defaultLiftBaseWith StMT
+    restoreM     = defaultRestoreM unStMT
 
 ghGet :: Git.MonadGit m => GitHubRepository m Repository
 ghGet = GitHubRepository ask

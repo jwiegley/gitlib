@@ -36,6 +36,7 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
 import           Data.Tuple
+import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -93,9 +94,9 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupCommit = cliLookupCommit
     lookupTree   = cliLookupTree
     lookupBlob   = cliLookupBlob
-    lookupTag    = undefined -- cliLookupTag
-    lookupObject = undefined -- cliLookupObject
-    existsObject = undefined -- cliExistsObject
+    lookupTag    = error "Not defined CmdLineRepository.cliLookupTag"
+    lookupObject = error "Not defined CmdLineRepository.cliLookupObject"
+    existsObject = cliExistsObject
     newTree      = cliNewTree
     hashContents = cliHashContents
     createBlob   = cliCreateBlob
@@ -186,22 +187,34 @@ cliCreateBlob :: Git.MonadGit m
               => Git.BlobContents (CmdLineRepository m)
               -> CmdLineRepository m (BlobOid m)
 cliCreateBlob b = cliDoCreateBlob b True
+
+cliExistsObject :: Git.MonadGit m => Oid m -> CmdLineRepository m Bool
+cliExistsObject (Oid sha) = do
+    repo <- cliGet
+    shellyNoDir $ silently $ errExit False $ do
+        run_ "git" $ [ "--git-dir", repoPath repo
+                     , "cat-file", "-e", sha ]
+        ec <- lastExitCode
+        return (ec == 0)
 
 cliMakeTree :: Git.MonadGit m
             => IORef (Maybe (TreeOid m))
             -> IORef (HashMap Text (TreeEntry m))
             -> CmdLineRepository m (Tree m)
 cliMakeTree oid contents = do
-    let tr = def
-            { Git.modifyTree      = cliModifyTree tr
-            , Git.writeTree       = cliWriteTree tr
-            , Git.traverseEntries = cliTraverseEntries tr
-            , Git.getTreeData     = TreeData oid contents
-            }
-    return tr
+    trace "In cliMakeTree!" $ return ()
+    return (specialize def)
+  where
+    specialize tr = tr
+        { Git.modifyTree      = cliModifyTree (specialize tr)
+        , Git.writeTree       = cliWriteTree (specialize tr)
+        , Git.traverseEntries = cliTraverseEntries (specialize tr)
+        , Git.getTreeData     = TreeData oid contents
+        }
 
 cliNewTree :: Git.MonadGit m => CmdLineRepository m (Tree m)
 cliNewTree = do
+    trace "In cliNewTree!" $ return ()
     oid      <- liftIO $ newIORef Nothing
     contents <- liftIO $ newIORef HashMap.empty
     cliMakeTree oid contents
@@ -214,6 +227,7 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
     -- @git ls-tree@ also outputs a newline at the end.
     contentsRef <- liftIO $ newIORef $ HashMap.fromList $
                    map parseLine (L.init (TL.splitOn "\NUL" contents))
+    trace "In cliLookupTree!" $ return ()
     cliMakeTree oidRef contentsRef
   where
     parseLine line =
@@ -395,18 +409,22 @@ cliLookupCommit oid@(Tagged (Oid sha)) = do
         Right c -> return c
   where
     parseOutput = do
-        tree <- string "tree " *>
-                (Git.ByOid . Tagged . Oid . TL.pack
-                 <$> manyTill anyChar newline)
-        parents <- many (string "parent " *>
-                         (Git.ByOid . Tagged . Oid . TL.pack
-                          <$> manyTill anyChar newline))
-        def <$> pure (Just oid)
-            <*> parseSignature "author"
-            <*> parseSignature "committer"
-            <*> (T.pack <$> many anyChar)
-            <*> pure tree
-            <*> pure parents
+        treeOid <- string "tree " *>
+                   (Tagged . Oid . TL.pack <$> manyTill anyChar newline)
+        parentOids <- many (string "parent " *>
+                            (Tagged . Oid . TL.pack
+                             <$> manyTill anyChar newline))
+        author    <- parseSignature "author"
+        committer <- parseSignature "committer"
+        message   <- T.pack <$> many anyChar
+        return def
+            { Git.commitOid       = oid
+            , Git.commitAuthor    = author
+            , Git.commitCommitter = committer
+            , Git.commitLog       = message
+            , Git.commitTree      = Git.ByOid treeOid
+            , Git.commitParents   = map Git.ByOid parentOids
+            }
 
     parseSignature txt =
         Git.Signature
@@ -449,8 +467,7 @@ cliCreateCommit parents tree author committer message ref = do
             , Git.commitParents   = map Git.ByOid parentOids
             }
     when (isJust ref) $
-        void $ cliUpdateRef (fromJust ref) $
-            Git.RefObj (Git.ByOid (Git.commitOid commit))
+        void $ cliUpdateRef (fromJust ref) (Git.RefObj (Git.Known commit))
 
     return commit
 
@@ -583,10 +600,20 @@ instance MonadTrans CmdLineRepository where
     lift = CmdLineRepository . ReaderT . const
 
 instance MonadTransControl CmdLineRepository where
-    newtype StT CmdLineRepository a =
-        StCmdLineRepository {unCmdLineRepository :: StT (ReaderT Repository) a}
-    liftWith = defaultLiftWith CmdLineRepository cmdLineRepositoryReaderT StCmdLineRepository
+    newtype StT CmdLineRepository a = StCmdLineRepository
+        { unCmdLineRepository :: StT (ReaderT Repository) a
+        }
+    liftWith = defaultLiftWith CmdLineRepository
+                   cmdLineRepositoryReaderT StCmdLineRepository
     restoreT = defaultRestoreT CmdLineRepository unCmdLineRepository
+
+instance (MonadIO m, MonadBaseControl IO m)
+         => MonadBaseControl IO (CmdLineRepository m) where
+    newtype StM (CmdLineRepository m) a = StMT
+        { unStMT :: ComposeSt CmdLineRepository m a
+        }
+    liftBaseWith = defaultLiftBaseWith StMT
+    restoreM     = defaultRestoreM unStMT
 
 cliGet :: Monad m => CmdLineRepository m Repository
 cliGet = CmdLineRepository ask

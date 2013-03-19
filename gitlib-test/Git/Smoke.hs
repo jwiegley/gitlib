@@ -14,7 +14,6 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Control
-import Data.Default
 import Data.List (sort)
 import Data.Proxy
 import Data.Tagged
@@ -23,21 +22,18 @@ import Filesystem (removeTree, isDirectory)
 import Filesystem.Path.CurrentOS
 import Git
 import Git.Utils
-import qualified Git.CmdLine as Cli
 import Prelude hiding (FilePath, putStr)
 import Test.HUnit
 import Test.Hspec (Spec, Example, describe, it, hspec)
 import Test.Hspec.Expectations
 import Test.Hspec.HUnit ()
 
-withNewRepository :: (Repository r, MonadBaseControl IO m, MonadIO m,
-                      Example (m ()))
-                  => RepositoryFactory r m c
-                  -> FilePath -> r a -> m a
+withNewRepository :: (Repository (t IO), MonadGit (t IO), MonadTrans t)
+                  => RepositoryFactory (t IO) IO c
+                  -> FilePath -> t IO a -> IO a
 withNewRepository factory path action = do
-    liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
+    exists <- isDirectory path
+    when exists $ removeTree path
 
     -- we want exceptions to leave the repo behind
     a <- withRepository' factory (defaultOptions factory)
@@ -46,9 +42,8 @@ withNewRepository factory path action = do
         , repoAutoCreate = True
         } action
 
-    liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
+    exists <- isDirectory path
+    when exists $ removeTree path
 
     return a
 
@@ -56,10 +51,12 @@ sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (Repository r, MonadGit r,
-                  MonadGit m, MonadBaseControl IO m, Example (m ()),
-                  MonadGit m2, MonadBaseControl IO m2, Example (m2 ()))
-              => RepositoryFactory r m c -> RepositoryFactory r m2 c -> Spec
+smokeTestSpec :: (Repository (t IO), MonadGit (t IO), MonadTrans t,
+                  Repository (t2 (t IO)), MonadGit (t2 (t IO)), MonadTrans t2,
+                  MonadBaseControl IO (t IO))
+              => RepositoryFactory (t IO) IO c
+              -> RepositoryFactory (t2 (t IO)) (t IO) c
+              -> Spec
 smokeTestSpec pr pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
@@ -281,29 +278,24 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
           case mref of
               Nothing  -> return Nothing
               Just ref -> do
-                  withRepository pr2 "/tmp/gitlib/.git" $
-                      pushRef ref (Just "file:///tmp/gitlib/.git")
+                  withRepository pr2 "/tmp/gitlib.git" $
+                      pushRef ref (Just "file:///tmp/gitlib.git")
                           "refs/heads/master"
       let name = refName <$> ref
       Prelude.putStrLn $ "refTarget: " ++ show name
       name @?= Just "refs/heads/master"
 
-  -- it "pushRef test using a Git URI" $ do
-  --     repo <- Cli.openCliRepository
-  --                 (def { repoPath = "/Users/johnw/src/fpco/gitlib/.git" })
-  --     ref  <- Cli.runCliRepository repo $ do
-  --         mref <- lookupRef "refs/heads/master"
-  --         case mref of
-  --             Nothing  -> return Nothing
-  --             Just ref -> do
-  --                 repo2 <- Cli.openCliRepository
-  --                              (def { repoPath = "/tmp/gitlib/.git" })
-  --                 Cli.runCliRepository repo2 $
-  --                     pushRef ref (Just "file:///tmp/gitlib/.git")
-  --                         "refs/heads/master"
-  --     let name = refName <$> ref
-  --     Prelude.putStrLn $ "refTarget: " ++ show name
-  --     name @?= Just "refs/heads/master"
+  it "pushRef test using genericPushRef" $ do
+      ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+          mref <- lookupRef "refs/heads/master"
+          case mref of
+              Nothing  -> return Nothing
+              Just ref -> do
+                  withRepository pr2 "/tmp/gitlib.git" $
+                      pushRef ref Nothing "refs/heads/master"
+      let name = refName <$> ref
+      Prelude.putStrLn $ "refTarget: " ++ show name
+      name @?= Just "refs/heads/master"
 
   where
     control' f = liftWith f >>= restoreT . return

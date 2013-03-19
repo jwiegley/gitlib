@@ -60,10 +60,20 @@ instance MonadTrans LgRepository where
     lift = LgRepository . ReaderT . const
 
 instance MonadTransControl LgRepository where
-    newtype StT LgRepository a =
-        StLgRepository {unLgRepository :: StT (ReaderT Repository) a}
-    liftWith = defaultLiftWith LgRepository lgRepositoryReaderT StLgRepository
+    newtype StT LgRepository a = StLgRepository
+        { unLgRepository :: StT (ReaderT Repository) a
+        }
+    liftWith = defaultLiftWith LgRepository
+                   lgRepositoryReaderT StLgRepository
     restoreT = defaultRestoreT LgRepository unLgRepository
+
+instance (MonadIO m, MonadBaseControl IO m)
+         => MonadBaseControl IO (LgRepository m) where
+    newtype StM (LgRepository m) a = StMT
+        { unStMT :: ComposeSt LgRepository m a
+        }
+    liftBaseWith = defaultLiftBaseWith StMT
+    restoreM     = defaultRestoreM unStMT
 
 type Oid m       = Git.Oid (LgRepository m)
 
