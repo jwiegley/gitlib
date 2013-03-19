@@ -291,15 +291,15 @@ smokeTestSpec pr = describe "Smoke tests" $ do
   it "pushRef test using a Git URI" $ do
       repo <- Cli.openCliRepository
                   (def { repoPath = "/Users/johnw/src/fpco/gitlib/.git" })
-      ref  <- Cli.runCliRepository repo $ do
+      ref <- Cli.runCliRepository repo $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
               Nothing  -> return Nothing
               Just ref -> do
                   repo2 <- Cli.openCliRepository
                                (def { repoPath = "/tmp/gitlib/.git" })
-                  control' $ \run -> Cli.runCliRepository repo2 $
-                      run $ pushRef ref (Just "file:///tmp/gitlib/.git")
+                  Cli.runCliRepository repo2 $
+                      pushRef ref (Just "file:///tmp/gitlib/.git")
                           "refs/heads/master"
       liftIO $ do
           let name = refName <$> ref
