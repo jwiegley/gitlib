@@ -13,3 +13,4 @@
 ./vendor/stringable
 ./vendor/rest-client
 ./git-monitor
+./vendor/aws
