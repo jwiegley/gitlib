@@ -36,7 +36,6 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (UTCTime)
 import           Data.Time.Format (formatTime, parseTime)
 import           Data.Tuple
-import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -136,9 +135,7 @@ cliPushRefDirectly ::
     (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
      Git.Repository (t (CmdLineRepository m)), MonadTrans t)
     => Reference m -> Text -> Text
-    -> t (CmdLineRepository m)
-        (Maybe (Git.Reference (t (CmdLineRepository m))
-                (Git.Commit (t (CmdLineRepository m)))))
+    -> t (CmdLineRepository m) Bool
 cliPushRefDirectly ref remoteNameOrURI remoteRefName = do
     repo <- lift $ cliGet
     r <- shellyNoDir $ silently $ errExit False $ do
@@ -147,16 +144,12 @@ cliPushRefDirectly ref remoteNameOrURI remoteRefName = do
                      , TL.concat [ TL.fromStrict (Git.refName ref)
                                  , ":", TL.fromStrict remoteRefName ] ]
         lastExitCode
-    if r == 0
-        then Git.lookupRef (Git.refName ref)
-        else return Nothing
+    return (r == 0)
 
 cliPushRef :: (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
                Git.Repository (t (CmdLineRepository m)), MonadTrans t)
            => Reference m -> Maybe Text -> Text
-           -> t (CmdLineRepository m)
-               (Maybe (Git.Reference (t (CmdLineRepository m))
-                       (Git.Commit (t (CmdLineRepository m)))))
+           -> t (CmdLineRepository m) Bool
 cliPushRef ref remoteNameOrURI remoteRefName =
     case remoteNameOrURI of
         Nothing  -> Git.genericPushRef ref remoteRefName
@@ -217,7 +210,6 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
     -- @git ls-tree@ also outputs a newline at the end.
     contentsRef <- liftIO $ newIORef $ HashMap.fromList $
                    map parseLine (L.init (TL.splitOn "\NUL" contents))
-    trace "In cliLookupTree!" $ return ()
     return $ cliMakeTree oidRef contentsRef
   where
     parseLine line =
@@ -267,7 +259,6 @@ doModifyTree :: Git.MonadGit m
              -> CmdLineRepository m (Maybe (TreeEntry m))
 doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
-    trace "In doModifyTree!" $ return ()
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
     -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
@@ -408,13 +399,14 @@ cliLookupCommit oid@(Tagged (Oid sha)) = do
         author    <- parseSignature "author"
         committer <- parseSignature "committer"
         message   <- T.pack <$> many anyChar
-        return def
+        return Git.Commit
             { Git.commitOid       = oid
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
             , Git.commitLog       = message
             , Git.commitTree      = Git.ByOid treeOid
             , Git.commitParents   = map Git.ByOid parentOids
+            , Git.commitEncoding  = "utf-8"
             }
 
     parseSignature txt =
@@ -449,13 +441,14 @@ cliCreateCommit parents tree author committer message ref = do
                       ]
                 setStdin $ TL.fromStrict message
 
-    let commit = def
+    let commit = Git.Commit
             { Git.commitOid       = Tagged (Oid (TL.init oid))
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
             , Git.commitLog       = message
             , Git.commitTree      = Git.ByOid treeOid
             , Git.commitParents   = map Git.ByOid parentOids
+            , Git.commitEncoding  = "utf-8"
             }
     when (isJust ref) $
         void $ cliUpdateRef (fromJust ref) (Git.RefObj (Git.Known commit))

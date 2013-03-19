@@ -273,29 +273,25 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
                               , "Files/Three", "More/Four" ]
 
   it "pushRef test using a Git URI" $ do
-      ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+      success <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
-              Nothing  -> return Nothing
+              Nothing  -> return False
               Just ref -> do
                   withRepository pr2 "/tmp/gitlib.git" $
                       pushRef ref (Just "file:///tmp/gitlib.git")
                           "refs/heads/master"
-      let name = refName <$> ref
-      Prelude.putStrLn $ "refTarget: " ++ show name
-      name @?= Just "refs/heads/master"
+      success @?= True
 
   it "pushRef test using genericPushRef" $ do
-      ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+      success <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
-              Nothing  -> return Nothing
+              Nothing  -> return False
               Just ref -> do
                   withRepository pr2 "/tmp/gitlib.git" $
                       pushRef ref Nothing "refs/heads/master"
-      let name = refName <$> ref
-      Prelude.putStrLn $ "refTarget: " ++ show name
-      name @?= Just "refs/heads/master"
+      success @?= True
 
   where
     control' f = liftWith f >>= restoreT . return

@@ -18,6 +18,8 @@ import           Data.Conduit
 import qualified Data.Conduit.List as CList
 import           Data.Default
 import           Data.Function
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import           Data.List
 import           Data.Monoid
 import           Data.Proxy
@@ -25,8 +27,7 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import           Data.Traversable hiding (mapM, sequence)
-import           Debug.Trace (trace)
+import           Data.Traversable hiding (mapM, forM, sequence)
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null)
 import           Git
@@ -95,7 +96,6 @@ copyBlob blobr = do
     let oid = unTagged (blobRefOid blobr)
     oid2    <- parseOid (renderOid oid)
     exists2 <- existsObject oid2
-    trace ("copyBlob " ++ show oid2 ++ " exists " ++ show exists2) $ return ()
     if exists2
         then return (Tagged oid2)
         else do
@@ -105,87 +105,87 @@ copyBlob blobr = do
 
 copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               => TreeEntry m -> t m (TreeEntry (t m))
-copyTreeEntry (BlobEntry oid kind) = do
-    trace ("copyBlobEntry " ++ T.unpack (renderObjOid oid)) $ return ()
-    blob2oid <- copyBlob (ByOid oid)
-    return $ BlobEntry blob2oid kind
-
--- copyTreeEntry (TreeEntry tr) = do
---     tree2 <- copyTree tr
---     oid2  <- writeTree tree2
---     return $ TreeEntry (ByOid oid2)
-
-copyTreeEntry (CommitEntry oid) = do
-    trace ("copyCommitEntry " ++ T.unpack (renderObjOid oid)) $ return ()
-    oid2 <- parseOid (renderObjOid oid)
-    return $ CommitEntry (Tagged oid2)
+copyTreeEntry (BlobEntry oid kind) =
+    BlobEntry <$> copyBlob (ByOid oid) <*> pure kind
+copyTreeEntry (CommitEntry oid) =
+    return . CommitEntry . Tagged =<< parseOid (renderObjOid oid)
 
 copyTree :: (Repository m, Repository (t m), MonadTrans t)
-         => TreeRef m -> t m (Tree (t m))
+         => TreeRef m -> t m (TreeRef (t m))
 copyTree tr = do
     oid     <- unTagged <$> (lift $ treeRefOid tr)
     oid2    <- parseOid (renderOid oid)
     exists2 <- existsObject oid2
-    trace ("copyTree " ++ T.unpack (renderOid oid2) ++ " exists " ++ show exists2) $ return ()
     if exists2
-        then lookupTree (Tagged oid2)
+        then return (ByOid (Tagged oid2))
         else do
-            trace "copyTree.1.." $ return ()
             tree    <- lift $ resolveTreeRef tr
-            trace "copyTree.2.." $ return ()
             entries <- lift $ traverseEntries tree (curry return)
-            trace "copyTree.3.." $ return ()
             tree2   <- newTree
-            trace "copyTree.4.." $ return ()
             forM_ entries $ \(fp,ent) -> do
-                trace ("copyTreeEntry " ++ show fp) $ return ()
                 case ent of
                     TreeEntry {} -> return ()
-                    _ -> do
-                        trace "copyTree.5.." $ return ()
-                        ent2 <- copyTreeEntry ent
-                        trace "copyTree.6.." $ return ()
-                        putTreeEntry tree2 fp ent2
-            trace "copyTree.7.." $ return ()
-            writeTree tree2
-            trace "copyTree.8.." $ return ()
-            return tree2
+                    _ -> putTreeEntry tree2 fp =<< copyTreeEntry ent
+            tree <- writeTree tree2
+            return $ ByOid $! tree
 
 copyCommit :: (Repository m, Repository (t m), MonadTrans t)
            => CommitRef m
            -> Maybe Text
-           -> t m (Commit (t m))
-copyCommit cr mref = do
+           -> HashMap Text (CommitRef (t m))
+           -> t m (CommitRef (t m), HashMap Text (CommitRef (t m)))
+copyCommit cr mref seen = do
     let oid = unTagged (commitRefOid cr)
-    commit   <- lift $ resolveCommitRef cr
-    oid2     <- parseOid (renderOid oid)
-    exists2  <- existsObject oid2
-    trace ("copyCommit " ++ T.unpack (renderOid oid2) ++ " exists " ++ show exists2) $ return ()
-    if exists2
-        then lookupCommit (Tagged oid2)
-        else do
-            tree2    <- copyTree (commitTree commit)
-            parents2 <- mapM (flip copyCommit Nothing) (commitParents commit)
-            createCommit
-                (map commitRef parents2)
-                (treeRef tree2)
-                (commitAuthor commit)
-                (commitCommitter commit)
-                (commitLog commit)
-                mref
+        sha = renderOid oid
+    case HashMap.lookup sha seen of
+        Just c -> return (c,seen)
+        Nothing -> do
+            commit   <- lift $ resolveCommitRef cr
+            oid2     <- parseOid sha
+            exists2  <- existsObject oid2
+            if exists2
+                then return (ByOid (Tagged oid2), seen)
+                else do
+                    let parents = commitParents commit
+                    (parentRefs,seen') <-
+                        foldM copyParent ([],seen) parents
+
+                    tr <- copyTree (commitTree commit)
+                    commit <- createCommit parentRefs tr
+                        (commitAuthor commit)
+                        (commitCommitter commit)
+                        (commitLog commit)
+                        mref
+                    let cref = commitRef $! commit
+                        x    = HashMap.insert sha cref seen
+                    return $ x `seq` cref `seq` (cref, x)
+  where
+    copyParent (prefs,seen') cref = do
+        (cref2,seen'') <- copyCommit cref Nothing seen'
+        let x = cref2 `seq` (cref2:prefs)
+        return $ x `seq` seen'' `seq` (x,seen'')
 
 genericPushRef :: (Repository m, Repository (t m), MonadTrans t)
                => Reference m (Commit m)
                -> Text
-               -> t m (Maybe (Reference (t m) (Commit (t m))))
-genericPushRef ref remoteRefName = do
-    let name = refName ref
-    mcr <- lift $ resolveRef name
-    case mcr of
-        Nothing -> return Nothing
-        Just cr -> do
-            commit2 <- copyCommit cr (Just remoteRefName)
-            return . Just . Reference name . commitRefTarget $ commit2
+               -> t m Bool
+genericPushRef ref remoteRefName =
+    case refTarget ref of
+        RefObj cr -> do
+            remoteHead  <- resolveRef remoteRefName
+            (cref,seen) <- copyCommit cr (Just remoteRefName) HashMap.empty
+            case remoteHead of
+                Nothing -> do
+                    createRef remoteRefName (RefObj cref)
+                    return True
+                Just rh -> do
+                    let sha = renderObjOid (commitRefOid rh)
+                    if HashMap.member sha seen
+                        then do
+                            updateRef remoteRefName (RefObj cref)
+                            return True
+                        else return False
+        _ -> return False
 
 commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =

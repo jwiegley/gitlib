@@ -275,8 +275,8 @@ lgLookupTree len oid = do
                                     "Failed to create tree builder")
                       else do
                       upds <- liftIO $ newIORef HashMap.empty
-                      info <- liftIO $ newIORef (Base (Just (Tagged (Oid coid)))
-                                                     (Just obj))
+                      info <- liftIO $ newIORef
+                              (Base (Just (Tagged (Oid coid))) (Just obj))
                       return (info,upds,fptr)
     return $ lgMakeTree info upds fptr
 
@@ -506,14 +506,15 @@ lgLookupCommit len oid =
                                (c'git_commit_parent_oid c)) [0..pn])
         poids' <- mapM (\x -> Git.ByOid . Tagged . Oid <$> coidPtrToOid x) poids
 
-        return def
+        return Git.Commit
             {
             -- Git.commitInfo      = Base (Just (Tagged (Oid coid))) (Just obj)
             -- ,
-              Git.commitAuthor    = auth
-            , Git.commitCommitter = comm
+              Git.commitOid       = oid
             , Git.commitTree      = Git.ByOid (Tagged (Oid toid'))
             , Git.commitParents   = poids'
+            , Git.commitAuthor    = auth
+            , Git.commitCommitter = comm
             , Git.commitLog       = U.toUnicode conv msg
             , Git.commitEncoding  = "utf-8"
             }
@@ -544,15 +545,12 @@ lgLookupObject str
 
     go coid _ y = do
         typ <- liftIO $ c'git_object_type y
-        if typ == c'GIT_OBJ_BLOB
-            then ret Git.BlobObj (Oid coid)
-            else if typ == c'GIT_OBJ_TREE
-                 then ret Git.TreeObj (Oid coid)
-                 else if typ == c'GIT_OBJ_COMMIT
-                      then ret Git.CommitObj (Oid coid)
-                      else if typ == c'GIT_OBJ_TAG
-                           then ret Git.TagObj (Oid coid)
-                           else failure (Git.ObjectLookupFailed str len)
+        case () of
+            () | typ == c'GIT_OBJ_BLOB   -> ret Git.BlobObj (Oid coid)
+               | typ == c'GIT_OBJ_TREE   -> ret Git.TreeObj (Oid coid)
+               | typ == c'GIT_OBJ_COMMIT -> ret Git.CommitObj (Oid coid)
+               | typ == c'GIT_OBJ_TAG    -> ret Git.TagObj (Oid coid)
+               | otherwise -> failure (Git.ObjectLookupFailed str len)
 
     ret f = return . f . Git.ByOid . Tagged
 
@@ -588,7 +586,7 @@ lgCreateCommit parents tree author committer logText ref = do
     repo <- lgGet
     toid <- getOid . unTagged <$> Git.treeRefOid tree
     let pptrs = map Git.commitRefOid parents
-    coid  <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
+    coid <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
         coid <- mallocForeignPtr
         conv <- U.open "utf-8" (Just True)
         withForeignPtr coid $ \coid' ->
@@ -607,14 +605,15 @@ lgCreateCommit parents tree author committer logText ref = do
                 when (r < 0) $ throwIO Git.CommitCreateFailed
                 return coid
 
-    return def
+    return Git.Commit
         {
         --   Git.commitInfo      = Base (Just (Tagged (Oid coid))) Nothing
         -- ,
-          Git.commitAuthor    = author
-        , Git.commitCommitter = committer
+          Git.commitOid       = Tagged (Oid coid)
         , Git.commitTree      = tree
         , Git.commitParents   = parents
+        , Git.commitAuthor    = author
+        , Git.commitCommitter = committer
         , Git.commitLog       = logText
         , Git.commitEncoding  = "utf-8"
         }

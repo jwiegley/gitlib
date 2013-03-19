@@ -574,7 +574,7 @@ instance Git.MonadGit m => ToJSON (GitHubCommitProxy m) where
                                        isJust (ghpCommitCommitter c) ]
 
 proxyToCommit :: Git.MonadGit m => GitHubCommitProxy m -> Commit m
-proxyToCommit cp = def
+proxyToCommit cp = Git.Commit
     { Git.commitOid       = Tagged (textToOid (ghpCommitOid cp))
     , Git.commitAuthor    = ghpCommitAuthor cp
     , Git.commitCommitter = case ghpCommitCommitter cp of
@@ -584,6 +584,7 @@ proxyToCommit cp = def
     , Git.commitTree      = Git.ByOid (Tagged (runGhpOid (ghpCommitTree cp)))
     , Git.commitParents   = map (Git.ByOid . Tagged . runGhpOid)
                               (ghpCommitParents cp)
+    , Git.commitEncoding  = "utf-8"
     }
 
 ghLookupCommit :: Git.MonadGit m => CommitOid m -> GitHubRepository m (Commit m)

@@ -33,7 +33,7 @@ import           Prelude hiding (FilePath)
 
 {- $repositories -}
 data RepositoryFacts = RepositoryFacts
-    { hasSymbolicReferences :: Bool
+    { hasSymbolicReferences :: !Bool
     } deriving Show
 
 type MonadGit m = (Failure Git.GitException m, MonadIO m, Applicative m)
@@ -86,7 +86,7 @@ class (Applicative m, Monad m, Failure GitException m,
             => Reference m (Commit m)
             -> Maybe Text
             -> Text
-            -> t m (Maybe (Reference (t m) (Commit (t m))))
+            -> t m Bool
 
     -- Lookup
     lookupCommit :: CommitOid m -> m (Commit m)
@@ -154,28 +154,28 @@ type CommitOid m = Tagged (Commit m) (Oid m)
 type TagOid m    = Tagged (Tag m) (Oid m)
 
 {- $references -}
-data RefTarget m a = RefObj (ObjRef m a) | RefSymbolic Text
+data RefTarget m a = RefObj !(ObjRef m a) | RefSymbolic !Text
 
 data Reference m a = Reference
-    { refName   :: Text
-    , refTarget :: RefTarget m a }
+    { refName   :: !Text
+    , refTarget :: !(RefTarget m a) }
 
 {- $objects -}
-data ObjRef m a = ByOid (Tagged a (Oid m)) | Known a
+data ObjRef m a = ByOid !(Tagged a (Oid m)) | Known !a
 
 type BlobRef m   = ObjRef m (Blob m)
 type TreeRef m   = ObjRef m (Tree m)
 type CommitRef m = ObjRef m (Commit m)
 type TagRef m    = ObjRef m (Tag m)
 
-data Object m = BlobObj   (BlobRef m)
-              | TreeObj   (TreeRef m)
-              | CommitObj (CommitRef m)
-              | TagObj    (TagRef m)
+data Object m = BlobObj   !(BlobRef m)
+              | TreeObj   !(TreeRef m)
+              | CommitObj !(CommitRef m)
+              | TagObj    !(TagRef m)
 
 {- $blobs -}
-data Blob m = Blob { blobOid      :: BlobOid m
-                   , blobContents :: BlobContents m }
+data Blob m = Blob { blobOid      :: !(BlobOid m)
+                   , blobContents :: !(BlobContents m) }
 
 blobRefOid :: Repository m => BlobRef m -> BlobOid m
 blobRefOid (ByOid oid) = oid
@@ -187,9 +187,9 @@ resolveBlobRef (Known obj) = return obj
 
 type ByteSource m = Producer m ByteString
 
-data BlobContents m = BlobString ByteString
-                    | BlobStream (ByteSource m)
-                    | BlobSizedStream (ByteSource m) Int
+data BlobContents m = BlobString !ByteString
+                    | BlobStream !(ByteSource m)
+                    | BlobSizedStream !(ByteSource m) !Int
 
 data BlobKind = PlainBlob | ExecutableBlob | SymlinkBlob | UnknownBlob
               deriving (Show, Eq, Enum)
@@ -199,10 +199,10 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
-data TreeEntry m = BlobEntry   { blobEntryOid  :: BlobOid m
-                               , blobEntryKind :: BlobKind }
-                 | TreeEntry   { treeEntryRef :: TreeRef m }
-                 | CommitEntry { commitEntryRef :: CommitOid m }
+data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
+                               , blobEntryKind  :: !BlobKind }
+                 | TreeEntry   { treeEntryRef   :: !(TreeRef m) }
+                 | CommitEntry { commitEntryRef :: !(CommitOid m) }
 
 blobEntry :: Repository m => BlobOid m -> BlobKind -> TreeEntry m
 blobEntry = BlobEntry
@@ -234,7 +234,7 @@ data Tree m = Tree
     , writeTree        :: m (TreeOid m)
     , traverseEntries  :: forall a. (FilePath -> TreeEntry m -> m a) -> m [a]
     , traverseEntries_ :: forall a. (FilePath -> TreeEntry m -> m a) -> m ()
-    , getTreeData      :: TreeData m
+    , getTreeData      :: !(TreeData m)
     }
 
 mkTree :: Repository m
@@ -247,10 +247,9 @@ mkTree :: Repository m
        -> (forall a. Tree m -> (FilePath -> TreeEntry m -> m a) -> m [a])
        -> TreeData m
        -> Tree m
-mkTree modifyTree' writeTree' traverseEntries' treeData =
-    let tr = specialize tr in tr
+mkTree modifyTree' writeTree' traverseEntries' treeData = tr
   where
-    specialize tr = tr
+    tr = Tree
         { modifyTree       = modifyTree' tr
         , lookupEntry      = \path -> modifyTree' tr path False return
         , putTreeEntry     = \path ent ->
@@ -283,9 +282,9 @@ resolveTreeRef (Known obj) = return obj
 
 {- $commits -}
 data Signature = Signature
-    { signatureName  :: Text
-    , signatureEmail :: Text
-    , signatureWhen  :: UTCTime
+    { signatureName  :: !Text
+    , signatureEmail :: !Text
+    , signatureWhen  :: !UTCTime
     } deriving (Show, Eq)
 
 instance Default Signature where
@@ -298,31 +297,14 @@ instance Default Signature where
         }
 
 data Commit m = Commit
-    { commitOid       :: CommitOid m
-    , commitParents   :: [CommitRef m]
-    , commitTree      :: TreeRef m
-    , commitTree'     :: m (Tree m)
-    , commitAuthor    :: Signature
-    , commitCommitter :: Signature
-    , commitLog       :: Text
-    , commitEncoding  :: Text
+    { commitOid       :: !(CommitOid m)
+    , commitParents   :: ![CommitRef m]
+    , commitTree      :: !(TreeRef m)
+    , commitAuthor    :: !Signature
+    , commitCommitter :: !Signature
+    , commitLog       :: !Text
+    , commitEncoding  :: !Text
     }
-
-instance Repository m => Default (Commit m) where
-    def = let c = mkCommit c in c
-      where
-        mkCommit c = Commit
-            { commitOid       = error "Not defined: Commit.commitOid"
-            , commitParents   = error "Not defined: Commit.commitParents"
-            , commitTree      = error "Not defined: Commit.commitTree"
-            , commitAuthor    = error "Not defined: Commit.commitAuthor"
-            , commitCommitter = error "Not defined: Commit.commitCommitter"
-            , commitLog       = error "Not defined: Commit.commitLog"
-            , commitEncoding  = error "Not defined: Commit.commitEncoding"
-            , commitTree'     = case commitTree c of
-                ByOid oid -> lookupTree oid
-                Known obj -> return obj
-            }
 
 commitRef :: Commit m -> CommitRef m
 commitRef = Known
@@ -340,12 +322,12 @@ resolveCommitRef (Known obj) = return obj
 
 {- $tags -}
 
-data Tag m = Tag { tagCommit :: CommitRef m }
+data Tag m = Tag { tagCommit :: !(CommitRef m) }
 
 data RepositoryOptions = RepositoryOptions
-    { repoPath       :: FilePath
-    , repoIsBare     :: Bool
-    , repoAutoCreate :: Bool
+    { repoPath       :: !FilePath
+    , repoIsBare     :: !Bool
+    , repoAutoCreate :: !Bool
     }
 
 instance Default RepositoryOptions where
@@ -355,7 +337,7 @@ data RepositoryFactory r m c = RepositoryFactory
     { openRepository  :: RepositoryOptions -> m c
     , runRepository   :: forall a. c -> r a -> m a
     , closeRepository :: c -> m ()
-    , defaultOptions  :: RepositoryOptions
+    , defaultOptions  :: !RepositoryOptions
     }
 
 withRepository' :: (Repository (t m), MonadTrans t,
