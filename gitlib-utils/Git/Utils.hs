@@ -213,29 +213,32 @@ genericPushRef ref remoteRefName = do
         Just rref -> do
             mrsha <- referenceSha rref
             case mrsha of
-                Nothing -> return True
+                Nothing   -> return True
                 Just rsha -> return $ rsha `elem` commits1
         Nothing -> return True
-    commits2 <- case mrref of
-        Nothing   -> return HashMap.empty
-        Just rref -> HashMap.fromList <$>
-                     traverseCommits crefToPair rref
-    case refTarget ref of
-        RefObj cr -> do
-            remoteHead  <- resolveRef remoteRefName
-            (cref,seen) <- copyCommitRec' cr Nothing commits2
-            case remoteHead of
-                Nothing -> do
-                    createRef remoteRefName (RefObj cref)
-                    return True
-                Just rh -> do
-                    let sha = renderObjOid (commitRefOid rh)
-                    if HashMap.member sha seen
-                        then do
-                            updateRef remoteRefName (RefObj cref)
-                            return True
-                        else return False
-        _ -> return False
+    if not fastForward
+        then return False
+        else do
+        commits2 <- case mrref of
+            Nothing   -> return HashMap.empty
+            Just rref -> HashMap.fromList <$>
+                         traverseCommits crefToPair rref
+        case refTarget ref of
+            RefObj cr -> do
+                remoteHead  <- resolveRef remoteRefName
+                (cref,seen) <- copyCommitRec' cr Nothing commits2
+                case remoteHead of
+                    Nothing -> do
+                        createRef remoteRefName (RefObj cref)
+                        return True
+                    Just rh -> do
+                        let sha = renderObjOid (commitRefOid rh)
+                        if HashMap.member sha seen
+                            then do
+                                updateRef remoteRefName (RefObj cref)
+                                return True
+                            else return False
+            _ -> return False
   where
     referenceSha ref = do
         r <- referenceToRef Nothing (Just ref)
