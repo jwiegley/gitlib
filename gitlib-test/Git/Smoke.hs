@@ -56,10 +56,11 @@ sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (Repository r, MonadGit r, MonadGit m, MonadBaseControl IO m,
-                  Example (m ()))
-              => RepositoryFactory r m c -> Spec
-smokeTestSpec pr = describe "Smoke tests" $ do
+smokeTestSpec :: (Repository r, MonadGit r,
+                  MonadGit m, MonadBaseControl IO m, Example (m ()),
+                  MonadGit m2, MonadBaseControl IO m2, Example (m2 ()))
+              => RepositoryFactory r m c -> RepositoryFactory r m2 c -> Spec
+smokeTestSpec pr pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
@@ -274,37 +275,35 @@ smokeTestSpec pr = describe "Smoke tests" $ do
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 
-  -- it "pushRef test using a Git URI" $ do
-  --     ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
-  --         mref <- lookupRef "refs/heads/master"
-  --         case mref of
-  --             Nothing  -> return Nothing
-  --             Just ref -> do
-  --                 control' $ \run -> withRepository pr "/tmp/gitlib/.git" $
-  --                     run $ pushRef ref (Just "file:///tmp/gitlib/.git")
-  --                         "refs/heads/master"
-  --     liftIO $ do
-  --         let name = refName <$> ref
-  --         Prelude.putStrLn $ "refTarget: " ++ show name
-  --         name @?= Just "refs/heads/master"
-
   it "pushRef test using a Git URI" $ do
-      repo <- Cli.openCliRepository
-                  (def { repoPath = "/Users/johnw/src/fpco/gitlib/.git" })
-      ref <- Cli.runCliRepository repo $ do
+      ref <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
           mref <- lookupRef "refs/heads/master"
           case mref of
               Nothing  -> return Nothing
               Just ref -> do
-                  repo2 <- Cli.openCliRepository
-                               (def { repoPath = "/tmp/gitlib/.git" })
-                  Cli.runCliRepository repo2 $
+                  withRepository pr2 "/tmp/gitlib/.git" $
                       pushRef ref (Just "file:///tmp/gitlib/.git")
                           "refs/heads/master"
-      liftIO $ do
-          let name = refName <$> ref
-          Prelude.putStrLn $ "refTarget: " ++ show name
-          name @?= Just "refs/heads/master"
+      let name = refName <$> ref
+      Prelude.putStrLn $ "refTarget: " ++ show name
+      name @?= Just "refs/heads/master"
+
+  -- it "pushRef test using a Git URI" $ do
+  --     repo <- Cli.openCliRepository
+  --                 (def { repoPath = "/Users/johnw/src/fpco/gitlib/.git" })
+  --     ref  <- Cli.runCliRepository repo $ do
+  --         mref <- lookupRef "refs/heads/master"
+  --         case mref of
+  --             Nothing  -> return Nothing
+  --             Just ref -> do
+  --                 repo2 <- Cli.openCliRepository
+  --                              (def { repoPath = "/tmp/gitlib/.git" })
+  --                 Cli.runCliRepository repo2 $
+  --                     pushRef ref (Just "file:///tmp/gitlib/.git")
+  --                         "refs/heads/master"
+  --     let name = refName <$> ref
+  --     Prelude.putStrLn $ "refTarget: " ++ show name
+  --     name @?= Just "refs/heads/master"
 
   where
     control' f = liftWith f >>= restoreT . return

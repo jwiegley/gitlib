@@ -348,16 +348,24 @@ data RepositoryFactory r m c = RepositoryFactory
     , defaultOptions  :: RepositoryOptions
     }
 
-withRepository' :: (Repository r, MonadBaseControl IO m, MonadIO m)
-                => RepositoryFactory r m c -> RepositoryOptions -> r a -> m a
+withRepository' :: (Repository (t m), MonadTrans t,
+                    MonadBaseControl IO m, MonadIO m)
+                => RepositoryFactory (t m) m c
+                -> RepositoryOptions
+                -> t m a
+                -> m a
 withRepository' factory opts action =
     Exc.bracket
         (openRepository factory opts)
         (closeRepository factory)
         (flip (runRepository factory) action)
 
-withRepository :: (Repository r, MonadBaseControl IO m, MonadIO m)
-               => RepositoryFactory r m c -> FilePath -> r a -> m a
+withRepository :: (Repository (t m), MonadTrans t,
+                   MonadBaseControl IO m, MonadIO m)
+               => RepositoryFactory (t m) m c
+               -> FilePath
+               -> t m a
+               -> m a
 withRepository factory path action =
     withRepository' factory
         ((defaultOptions factory) { repoPath = path }) action
