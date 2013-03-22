@@ -23,10 +23,6 @@ type LgRepoFactoryIO =
     Git.RepositoryFactory (Lg.LgRepository IO) IO Lg.Repository
 
 main :: IO ()
-main = do
-    summary <- hspecWith (defaultConfig { configVerbose = True })
-                         (Git.smokeTestSpec (Lg.lgFactory :: LgRepoFactoryIO))
-    when (summaryFailures summary > 0) $ exitFailure
-    return ()
+main = hspec $ Git.smokeTestSpec Lg.lgFactory Lg.lgFactory
 
 -- Smoke.hs ends here

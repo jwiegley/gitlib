@@ -103,8 +103,10 @@ instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
     lookupObject     = error "Not defined: GitHubRepository.lookupObject"
     existsObject     = error "Not defined: GitHubRepository.existsObject"
     traverseCommits  = error "Not defined: GitHubRepository.traverseCommits"
+    missingObjects   = error "Not defined: GitHubRepository.missingObjects"
     newTree          = ghNewTree
-    hashContents     = error "Not defined: GitHubRepository.hashContents" -- jww (2013-03-14): do it locally
+                       -- jww (2013-03-14): do the hashing locally
+    hashContents     = error "Not defined: GitHubRepository.hashContents"
     createBlob       = ghCreateBlob
     createCommit     = ghCreateCommit
     createTag        = error "Not defined: GitHubRepository.createTag"

@@ -1,3 +1,5 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-wrong-do-bind #-}
@@ -25,10 +27,8 @@ import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
-type LgRepoFactoryIO =
-    Git.RepositoryFactory (Lg.LgRepository IO) IO Lg.Repository
-
-s3Factory :: LgRepoFactoryIO
+s3Factory :: Git.MonadGit m
+          => Git.RepositoryFactory (Lg.LgRepository m) m Lg.Repository
 s3Factory = Lg.lgFactory
     { Git.runRepository = \ctxt -> Lg.runLgRepository ctxt . (s3back >>) }
   where
@@ -51,10 +51,6 @@ s3Factory = Lg.lgFactory
             Error
 
 main :: IO ()
-main = do
-    summary <- hspecWith (defaultConfig { configVerbose = True })
-                        (Git.smokeTestSpec s3Factory)
-    when (summaryFailures summary > 0) $ exitFailure
-    return ()
+main = hspec $ Git.smokeTestSpec s3Factory s3Factory
 
 -- Smoke.hs ends here

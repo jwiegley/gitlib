@@ -89,7 +89,7 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     deleteRef       = lgDeleteRef
     resolveRef      = lgResolveRef
     allRefNames     = lgAllRefNames
-    pushRef         = undefined -- lgPushRef
+    pushRef         = \ref _ rrefname -> Git.genericPushRef ref rrefname
     lookupCommit    = lgLookupCommit 40
     lookupTree      = lgLookupTree 40
     lookupBlob      = lgLookupBlob
@@ -97,6 +97,7 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     lookupObject    = lgLookupObject
     existsObject    = lgExistsObject
     traverseCommits = lgTraverseCommits
+    missingObjects  = lgMissingObjects
     newTree         = lgNewTree
     hashContents    = lgHashContents
     createBlob      = lgCreateBlob
@@ -576,6 +577,30 @@ lgExistsObject oid = do
                     return (Just (r == 0))
     maybe (failure Git.RepositoryInvalid) return result
 
+lgRevWalker :: Reference m -> Maybe (CommitOid m) -> Ptr C'git_revwalk
+            -> IO [CommitRef m]
+lgRevWalker ref moid walker = do
+    withCStringable (Git.refName ref) $ \rname -> do
+        r2 <- c'git_revwalk_push_ref walker rname
+        when (r2 < 0) $
+            failure (Git.BackendError "Could not push ref on revwalker")
+
+    case moid of
+        Nothing -> return ()
+        Just oid -> do
+            withForeignPtr (getOid (unTagged oid)) $ \coid -> do
+                r2 <- c'git_revwalk_hide walker coid
+                when (r2 < 0) $
+                    failure (Git.BackendError
+                             "Could not hide commit on revwalker")
+
+    alloca $ \coidPtr -> do
+        c'git_revwalk_sorting walker
+            (fromIntegral ((1 :: Int) .|. (4 :: Int)))
+        whileM ((==) <$> pure 0
+                     <*> c'git_revwalk_next coidPtr walker)
+            (Git.ByOid . Tagged . Oid <$> coidPtrToOid coidPtr)
+
 lgTraverseCommits :: Git.MonadGit m
                   => (CommitRef m -> LgRepository m a)
                   -> Reference m
@@ -590,20 +615,36 @@ lgTraverseCommits f ref = do
                         failure (Git.BackendError "Could not create revwalker")
                     peek pptr)
                 c'git_revwalk_free
-                doWalk
+                (lgRevWalker ref Nothing)
     mapM f refs
+
+lgMissingObjects :: Git.MonadGit m
+                 => Maybe (Reference m) -> Reference m
+                 -> LgRepository m [Oid m]
+lgMissingObjects mhave need = do
+    repo <- lgGet
+    mref <- Git.referenceToRef Nothing mhave
+    refs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
+        alloca $ \pptr ->
+            Exc.bracket
+                (do r <- c'git_revwalk_new pptr repoPtr
+                    when (r < 0) $
+                        failure (Git.BackendError "Could not create revwalker")
+                    peek pptr)
+                c'git_revwalk_free
+                (lgRevWalker need (Git.commitRefOid <$> mref))
+    concat <$> mapM getCommitContents refs
   where
-    doWalk walker = do
-        withCStringable (Git.refName ref) $ \rname -> do
-            r2 <- c'git_revwalk_push_ref walker rname
-            when (r2 < 0) $
-                failure (Git.BackendError "Could not push ref on revwalker")
-        alloca $ \coidPtr -> do
-            c'git_revwalk_sorting walker
-                (fromIntegral ((1 :: Int) .|. (4 :: Int)))
-            whileM ((==) <$> pure 0
-                         <*> c'git_revwalk_next coidPtr walker)
-                (Git.ByOid . Tagged . Oid <$> coidPtrToOid coidPtr)
+    getCommitContents cref = do
+        c <- lgLookupCommit 40 (Git.commitRefOid cref)
+        tr <- Git.resolveTreeRef (Git.commitTree c)
+        (unTagged (Git.commitOid c) :)
+            <$> (lgTraverseEntries tr $ \fp ent -> do
+                      case ent of
+                          Git.BlobEntry oid _ -> return (unTagged oid)
+                          Git.CommitEntry oid -> return (unTagged oid)
+                          Git.TreeEntry tr'   ->
+                              unTagged <$> Git.treeRefOid tr')
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.

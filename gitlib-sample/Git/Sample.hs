@@ -52,6 +52,7 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     lookupObject     = undefined
     existsObject     = undefined
     traverseCommits  = undefined
+    missingObjects   = undefined
     newTree          = undefined
     hashContents     = undefined
     createBlob       = undefined

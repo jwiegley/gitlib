@@ -34,6 +34,8 @@ main :: IO ()
 main = do
     owner <- T.pack <$> getEnv "GITHUB_OWNER"
     token <- T.pack <$> getEnv "GITHUB_TOKEN"
-    hspec (Git.smokeTestSpec (ghFactory owner (Just token)))
+    let f = ghFactory owner (Just token)
+        g = ghFactory owner (Just token)
+    hspec $ Git.smokeTestSpec f g
 
 -- Smoke.hs ends here
