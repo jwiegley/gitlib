@@ -18,8 +18,8 @@ import           Data.Conduit
 import qualified Data.Conduit.List as CList
 import           Data.Default
 import           Data.Function
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
+import           Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
 import           Data.List
 import           Data.Monoid
 import           Data.Proxy
@@ -28,6 +28,7 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Traversable hiding (mapM, forM, sequence)
+-- import           Debug.Trace
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null)
 import           Git
@@ -93,140 +94,96 @@ copyOid oid = parseOid (renderOid oid)
 
 copyBlob :: (Repository m, Repository (t m), MonadTrans t)
          => BlobRef m
-         -> HashMap Text (Object (t m))
-         -> t m (BlobOid (t m), HashMap Text (Object (t m)))
-copyBlob blobr seen = do
+         -> HashSet Text
+         -> t m (BlobOid (t m), HashSet Text)
+copyBlob blobr needed = do
     let oid = unTagged (blobRefOid blobr)
         sha = renderOid oid
-    case HashMap.lookup sha seen of
-        Just (BlobObj b) -> return (blobRefOid b, seen)
-        Just _ -> failure (ObjectLookupFailed sha 40)
-        Nothing -> do
-            oid2    <- parseOid (renderOid oid)
-            exists2 <- existsObject oid2
-            if exists2
-                then return (Tagged oid2, seen)
-                else do
-                    bs <- lift $ blobToByteString
-                          =<< resolveBlobRef (ByOid (Tagged oid))
-                    boid <- createBlob (BlobString bs)
-                    let x = HashMap.insert sha (BlobObj (ByOid boid)) seen
-                    return $ boid `seq` x `seq` (boid, x)
+    oid2 <- parseOid (renderOid oid)
+    if HashSet.member sha needed
+        then do
+        bs <- lift $ blobToByteString
+              =<< resolveBlobRef (ByOid (Tagged oid))
+        boid <- createBlob (BlobString bs)
+
+        let x = HashSet.delete sha needed
+        return $ boid `seq` x `seq` (boid, x)
+
+        else return (Tagged oid2, needed)
 
 copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               => TreeEntry m
-              -> HashMap Text (Object (t m))
-              -> t m (TreeEntry (t m), HashMap Text (Object (t m)))
-copyTreeEntry (BlobEntry oid kind) seen = do
-    (b,seen') <- copyBlob (ByOid oid) seen
-    return (BlobEntry b kind, seen')
-copyTreeEntry (CommitEntry oid) seen = do
+              -> HashSet Text
+              -> t m (TreeEntry (t m), HashSet Text)
+copyTreeEntry (BlobEntry oid kind) needed = do
+    (b,needed') <- copyBlob (ByOid oid) needed
+    return (BlobEntry b kind, needed')
+copyTreeEntry (CommitEntry oid) needed = do
     coid <- parseOid (renderObjOid oid)
-    return (CommitEntry (Tagged coid), seen)
+    return (CommitEntry (Tagged coid), needed)
 
 copyTree :: (Repository m, Repository (t m), MonadTrans t)
          => TreeRef m
-         -> HashMap Text (Object (t m))
-         -> t m (TreeRef (t m), HashMap Text (Object (t m)))
-copyTree tr seen = do
+         -> HashSet Text
+         -> t m (TreeRef (t m), HashSet Text)
+copyTree tr needed = do
     oid <- unTagged <$> (lift $ treeRefOid tr)
     let sha = renderOid oid
-    case HashMap.lookup sha seen of
-        Just (TreeObj t) -> return (t, seen)
-        Just _ -> failure (ObjectLookupFailed sha 40)
-        Nothing -> do
-            oid2    <- parseOid (renderOid oid)
-            exists2 <- existsObject oid2
-            if exists2
-                then return (ByOid (Tagged oid2), seen)
-                else do
-                    tree    <- lift $ resolveTreeRef tr
-                    entries <- lift $ traverseEntries tree (curry return)
-                    tree2   <- newTree
-                    seen'   <- foldM (doCopyTreeEntry tree2) seen entries
-                    toid    <- writeTree tree2
-                    let tref = ByOid toid
-                        x    = HashMap.insert sha (TreeObj tref) seen'
-                    return $ x `seq` tref `seq` (tref, x)
-  where
-    doCopyTreeEntry tree2 seen' (fp,ent) = do
-        case ent of
-            TreeEntry {} -> return seen'
-            _ -> do
-                (ent2,seen'') <- copyTreeEntry ent seen'
-                putTreeEntry tree2 fp ent2
-                return seen''
+    oid2 <- parseOid (renderOid oid)
+    if HashSet.member sha needed
+        then do
+        tree    <- lift $ resolveTreeRef tr
+        entries <- lift $ traverseEntries tree (curry return)
+        tree2   <- newTree
+        needed' <- foldM (doCopyTreeEntry tree2) needed entries
+        toid    <- writeTree tree2
 
-copyCommitRec' :: (Repository m, Repository (t m), MonadTrans t)
-              => CommitRef m
-              -> Maybe Text
-              -> HashMap Text (Object (t m))
-              -> t m (CommitRef (t m), HashMap Text (Object (t m)))
-copyCommitRec' cr mref seen = do
+        let tref = ByOid toid
+            x    = HashSet.delete sha needed'
+        return $ tref `seq` x `seq` (tref, x)
+
+        else return (ByOid (Tagged oid2), needed)
+  where
+    doCopyTreeEntry tree2 needed' (fp,ent) = do
+        case ent of
+            TreeEntry {} -> return needed'
+            _ -> do
+                (ent2,needed'') <- copyTreeEntry ent needed'
+                putTreeEntry tree2 fp ent2
+                return needed''
+
+copyCommit :: (Repository m, Repository (t m), MonadTrans t)
+           => CommitRef m
+           -> Maybe Text
+           -> HashSet Text
+           -> t m (CommitRef (t m), HashSet Text)
+copyCommit cr mref needed = do
     let oid = unTagged (commitRefOid cr)
         sha = renderOid oid
-    case HashMap.lookup sha seen of
-        Just (CommitObj c) -> return (c,seen)
-        Just _ -> failure (ObjectLookupFailed sha 40)
-        Nothing -> do
-            commit   <- lift $ resolveCommitRef cr
-            oid2     <- parseOid sha
-            exists2  <- existsObject oid2
-            if exists2
-                then return (ByOid (Tagged oid2), seen)
-                else do
-                    let parents = commitParents commit
-                    (parentRefs,seen') <-
-                        foldM copyParent ([],seen) parents
+    commit   <- lift $ resolveCommitRef cr
+    oid2     <- parseOid sha
+    if HashSet.member sha needed
+        then do
+        let parents = commitParents commit
+        (parentRefs,needed') <- foldM copyParent ([],needed) parents
+        (tr,needed'') <- copyTree (commitTree commit) needed'
 
-                    (tr,seen'') <- copyTree (commitTree commit) seen'
-                    commit <- createCommit parentRefs tr
-                        (commitAuthor commit)
-                        (commitCommitter commit)
-                        (commitLog commit)
-                        mref
-                    let cref = commitRef $! commit
-                        x    = HashMap.insert sha (CommitObj cref) seen''
-                    return $ x `seq` cref `seq` (cref, x)
+        commit <- createCommit parentRefs tr
+            (commitAuthor commit)
+            (commitCommitter commit)
+            (commitLog commit)
+            mref
+
+        let cref = commitRef $! commit
+            x    = HashSet.delete sha needed''
+        return $ cref `seq` x `seq` (cref, x)
+
+        else return (ByOid (Tagged oid2), needed)
   where
-    copyParent (prefs,seen') cref = do
-        (cref2,seen'') <- copyCommitRec' cref Nothing seen'
+    copyParent (prefs,needed') cref = do
+        (cref2,needed'') <- copyCommit cref Nothing needed'
         let x = cref2 `seq` (cref2:prefs)
-        return $ x `seq` seen'' `seq` (x,seen'')
-
-copyCommitRec :: (Repository m, Repository (t m), MonadTrans t)
-              => CommitRef m
-              -> Maybe Text
-              -> t m (CommitRef (t m), HashMap Text (Object (t m)))
-copyCommitRec cr mref = copyCommitRec' cr mref HashMap.empty
-
--- copyCommit :: (Repository m, Repository (t m), MonadTrans t)
---            => CommitRef m
---            -> Maybe Text
---            -> t m (CommitRef (t m))
--- copyCommit cr mref =  do
---     let oid = unTagged (commitRefOid cr)
---         sha = renderOid oid
---     commit   <- lift $ resolveCommitRef cr
---     oid2     <- parseOid sha
---     exists2  <- existsObject oid2
---     if exists2
---         then return $ ByOid (Tagged oid2)
---         else do
---             parentRefs <- mapM parentRef (commitParents commit)
---             tr <- copyTree (commitTree commit)
---             commit <- createCommit parentRefs tr
---                 (commitAuthor commit)
---                 (commitCommitter commit)
---                 (commitLog commit)
---                 mref
---             return $ commitRef $! commit
---   where
---     parentRef cref = do
---         let oid = unTagged (commitRefOid cref)
---             sha = renderOid oid
---         oid2 <- parseOid sha
---         return $ ByOid (Tagged oid2)
+        return $ x `seq` needed'' `seq` (x,needed'')
 
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works.
@@ -235,41 +192,37 @@ genericPushRef :: (Repository m, Repository (t m), MonadTrans t)
                -> Text
                -> t m Bool
 genericPushRef ref remoteRefName = do
-    mrref       <- lookupRef remoteRefName
-    commits1    <- lift $ traverseCommits crefToSha ref
+    mrref    <- lookupRef remoteRefName
+    commits1 <- lift $ traverseCommits crefToSha ref
     fastForward <- case mrref of
         Just rref -> do
             mrsha <- referenceSha rref
-            return $ case mrsha of
-                Nothing   -> True
-                Just rsha -> rsha `elem` commits1
-        Nothing -> return True
-    if not fastForward
-        then return False
-        else do
-        commits2 <- case mrref of
-            Nothing   -> return HashMap.empty
-            Just rref -> HashMap.fromList <$>
-                         traverseCommits crefToPair rref
-        case refTarget ref of
-            RefObj cr -> do
-                remoteHead  <- resolveRef remoteRefName
-                (cref,seen) <- copyCommitRec' cr Nothing commits2
-                case remoteHead of
-                    Nothing -> do
-                        createRef remoteRefName (RefObj cref)
-                        return True
-                    Just rh -> do
-                        let sha = renderObjOid (commitRefOid rh)
-                        if HashMap.member sha seen
-                            then do updateRef remoteRefName (RefObj cref)
-                                    return True
-                            else return False
-            _ -> return False
+            case mrsha of
+                Nothing -> return Nothing
+                Just rsha
+                    | rsha `elem` commits1 -> do
+                        roid <- lift $ parseOid rsha
+                        return $
+                            Just (Just (Reference rsha
+                                        (RefObj (ByOid (Tagged roid)))))
+                    | otherwise -> return Nothing
+        Nothing -> return (Just Nothing)
+    case fastForward of
+        Nothing   -> return False
+        Just liftedMrref -> do
+            case refTarget ref of
+                RefObj cr -> do
+                    oids <- lift $ missingObjects liftedMrref ref
+                    let shas = map renderOid oids
+                    (cref,_) <- copyCommit cr Nothing (HashSet.fromList shas)
+                    updateRef remoteRefName (RefObj cref)
+                    return True
+                _ -> return False
   where
     referenceSha ref = do
         r <- referenceToRef Nothing (Just ref)
         return $ renderObjOid . commitRefOid <$> r
+
     crefToSha cref  = return (renderObjOid (commitRefOid cref))
     crefToPair cref = (,) <$> crefToSha cref <*> pure (CommitObj cref)
 

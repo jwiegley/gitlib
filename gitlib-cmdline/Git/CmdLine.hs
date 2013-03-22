@@ -101,6 +101,7 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupObject    = error "Not defined CmdLineRepository.cliLookupObject"
     existsObject    = cliExistsObject
     traverseCommits = cliTraverseCommits
+    missingObjects  = cliMissingObjects
     newTree         = cliNewTree
     hashContents    = cliHashContents
     createBlob      = cliCreateBlob
@@ -218,6 +219,21 @@ cliTraverseCommits f ref = do
     mapM (\sha -> f =<< (Git.ByOid . Tagged
                          <$> Git.parseOid (TL.toStrict sha)))
         (TL.lines shas)
+
+cliMissingObjects :: Git.MonadGit m
+                  => Maybe (Reference m) -> Reference m
+                  -> CmdLineRepository m [Oid m]
+cliMissingObjects mhave need = do
+    shas <- doRunGit run
+            ([ "--no-pager", "rev-list", "--objects"]
+             <> (case mhave of
+                      Nothing ->
+                          [TL.fromStrict (Git.refName need)]
+                      Just have ->
+                          [ TL.fromStrict (Git.refName have)
+                          , TL.fromStrict (T.append "^" (Git.refName need)) ]))
+            $ return ()
+    mapM (Git.parseOid . T.take 40 . TL.toStrict) (TL.lines shas)
 
 cliMakeTree :: Git.MonadGit m
             => IORef (Maybe (TreeOid m))

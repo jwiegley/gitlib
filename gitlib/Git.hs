@@ -94,6 +94,9 @@ class (Applicative m, Monad m, Failure GitException m,
     traverseCommits_ :: (CommitRef m -> m ()) -> Reference m (Commit m) -> m ()
     traverseCommits_ = (void .) . traverseCommits
 
+    missingObjects :: Maybe (Reference m (Commit m)) -> Reference m (Commit m)
+                   -> m [Oid m]
+
     -- Object creation
     newTree :: m (Tree m)
     hashContents :: BlobContents m -> m (BlobOid m)
