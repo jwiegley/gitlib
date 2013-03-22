@@ -21,6 +21,7 @@ import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Data.Conduit
+import           Data.Default
 import           Data.Function
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -119,7 +120,7 @@ doRunGit :: Git.MonadGit m
          -> CmdLineRepository m a
 doRunGit f args act = do
     repo <- cliGet
-    shellyNoDir $ verbosely $ do
+    shellyNoDir $ silently $ do
         act
         f "git" $ ["--git-dir", repoPath repo] <> args
 
@@ -138,7 +139,7 @@ cliPushRefDirectly ::
     -> t (CmdLineRepository m) Bool
 cliPushRefDirectly ref remoteNameOrURI remoteRefName = do
     repo <- lift $ cliGet
-    r <- shellyNoDir $ verbosely $ errExit False $ do
+    r <- shellyNoDir $ silently $ errExit False $ do
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "push", TL.fromStrict remoteNameOrURI
                      , TL.concat [ TL.fromStrict (Git.refName ref)
@@ -184,7 +185,7 @@ cliCreateBlob b = cliDoCreateBlob b True
 cliExistsObject :: Git.MonadGit m => Oid m -> CmdLineRepository m Bool
 cliExistsObject (Oid sha) = do
     repo <- cliGet
-    shellyNoDir $ verbosely $ errExit False $ do
+    shellyNoDir $ silently $ errExit False $ do
         run_ "git" $ [ "--git-dir", repoPath repo
                      , "cat-file", "-e", sha ]
         ec <- lastExitCode
@@ -195,7 +196,7 @@ cliTraverseCommits :: Git.MonadGit m
                    -> Reference m
                    -> CmdLineRepository m [a]
 cliTraverseCommits f ref = do
-    shas <- doRunGit run [ "--no-pager", "log", "--topo-order"
+    shas <- doRunGit run [ "--no-pager", "log"
                          , "--format=%H", TL.fromStrict (Git.refName ref) ]
             $ return ()
     mapM (\sha -> f =<< (Git.ByOid . Tagged
@@ -366,7 +367,6 @@ cliTraverseEntries :: Git.MonadGit m
                    -> (FilePath -> TreeEntry m -> CmdLineRepository m b)
                    -> CmdLineRepository m [b]
 cliTraverseEntries tree f = do
-    -- jww (2013-03-20): This is perhaps needlessly inefficient.
     Tagged (Oid sha) <- Git.writeTree tree
     contents <- runGit ["ls-tree", "-t", "-r", "-z", sha]
     -- Even though the tree entries are separated by \NUL, for whatever reason
@@ -480,7 +480,7 @@ cliShowRef :: Git.MonadGit m
            => Maybe Text -> CmdLineRepository m (Maybe [(TL.Text,TL.Text)])
 cliShowRef mrefName = do
     repo <- cliGet
-    shellyNoDir $ verbosely $ errExit False $ do
+    shellyNoDir $ silently $ errExit False $ do
         rev <- run "git" $ [ "--git-dir", repoPath repo
                            , "show-ref" ]
                        <> [ TL.fromStrict (fromJust mrefName)
@@ -532,7 +532,7 @@ cliResolveRef :: Git.MonadGit m
               => Text -> CmdLineRepository m (Maybe (CommitRef m))
 cliResolveRef refName = do
     repo <- cliGet
-    shellyNoDir $ verbosely $ errExit False $ do
+    shellyNoDir $ silently $ errExit False $ do
         rev <- run "git" $ [ "--git-dir", repoPath repo
                            , "rev-parse", TL.fromStrict refName ]
         ec  <- lastExitCode
@@ -632,7 +632,7 @@ openCliRepository opts = do
         Left e -> failure (Git.BackendError e)
         Right p -> do
             when (not exists && Git.repoAutoCreate opts) $
-                shellyNoDir $ verbosely $
+                shellyNoDir $ silently $
                     run_ "git" $ ["--git-dir", TL.fromStrict p]
                               <> ["--bare" | Git.repoIsBare opts]
                               <> ["init"]
