@@ -178,8 +178,8 @@ cliDoCreateBlob :: Git.MonadGit m
                 => Git.BlobContents (CmdLineRepository m) -> Bool
                 -> CmdLineRepository m (BlobOid m)
 cliDoCreateBlob b persist = do
-    repo <- cliGet
-    bs <- Git.blobContentsToByteString b
+    repo      <- cliGet
+    bs        <- Git.blobContentsToByteString b
     (r,out,_) <-
         liftIO $ readProcessWithExitCode "git"
             ([ "--git-dir", TL.unpack (repoPath repo), "hash-object" ]
