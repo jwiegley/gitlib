@@ -277,55 +277,61 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 
-  it "pushRef test using genericPushRef" $ do
+  it "pushRef between repositories" $ do
       let masterRef = "refs/heads/master"
           sig = Signature { signatureName   = "First Name"
                           , signatureEmail = "user1@email.org"
                           , signatureWhen  = fakeTime 1348981883 }
 
-      Just (ref,ref2) <-
-          withNewRepository pr "genericPushRefSource.git" $ do
-              tree <- newTree
+      withNewRepository pr "pushRefSource.git" $ do
+          tree <- newTree
 
-              putBlob tree "foo/README.md"
-                  =<< createBlobUtf8 "one\n"
-              c <- createCommit [] (treeRef tree) sig sig
-                       "Initial commit" Nothing
+          putBlob tree "foo/README.md"
+              =<< createBlobUtf8 "one\n"
+          c <- createCommit [] (treeRef tree) sig sig
+                   "Initial commit" Nothing
 
-              putBlob tree "bar/foo.txt"
-                  =<< createBlobUtf8 "This is some content."
-              c <- createCommit [commitRef c] (treeRef tree) sig sig
-                       "This is another log message." (Just masterRef)
+          putBlob tree "bar/foo.txt"
+              =<< createBlobUtf8 "This is some content."
+          c <- createCommit [commitRef c] (treeRef tree) sig sig
+                   "This is another log message." (Just masterRef)
 
-              putBlob tree "foo/bar/baz.txt"
-                  =<< createBlobUtf8 "This is some content."
-              c <- createCommit [commitRef c] (treeRef tree) sig sig
-                       "This is another log message." (Just masterRef)
+          putBlob tree "foo/bar/baz.txt"
+              =<< createBlobUtf8 "This is some content."
+          c <- createCommit [commitRef c] (treeRef tree) sig sig
+                   "This is another log message." (Just masterRef)
 
-              putBlob tree "bar/bar.txt"
-                  =<< createBlobUtf8 "This is some content."
-              c <- createCommit [commitRef c] (treeRef tree) sig sig
-                       "This is another log message." (Just masterRef)
+          putBlob tree "bar/bar.txt"
+              =<< createBlobUtf8 "This is some content."
+          c <- createCommit [commitRef c] (treeRef tree) sig sig
+                   "This is another log message." (Just masterRef)
 
-              putBlob tree "foo/hello.txt"
-                  =<< createBlobUtf8 "This is some content."
-              c <- createCommit [commitRef c] (treeRef tree) sig sig
-                       "This is another log message." (Just masterRef)
+          putBlob tree "foo/hello.txt"
+              =<< createBlobUtf8 "This is some content."
+          c <- createCommit [commitRef c] (treeRef tree) sig sig
+                   "This is another log message." (Just masterRef)
 
-              mref <- lookupRef masterRef
-              case mref of
-                  Nothing  -> return Nothing
-                  Just ref -> do
-                      coid2 <-
-                          withNewRepository pr2 "genericPushRefDest.git" $ do
-                              pushRef ref Nothing masterRef
-                              mref2 <- lookupRef masterRef
-                              Just cref <- referenceToRef Nothing mref2
-                              return $ renderObjOid (commitRefOid cref)
-                      Just cref <- referenceToRef Nothing mref
-                      let coid = renderObjOid (commitRefOid cref)
-                      return $ Just (coid,coid2)
-      ref @?= ref2
+          mref <- lookupRef masterRef
+          case mref of
+              Nothing  -> lift $ True @?= False
+              Just ref -> do
+                  Just cref <- referenceToRef Nothing mref
+                  let coid = renderObjOid (commitRefOid cref)
+
+                  withNewRepository pr2 "pushRefDest.git" $ do
+                      pushRef ref Nothing masterRef
+                      mref2 <- lookupRef masterRef
+                      Just cref <- referenceToRef Nothing mref2
+                      lift . lift $
+                          coid @?= renderObjOid (commitRefOid cref)
+
+                  withNewRepository pr2 "pushRefDest.git" $ do
+                      pushRef ref (Just "file://pushRefDest.git")
+                          masterRef
+                      mref2 <- lookupRef masterRef
+                      Just cref <- referenceToRef Nothing mref2
+                      lift . lift $
+                          coid @?= renderObjOid (commitRefOid cref)
 
   where
     control' f = liftWith f >>= restoreT . return

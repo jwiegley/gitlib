@@ -441,7 +441,7 @@ cliLookupCommit (Tagged (Oid sha)) = do
     parseOutput = do
         coid       <- Tagged . Oid . TL.pack
                       <$> manyTill alphaNum space
-        bodyLength <- string "commit " *> natural lexer
+        _          <- string "commit " *> manyTill digit newline
         treeOid    <- string "tree " *>
                       (Tagged . Oid . TL.pack
                        <$> manyTill anyChar newline)
@@ -451,14 +451,11 @@ cliLookupCommit (Tagged (Oid sha)) = do
         author     <- parseSignature "author"
         committer  <- parseSignature "committer"
         message    <- newline *> many anyChar
-
-        let msg = TL.toStrict (TL.take (fromIntegral bodyLength)
-                                   (TL.pack message))
         return Git.Commit
             { Git.commitOid       = coid
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
-            , Git.commitLog       = msg
+            , Git.commitLog       = T.pack (init message)
             , Git.commitTree      = Git.ByOid treeOid
             , Git.commitParents   = map Git.ByOid (Prelude.reverse parentOids)
             , Git.commitEncoding  = "utf-8"
@@ -493,10 +490,7 @@ cliCreateCommit parents tree author committer message ref = do
                       , ("GIT_COMMITTER_DATE",
                          formatCliTime . Git.signatureWhen, committer)
                       ]
-                setStdin $ TL.fromStrict $
-                    if not (T.null message) && T.last message == '\n'
-                    then T.init message
-                    else message
+                setStdin (TL.fromStrict message)
 
     let commit = Git.Commit
             { Git.commitOid       = Tagged (Oid (TL.init oid))
