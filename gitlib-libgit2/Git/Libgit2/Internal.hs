@@ -22,7 +22,6 @@ import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
 import           Debug.Trace
 import           Data.Time
-import           Data.Time.Clock
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
 import           Filesystem
@@ -142,24 +141,28 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
 
 --   | otherwise = return undefined
 
--- | Convert a time in seconds (from Stripe's servers) to 'UTCTime'. See
---   "Data.Time.Format" for more on working with 'UTCTime'.
-fromSeconds :: Integer -> UTCTime
-fromSeconds  = posixSecondsToUTCTime . fromInteger
+-- -- | Convert a time in seconds (from Stripe's servers) to 'UTCTime'. See
+-- --   "Data.Time.Format" for more on working with 'UTCTime'.
+-- fromSeconds :: Integer -> ZonedTime
+-- fromSeconds  = posixSecondsToUTCTime . fromInteger
 
--- | Convert a 'UTCTime' back to an Integer suitable for use with Stripe's API.
-toSeconds :: UTCTime -> Integer
-toSeconds  = round . utcTimeToPOSIXSeconds
+-- -- | Convert a 'UTCTime' back to an Integer suitable for use with Stripe's API.
+-- toSeconds :: ZonedTime -> Integer
+-- toSeconds  = round . utcTimeToPOSIXSeconds
 
-peekGitTime :: Ptr (C'git_time) -> IO UTCTime
-peekGitTime time =
-  -- jww (2012-09-29): Handle offset here
-  return . fromSeconds . toInteger . c'git_time'time =<< peek time
+peekGitTime :: Ptr (C'git_time) -> IO ZonedTime
+peekGitTime tptr = do
+    when <- peek tptr
+    return (utcToZonedTime
+            (minutesToTimeZone (fromIntegral (c'git_time'offset when)))
+            (posixSecondsToUTCTime (fromIntegral (c'git_time'time when))))
 
-packGitTime :: UTCTime -> C'git_time
-packGitTime utcTime =
-  C'git_time { c'git_time'time   = fromIntegral (toSeconds utcTime)
-             , c'git_time'offset = 0 } -- jww (2012-09-29): NYI
+packGitTime :: ZonedTime -> C'git_time
+packGitTime zt = C'git_time
+    { c'git_time'time   =
+           fromIntegral (floor (utcTimeToPOSIXSeconds (zonedTimeToUTC zt)))
+    , c'git_time'offset = fromIntegral (timeZoneMinutes (zonedTimeZone zt))
+    }
 
 packSignature :: U.Converter -> Ptr C'git_signature -> IO Git.Signature
 packSignature conv sig = do

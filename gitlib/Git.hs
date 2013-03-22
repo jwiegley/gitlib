@@ -281,16 +281,20 @@ resolveTreeRef (Known obj) = return obj
 data Signature = Signature
     { signatureName  :: !Text
     , signatureEmail :: !Text
-    , signatureWhen  :: !UTCTime
-    } deriving (Show, Eq)
+    , signatureWhen  :: !ZonedTime
+    } deriving Show
 
 instance Default Signature where
     def = Signature
         { signatureName  = T.empty
         , signatureEmail = T.empty
-        , signatureWhen  =
-            UTCTime { utctDay = ModifiedJulianDay { toModifiedJulianDay = 0 }
-                    , utctDayTime = secondsToDiffTime 0 }
+        , signatureWhen  = ZonedTime
+            { zonedTimeToLocalTime = LocalTime
+                { localDay = ModifiedJulianDay 0
+                , localTimeOfDay = TimeOfDay 0 0 0
+                }
+            , zonedTimeZone = utc
+            }
         }
 
 data Commit m = Commit

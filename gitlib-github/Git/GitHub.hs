@@ -41,8 +41,7 @@ import           Data.Monoid
 import           Data.Tagged
 import           Data.Text as T hiding (drop, map, null)
 import qualified Data.Text.Encoding as T
-import           Data.Time.Clock (UTCTime)
-import           Data.Time.Format (formatTime, parseTime)
+import           Data.Time
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -514,11 +513,11 @@ ghTraverseEntries tree f = do
 --     let fmt   = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" t
 --         (b,a) = L.splitAt (L.length fmt - 2) fmt
 --     in T.pack (b ++ ":" ++ a)
-parseGhTime :: Text -> UTCTime
+parseGhTime :: Text -> ZonedTime
 parseGhTime =
     fromJust . parseTime defaultTimeLocale "%Y-%m-%dT%H%M%SZ" . T.unpack
 
-formatGhTime :: UTCTime -> Text
+formatGhTime :: ZonedTime -> Text
 formatGhTime = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
 
 instance FromJSON Git.Signature where

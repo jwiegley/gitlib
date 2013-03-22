@@ -17,6 +17,7 @@ import Control.Monad.Trans.Control
 import Data.List (sort)
 import Data.Proxy
 import Data.Tagged
+import Data.Time
 import Data.Time.Clock.POSIX
 import Filesystem (removeTree, isDirectory)
 import Filesystem.Path.CurrentOS
@@ -126,7 +127,7 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       let sig  = Signature {
               signatureName  = "John Wiegley"
             , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+            , signatureWhen  = fakeTime 1348980883 }
 
       c <- sampleCommit tr sig
       let x = renderObjOid (commitOid c)
@@ -148,7 +149,7 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       let sig  = Signature {
               signatureName  = "John Wiegley"
             , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+            , signatureWhen  = fakeTime 1348980883 }
 
       c <- sampleCommit tr sig
       let x = renderObjOid (commitOid c)
@@ -165,7 +166,7 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       let sig  = Signature {
               signatureName  = "John Wiegley"
             , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+            , signatureWhen  = fakeTime 1348980883 }
 
       c <- createCommit [commitRef c] (treeRef tr') sig sig
                        "Sample log message 2.\n" (Just "refs/heads/master")
@@ -187,7 +188,7 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       let sig = Signature {
               signatureName  = "John Wiegley"
             , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = posixSecondsToUTCTime 1348980883 }
+            , signatureWhen  = fakeTime 1348980883 }
       c <- sampleCommit tr sig
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
@@ -200,7 +201,7 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       let sig = Signature {
               signatureName  = "John Wiegley"
             , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+            , signatureWhen  = fakeTime 1348981883 }
       c2 <- createCommit [commitRef c] (treeRef tr) sig sig
                         "Second sample log message.\n" Nothing
       let x = renderObjOid (commitOid c2)
@@ -240,14 +241,14 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       let masterRef = "refs/heads/master"
           sig = Signature { signatureName   = "First Name"
                           , signatureEmail = "user1@email.org"
-                          , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+                          , signatureWhen  = fakeTime 1348981883 }
       tree <- newTree
       putBlob tree "README.md" blob
       commit <- createCommit [] (treeRef tree) sig sig "Initial commit" Nothing
 
       let sig2 = Signature { signatureName   = "Second Name"
                            , signatureEmail = "user2@email.org"
-                           , signatureWhen  = posixSecondsToUTCTime 1348982883 }
+                           , signatureWhen  = fakeTime 1348982883 }
       blob <- createBlobUtf8 "This is some content."
       putBlob tree "foo.txt" blob
       commit' <- createCommit [commitRef commit] (treeRef tree) sig sig
@@ -257,9 +258,10 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
 
   it "traversal test" $ withNewRepository pr "traversalTest.git" $ do
       let masterRef = "refs/heads/master"
-          sig = Signature { signatureName  = "First Name"
-                          , signatureEmail = "user1@email.org"
-                          , signatureWhen  = posixSecondsToUTCTime 1348981883 }
+          sig = Signature
+              { signatureName  = "First Name"
+              , signatureEmail = "user1@email.org"
+              , signatureWhen  = fakeTime 1348981883 }
       tree <- newTree
       putBlob tree "One"         =<< createBlobUtf8 "One\n"
       putBlob tree "Two"         =<< createBlobUtf8 "Two\n"
@@ -284,16 +286,25 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       success @?= True
 
   it "pushRef test using genericPushRef" $ do
-      success <- withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
-          mref <- lookupRef "refs/heads/master"
-          case mref of
-              Nothing  -> return False
-              Just ref -> do
-                  withRepository pr2 "/tmp/gitlib.git" $
-                      pushRef ref Nothing "refs/heads/master"
-      success @?= True
+      Just (ref,ref2) <-
+          withRepository pr "/Users/johnw/src/fpco/gitlib/.git" $ do
+              mref <- lookupRef "refs/heads/master"
+              case mref of
+                  Nothing  -> return Nothing
+                  Just ref -> do
+                      coid2 <-
+                          withRepository pr2 "/tmp/gitlib.git" $ do
+                              pushRef ref Nothing "refs/heads/master"
+                              mref2 <- lookupRef "refs/heads/master"
+                              Just cref <- referenceToRef Nothing mref2
+                              return $ renderObjOid (commitRefOid cref)
+                      Just cref <- referenceToRef Nothing mref
+                      let coid = renderObjOid (commitRefOid cref)
+                      return $ Just (coid,coid2)
+      ref @?= ref2
 
   where
     control' f = liftWith f >>= restoreT . return
+    fakeTime secs = utcToZonedTime utc (posixSecondsToUTCTime secs)
 
 -- Main.hs ends here

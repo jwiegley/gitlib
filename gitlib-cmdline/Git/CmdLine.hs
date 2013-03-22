@@ -20,6 +20,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
+import qualified Data.ByteString as B
 import           Data.Conduit
 import           Data.Function
 import           Data.HashMap.Strict (HashMap)
@@ -29,24 +30,28 @@ import           Data.List as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text as T hiding (map, null)
+import           Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
-import           Data.Time.Clock (UTCTime)
-import           Data.Time.Format (formatTime, parseTime)
+import           Data.Time
 import           Data.Tuple
+-- import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
 import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import           Shelly hiding (trace)
+import           System.Exit
 import           System.IO.Unsafe
 import           System.Locale (defaultTimeLocale)
+import           System.Process.ByteString
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
+import           Text.Parsec.Language (haskellDef)
 import           Text.Parsec.Prim
-import           Text.Parsec.Text.Lazy ()
+import           Text.Parsec.Token
 
 type Oid m       = Git.Oid (CmdLineRepository m)
 
@@ -157,19 +162,31 @@ cliPushRef ref remoteNameOrURI remoteRefName =
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
-cliLookupBlob oid@(Tagged (Oid sha)) =
-    Git.Blob oid . Git.BlobString . T.encodeUtf8 . TL.toStrict <$>
-        runGit ["cat-file", "-p", sha]
+cliLookupBlob oid@(Tagged (Oid sha)) = do
+    repo <- cliGet
+    (r,out,_) <-
+        liftIO $ readProcessWithExitCode "git"
+            [ "--git-dir", TL.unpack (repoPath repo)
+            , "cat-file", "-p", TL.unpack sha ]
+            B.empty
+    if r == ExitSuccess
+        then return (Git.Blob oid (Git.BlobString out))
+        else failure Git.BlobLookupFailed
 
 cliDoCreateBlob :: Git.MonadGit m
                 => Git.BlobContents (CmdLineRepository m) -> Bool
                 -> CmdLineRepository m (BlobOid m)
 cliDoCreateBlob b persist = do
-    Tagged . Oid . TL.init <$>
-        (Git.blobContentsToByteString b
-         >>= \bs ->
-             doRunGit run (["hash-object"] <> ["-w" | persist] <> ["--stdin"]) $
-                 setStdin (TL.fromStrict (T.decodeUtf8 (bs))))
+    repo <- cliGet
+    bs <- Git.blobContentsToByteString b
+    (r,out,_) <-
+        liftIO $ readProcessWithExitCode "git"
+            ([ "--git-dir", TL.unpack (repoPath repo), "hash-object" ]
+             <> ["-w" | persist] <> ["--stdin"])
+            bs
+    if r == ExitSuccess
+        then return . Tagged . Oid . TL.fromStrict . T.init . T.decodeUtf8 $ out
+        else failure Git.BlobCreateFailed
 
 cliHashContents :: Git.MonadGit m
                 => Git.BlobContents (CmdLineRepository m)
@@ -387,37 +404,47 @@ cliTraverseEntries tree f = do
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
             _ -> error "This cannot happen")
 
-parseCliTime :: Text -> UTCTime
-parseCliTime =
-    fromJust . parseTime defaultTimeLocale "%Y-%m-%dT%H%M%SZ" . T.unpack
+parseCliTime :: String -> ZonedTime
+parseCliTime = fromJust . parseTime defaultTimeLocale "%s %z"
 
-formatCliTime :: UTCTime -> Text
-formatCliTime = T.pack . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+formatCliTime :: ZonedTime -> Text
+formatCliTime = T.pack . formatTime defaultTimeLocale "%s %z"
+
+lexer :: TokenParser u
+lexer = makeTokenParser haskellDef
 
 cliLookupCommit :: Git.MonadGit m
                 => CommitOid m -> CmdLineRepository m (Commit m)
-cliLookupCommit oid@(Tagged (Oid sha)) = do
-    output <- runGit ["cat-file", "-p", sha]
-    case parse parseOutput "" output of
+cliLookupCommit (Tagged (Oid sha)) = do
+    output <- doRunGit run ["cat-file", "--batch"]
+                  $ setStdin (TL.append sha "\n")
+    case parse parseOutput "" (TL.unpack output) of
         Left e  -> failure $ Git.CommitLookupFailed (T.pack (show e))
         Right c -> return c
   where
     parseOutput = do
-        treeOid <- string "tree " *>
-                   (Tagged . Oid . TL.pack <$> manyTill anyChar newline)
+        coid       <- Tagged . Oid . TL.pack
+                      <$> manyTill alphaNum space
+        bodyLength <- string "commit " *> natural lexer
+        treeOid    <- string "tree " *>
+                      (Tagged . Oid . TL.pack
+                       <$> manyTill anyChar newline)
         parentOids <- many (string "parent " *>
                             (Tagged . Oid . TL.pack
                              <$> manyTill anyChar newline))
-        author    <- parseSignature "author"
-        committer <- parseSignature "committer"
-        message   <- T.pack <$> many anyChar
+        author     <- parseSignature "author"
+        committer  <- parseSignature "committer"
+        message    <- newline *> many anyChar
+
+        let msg = TL.toStrict (TL.take (fromIntegral bodyLength)
+                                   (TL.pack message))
         return Git.Commit
-            { Git.commitOid       = oid
+            { Git.commitOid       = coid
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
-            , Git.commitLog       = message
+            , Git.commitLog       = msg
             , Git.commitTree      = Git.ByOid treeOid
-            , Git.commitParents   = map Git.ByOid parentOids
+            , Git.commitParents   = map Git.ByOid (Prelude.reverse parentOids)
             , Git.commitEncoding  = "utf-8"
             }
 
@@ -426,8 +453,7 @@ cliLookupCommit oid@(Tagged (Oid sha)) = do
             <$> (string (T.unpack txt ++ " ")
                  *> (T.pack <$> manyTill anyChar (try (string " <"))))
             <*> (T.pack <$> manyTill anyChar (try (string "> ")))
-            <*> (fromJust . parseTime defaultTimeLocale "%s %z"
-                 <$> manyTill anyChar newline)
+            <*> (parseCliTime <$> manyTill anyChar newline)
 
 cliCreateCommit :: Git.MonadGit m
                 => [CommitRef m] -> TreeRef m
@@ -451,7 +477,10 @@ cliCreateCommit parents tree author committer message ref = do
                       , ("GIT_COMMITTER_DATE",
                          formatCliTime . Git.signatureWhen, committer)
                       ]
-                setStdin $ TL.fromStrict message
+                setStdin $ TL.fromStrict $
+                    if not (T.null message) && T.last message == '\n'
+                    then T.init message
+                    else message
 
     let commit = Git.Commit
             { Git.commitOid       = Tagged (Oid (TL.init oid))

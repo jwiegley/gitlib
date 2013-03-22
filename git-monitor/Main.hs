@@ -22,8 +22,7 @@ import           Data.Maybe
 import           Data.Text (Text)
 import qualified Data.Text as T (pack, unpack)
 import qualified Data.Text.Lazy as TL (pack, unpack, toStrict, init)
-import           Data.Time.Clock (UTCTime, getCurrentTime)
-import           Data.Time.Format (formatTime)
+import           Data.Time
 import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
@@ -167,7 +166,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     toid' <- writeTree str
     sc'   <- if toid /= toid'
             then do
-                now <- liftIO getCurrentTime
+                now <- liftIO getZonedTime
                 let sig = Signature
                           { signatureName  = name
                           , signatureEmail = email
