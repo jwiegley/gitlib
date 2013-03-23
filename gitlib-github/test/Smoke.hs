@@ -28,7 +28,7 @@ ghFactory :: Git.MonadGit m
           => Text
           -> Maybe Text
           -> Git.RepositoryFactory (Gh.GitHubRepository m) m Gh.Repository
-ghFactory owner token = Gh.ghFactory (Gh.GitHubUser owner) undefined token
+ghFactory owner token = Gh.ghFactory (Gh.GitHubUser owner) token
 
 main :: IO ()
 main = do

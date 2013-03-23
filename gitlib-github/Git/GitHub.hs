@@ -805,15 +805,12 @@ ghDeleteRepository = do
         owner     = ghRepoOwner ghOpts
         repoName  = ghRepoName ghOpts
         token     = ghRepoToken ghOpts
-        repoName' = if ".git" `T.isSuffixOf` repoName
-                    then T.take (T.length repoName - 4) repoName
-                    else repoName
         name = case owner of
             GitHubUser n -> n
             GitHubOrganization n -> n
     result <- liftIO $ Github.deleteRepo
                   (Github.GithubOAuth (T.unpack (fromJust token)))
-                  (T.unpack name) (T.unpack repoName')
+                  (T.unpack name) (T.unpack repoName)
     either (failure . Git.BackendError . T.pack . show) return result
 
 doOpenGhRepository :: Git.RepositoryOptions
@@ -899,11 +896,12 @@ openOrCreateGhRepository opts owner repoName token = do
 
 ghFactory :: Git.MonadGit m
           => GitHubOwner
-          -> Text
           -> Maybe Text
           -> Git.RepositoryFactory (GitHubRepository m) m Repository
-ghFactory owner repoName token = Git.RepositoryFactory
-    { Git.openRepository  = \opts -> openGhRepository opts owner repoName token
+ghFactory owner token = Git.RepositoryFactory
+    { Git.openRepository  = \opts ->
+       openGhRepository opts owner
+           (either id id (F.toText (F.basename (Git.repoPath opts)))) token
     , Git.runRepository   = runGhRepository
     , Git.closeRepository = closeGhRepository
     , Git.defaultOptions  = defaultGhOptions
