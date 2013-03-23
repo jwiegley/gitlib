@@ -11,7 +11,7 @@ tests:
 	    python vendor/mock-s3/mock_s3.py ;				\
 	fi
 	perl -i -pe 's/^-- //;' gitlib-github/gitlib-github.cabal
-	for i in cmdline github libgit2 s3 ; do				\
+	for i in cmdline github libgit2 s3 cross ; do			\
 	    (echo gitlib-$$i ; cd gitlib-$$i ;				\
 	     cabal clean > /dev/null ;					\
 	     cabal configure --enable-tests > /dev/null ;		\

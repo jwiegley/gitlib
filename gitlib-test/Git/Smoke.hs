@@ -59,7 +59,7 @@ smokeTestSpec :: (Repository (t IO), MonadGit (t IO), MonadTrans t,
                   Repository (t2 (t IO)), MonadGit (t2 (t IO)), MonadTrans t2,
                   MonadBaseControl IO (t IO))
               => RepositoryFactory (t IO) IO c
-              -> RepositoryFactory (t2 (t IO)) (t IO) c
+              -> RepositoryFactory (t2 (t IO)) (t IO) c2
               -> Spec
 smokeTestSpec pr pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
@@ -289,27 +289,27 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
           putBlob tree "foo/README.md"
               =<< createBlobUtf8 "one\n"
           c <- createCommit [] (treeRef tree) sig sig
-                   "Initial commit" Nothing
+                   "Initial commit.\n" Nothing
 
           putBlob tree "bar/foo.txt"
               =<< createBlobUtf8 "This is some content."
           c <- createCommit [commitRef c] (treeRef tree) sig sig
-                   "This is another log message." (Just masterRef)
+                   "This is another log message.\n" (Just masterRef)
 
           putBlob tree "foo/bar/baz.txt"
               =<< createBlobUtf8 "This is some content."
           c <- createCommit [commitRef c] (treeRef tree) sig sig
-                   "This is another log message." (Just masterRef)
+                   "This is another log message.\n" (Just masterRef)
 
           putBlob tree "bar/bar.txt"
               =<< createBlobUtf8 "This is some content."
           c <- createCommit [commitRef c] (treeRef tree) sig sig
-                   "This is another log message." (Just masterRef)
+                   "This is another log message.\n" (Just masterRef)
 
           putBlob tree "foo/hello.txt"
               =<< createBlobUtf8 "This is some content."
           c <- createCommit [commitRef c] (treeRef tree) sig sig
-                   "This is another log message." (Just masterRef)
+                   "This is another log message.\n" (Just masterRef)
 
           mref <- lookupRef masterRef
           case mref of
