@@ -52,6 +52,7 @@ Library
     , http-conduit         >= 1.8.5.1
     , lens                 >= 2.8
     , parallel-io          >= 0.3.2.1
+    , retry                >= 0.2.0.0
     , stringable           >= 0.1.1
     , system-fileio        >= 0.3.9
     , system-filepath      >= 0.4.7

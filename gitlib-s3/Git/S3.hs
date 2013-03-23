@@ -25,6 +25,8 @@ import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
+import           Control.Retry
 import           Data.Aeson (object, (.=), (.:))
 import           Data.Attempt
 import           Data.Binary
@@ -120,14 +122,22 @@ odbS3dispatch f odbS3 arg = do
   s3config <- liftIO $ deRefStablePtr (s3configuration odbS3)
   f manager bucket prefix config s3config arg
 
+awsRetry :: Transaction r a
+         => Configuration
+         -> ServiceConfiguration r NormalQuery
+         -> Manager
+         -> r
+         -> ResourceT IO (Response (ResponseMetadata a) a)
+awsRetry = ((((retrying def (isFailure . responseResult) .) .) .) .) aws
+
 testFileS3' :: Manager -> Text -> Text
                -> Configuration -> S3Configuration NormalQuery
                -> Text
                -> ResourceT IO Bool
 testFileS3' manager bucket prefix config s3config filepath =
   isJust . readResponse <$>
-    aws config s3config manager
-        (headObject bucket (T.append prefix filepath))
+      awsRetry config s3config manager
+          (headObject bucket (T.append prefix filepath))
 
 testFileS3 :: OdbS3Backend -> Text -> ResourceT IO Bool
 testFileS3 = odbS3dispatch testFileS3'
@@ -137,9 +147,9 @@ getFileS3' :: Manager -> Text -> Text
               -> (Text, Maybe (Int,Int))
               -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFileS3' manager bucket prefix config s3config (filepath,range) = do
-  res <- aws config s3config manager
+  res <- awsRetry config s3config manager
              (getObject bucket (T.append prefix filepath))
-               { goResponseContentRange = range }
+                 { goResponseContentRange = range }
   gor <- readResponseIO res
   return (responseBody (gorResponse gor))
 
@@ -153,9 +163,9 @@ putFileS3' :: Manager -> Text -> Text
               -> ResourceT IO BL.ByteString
 putFileS3' manager bucket prefix config s3config (filepath,src) = do
   lbs <- BL.fromChunks <$> (src $$ CList.consume)
-  res <- aws config s3config manager
+  res <- awsRetry config s3config manager
              (putObject bucket (T.append prefix filepath)
-                        (RequestBodyLBS lbs))
+                  (RequestBodyLBS lbs))
   _ <- readResponseIO res
   return lbs
 
