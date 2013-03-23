@@ -45,6 +45,7 @@ import           Data.Time
 import           Filesystem.Path.CurrentOS (FilePath)
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
+import qualified Git.Utils as Git
 import qualified Github.Repos as Github
 import           Network.HTTP.Conduit hiding (Proxy, Response)
 import           Network.REST.Client
@@ -95,7 +96,7 @@ instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
     updateRef        = ghUpdateRef
     deleteRef        = ghDeleteRef
     allRefs          = ghAllRefs
-    pushRef          = error "Not defined: GitHubRepository.pushRef"
+    pushRef          = \ref _ rrefname -> Git.genericPushRef ref rrefname
     lookupCommit     = ghLookupCommit
     lookupTree       = ghLookupTree
     lookupBlob       = ghLookupBlob

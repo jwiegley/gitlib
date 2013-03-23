@@ -20,6 +20,7 @@ Library
   build-depends:
       base >= 3 && < 5
     , gitlib
+    , gitlib-utils
     , aeson                >= 0.6.1.0
     , attempt              >= 0.4.0
     , base64-bytestring    >= 1.0.0.0
