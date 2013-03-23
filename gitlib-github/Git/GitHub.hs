@@ -776,28 +776,6 @@ instance (MonadIO m, MonadBaseControl IO m)
 ghGet :: Git.MonadGit m => GitHubRepository m Repository
 ghGet = GitHubRepository ask
 
--- dropRepository :: GitHubOwner -> Text -> Maybe Text -> GitHubRepository m a
---                -> IO (Either Github.Error a)
--- dropRepository owner repoName token action =
---     let repoName' = if ".git" `T.isSuffixOf` repoName
---                     then T.take (T.length repoName - 4) repoName
---                     else repoName
---     in bracket
---        (openOrCreateGhRepository owner repoName' token)
---        (\repo -> case repo of
---              Left _ -> return ()
---              Right _ -> when (isJust token) $ do
---              let name = case owner of
---                      GitHubUser n -> n
---                      GitHubOrganization n -> n
---              _ <- Github.deleteRepo
---                   (Github.GithubOAuth (T.unpack (fromJust token)))
---                   (T.unpack name) (T.unpack repoName')
---              return ())
---        (\repo -> case repo of
---              Left e -> return (Left e)
---              Right r -> Right <$> withOpenGhRepository r action)
-
 ghDeleteRepository :: Git.MonadGit m => GitHubRepository m ()
 ghDeleteRepository = do
     repo <- ghGet
