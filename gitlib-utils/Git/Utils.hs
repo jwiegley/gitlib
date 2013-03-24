@@ -230,7 +230,7 @@ commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =
     case commitParents c of
         []    -> return [c]
-        (p:_) -> do ps <- commitHistoryFirstParent c
+        (p:_) -> do ps <- commitHistoryFirstParent =<< resolveCommitRef p
                     return (c:ps)
 
 data PinnedEntry m = PinnedEntry
