@@ -637,8 +637,10 @@ lgMissingObjects mhave need = do
   where
     getCommitContents cref = do
         c <- lgLookupCommit 40 (Git.commitRefOid cref)
-        tr <- Git.resolveTreeRef (Git.commitTree c)
-        (unTagged (Git.commitOid c) :)
+        let ct = Git.commitTree c
+        tr   <- Git.resolveTreeRef ct
+        toid <- Git.treeRefOid ct
+        (\xs -> unTagged (Git.commitOid c) : unTagged toid : xs)
             <$> (lgTraverseEntries tr $ \fp ent -> do
                       case ent of
                           Git.BlobEntry oid _ -> return (unTagged oid)

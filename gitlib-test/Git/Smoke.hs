@@ -29,28 +29,6 @@ import Test.Hspec (Spec, Example, describe, it, hspec)
 import Test.Hspec.Expectations
 import Test.Hspec.HUnit ()
 
-withNewRepository :: (Repository (t m), MonadGit (t m),
-                      MonadBaseControl IO m, MonadIO m, MonadTrans t)
-                  => RepositoryFactory (t m) m c
-                  -> FilePath -> t m a -> m a
-withNewRepository factory path action = do
-    liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
-
-    -- we want exceptions to leave the repo behind
-    a <- withRepository' factory (defaultOptions factory)
-        { repoPath       = path
-        , repoIsBare     = True
-        , repoAutoCreate = True
-        } action
-
-    liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
-
-    return a
-
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing

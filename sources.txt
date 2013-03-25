@@ -6,6 +6,8 @@
 ./gitlib-s3
 ./gitlib-cmdline
 ./gitlib-github
+./gitlib-cross
+./gitlib-fpco
 ./hlibgit2
 ./vendor/aws
 ./vendor/c2hsc

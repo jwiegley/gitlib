@@ -7,7 +7,7 @@
 module Git.Utils where
 
 import           Control.Applicative
-import           Control.Exception as Exc
+import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -160,8 +160,8 @@ copyCommit :: (Repository m, Repository (t m), MonadTrans t)
 copyCommit cr mref needed = do
     let oid = unTagged (commitRefOid cr)
         sha = renderOid oid
-    commit   <- lift $ resolveCommitRef cr
-    oid2     <- parseOid sha
+    commit <- lift $ resolveCommitRef cr
+    oid2   <- parseOid sha
     if HashSet.member sha needed
         then do
         let parents = commitParents commit
@@ -273,5 +273,47 @@ resolveRefTree refName = do
     case c of
         Nothing -> newTree
         Just c' -> resolveCommitRef c' >>= resolveTreeRef . commitTree
+
+withNewRepository :: (Repository (t m), MonadGit (t m),
+                      MonadBaseControl IO m, MonadIO m, MonadTrans t)
+                  => RepositoryFactory (t m) m c
+                  -> FilePath -> t m a -> m a
+withNewRepository factory path action = do
+    liftIO $ do
+        exists <- isDirectory path
+        when exists $ removeTree path
+
+    -- we want exceptions to leave the repo behind
+    a <- withRepository' factory (defaultOptions factory)
+        { repoPath       = path
+        , repoIsBare     = True
+        , repoAutoCreate = True
+        } action
+
+    liftIO $ do
+        exists <- isDirectory path
+        when exists $ removeTree path
+
+    return a
+
+withNewRepository' :: (Repository (t m), MonadGit (t m),
+                       MonadBaseControl IO m, MonadIO m, MonadTrans t)
+                   => RepositoryFactory (t m) m c -> FilePath -> t m a -> m a
+withNewRepository' factory path action = do
+    liftIO $ do
+        exists <- isDirectory path
+        when exists $ removeTree path
+
+    Exc.finally go (liftIO recover)
+  where
+    go = withRepository' factory (defaultOptions factory)
+        { repoPath       = path
+        , repoIsBare     = True
+        , repoAutoCreate = True
+        } action
+
+    recover = do exists <- isDirectory path
+                 when exists $ removeTree path
+
 
 -- Utils.hs ends here

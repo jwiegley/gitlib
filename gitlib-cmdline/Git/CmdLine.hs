@@ -137,17 +137,19 @@ runGit_ :: Git.MonadGit m
         => [TL.Text] -> CmdLineRepository m ()
 runGit_ = flip (doRunGit run_) (return ())
 
-cliPushRefDirectly ::
-    (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
-     Git.Repository (t (CmdLineRepository m)), MonadTrans t)
-    => Reference m -> Text -> Text
-    -> t (CmdLineRepository m) Bool
-cliPushRefDirectly ref remoteNameOrURI remoteRefName = do
-    repo <- lift $ cliGet
+cliPushRefDirectly :: Git.MonadGit m
+                   => Text -> Text -> Text -> Maybe FilePath
+                   -> CmdLineRepository m Bool
+cliPushRefDirectly refName remoteNameOrURI remoteRefName msshCmd = do
+    repo <- cliGet
     r <- shellyNoDir $ silently $ errExit False $ do
+        case msshCmd of
+            Nothing -> return ()
+            Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
+                               =<< liftIO (F.canonicalizePath sshCmd)
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "push", TL.fromStrict remoteNameOrURI
-                     , TL.concat [ TL.fromStrict (Git.refName ref)
+                     , TL.concat [ TL.fromStrict refName
                                  , ":", TL.fromStrict remoteRefName ] ]
         lastExitCode
     return (r == 0)
@@ -159,7 +161,8 @@ cliPushRef :: (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
 cliPushRef ref remoteNameOrURI remoteRefName =
     case remoteNameOrURI of
         Nothing  -> Git.genericPushRef ref remoteRefName
-        Just uri -> cliPushRefDirectly ref uri remoteRefName
+        Just uri -> lift $ cliPushRefDirectly (Git.refName ref) uri
+                        remoteRefName Nothing
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)

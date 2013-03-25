@@ -37,6 +37,7 @@ Library
         , conduit              >= 0.5.5
         , data-default         >= 0.5.1
         , failure              >= 0.2.0.1
+        , lifted-base          >= 0.2.0.2
         , system-fileio        >= 0.3.11
         , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1
