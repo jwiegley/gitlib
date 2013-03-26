@@ -1,42 +1,42 @@
 [submodule "hlibgit2/libgit2"]
 	path = hlibgit2/libgit2
-	url = git://github.com/jwiegley/libgit2.git
+	url = https://github.com/jwiegley/libgit2.git
 [submodule "vendor/mock-s3"]
 	path = vendor/mock-s3
-	url = git://github.com/jwiegley/mock-s3.git
+	url = https://github.com/jwiegley/mock-s3.git
 [submodule "vendor/aws"]
 	path = vendor/aws
-	url = git://github.com/fpco/aws
+	url = https://github.com/fpco/aws
 [submodule "vendor/c2hsc"]
 	path = vendor/c2hsc
-	url = git://github.com/jwiegley/c2hsc.git
+	url = https://github.com/jwiegley/c2hsc.git
 [submodule "vendor/conduit"]
 	path = vendor/conduit
-	url = git://github.com/snoyberg/conduit.git
+	url = https://github.com/snoyberg/conduit.git
 [submodule "vendor/convertible"]
 	path = vendor/convertible
-	url = git://github.com/jwiegley/convertible
+	url = https://github.com/jwiegley/convertible
 [submodule "vendor/general-prelude"]
 	path = vendor/general-prelude
-	url = git://github.com/jwiegley/general-prelude.git
+	url = https://github.com/jwiegley/general-prelude.git
 [submodule "vendor/http-conduit"]
 	path = vendor/http-conduit
-	url = git://github.com/snoyberg/http-conduit.git
+	url = https://github.com/snoyberg/http-conduit.git
 [submodule "vendor/http-types"]
 	path = vendor/http-types
-	url = git://github.com/jwiegley/http-types.git
+	url = https://github.com/jwiegley/http-types.git
 [submodule "vendor/rest-client"]
 	path = vendor/rest-client
-	url = git://github.com/fpco/rest-client.git
+	url = https://github.com/fpco/rest-client.git
 [submodule "vendor/stringable"]
 	path = vendor/stringable
-	url = git://github.com/jwiegley/stringable.git
+	url = https://github.com/jwiegley/stringable.git
 [submodule "vendor/svndump"]
 	path = vendor/svndump
-	url = git://github.com/jwiegley/svndump.git
+	url = https://github.com/jwiegley/svndump.git
 [submodule "vendor/github"]
 	path = vendor/github
-	url = git://github.com/fpco/github.git
+	url = https://github.com/fpco/github.git
 [submodule "gitlib-fpco"]
 	path = gitlib-fpco
-	url = git://github.com/fpco/gitlib-fpco.git
+	url = https://github.com/fpco/gitlib-fpco.git
