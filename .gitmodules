@@ -39,4 +39,4 @@
 	url = https://github.com/fpco/github.git
 [submodule "gitlib-fpco"]
 	path = gitlib-fpco
-	url = https://github.com/fpco/gitlib-fpco.git
+	url = git@github.com:fpco/gitlib-fpco.git
