@@ -27,7 +27,7 @@
 	url = git://github.com/jwiegley/http-types.git
 [submodule "vendor/rest-client"]
 	path = vendor/rest-client
-	url = git@github.com:fpco/rest-client.git
+	url = git://github.com/fpco/rest-client.git
 [submodule "vendor/stringable"]
 	path = vendor/stringable
 	url = git://github.com/jwiegley/stringable.git
@@ -36,7 +36,7 @@
 	url = git://github.com/jwiegley/svndump.git
 [submodule "vendor/github"]
 	path = vendor/github
-	url = git@github.com:fpco/github.git
+	url = git://github.com/fpco/github.git
 [submodule "gitlib-fpco"]
 	path = gitlib-fpco
 	url = git://github.com/fpco/gitlib-fpco.git
