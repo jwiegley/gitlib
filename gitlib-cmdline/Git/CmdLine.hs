@@ -163,6 +163,37 @@ cliPushRef ref remoteNameOrURI remoteRefName =
         Nothing  -> Git.genericPushRef ref remoteRefName
         Just uri -> lift $ cliPushRefDirectly (Git.refName ref) uri
                         remoteRefName Nothing
+
+cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
+cliResetHard refname =
+    doRunGit run_ [ "reset", "--hard", TL.fromStrict refname ] $ return ()
+
+cliPullRefDirectly :: Git.MonadGit m
+                   => Text -> Text -> Maybe FilePath
+                   -> CmdLineRepository m [FilePath]
+cliPullRefDirectly remoteNameOrURI remoteRefName msshCmd = do
+    repo <- cliGet
+    mfiles <- shellyNoDir $ silently $ errExit False $ do
+        case msshCmd of
+            Nothing -> return ()
+            Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
+                               =<< liftIO (F.canonicalizePath sshCmd)
+        run_ "git" $ [ "--git-dir", repoPath repo ]
+                  <> [ "pull", TL.fromStrict remoteNameOrURI
+                     , TL.fromStrict remoteRefName ]
+        r <- lastExitCode
+        if r == 0
+            then do
+                xs <- run "git" $ [ "--git-dir", repoPath repo ]
+                               <> [ "ls-files", "-z", "unmerged" ]
+                if TL.null xs
+                    then return (Just [])
+                    else return . Just . map fromText . TL.splitOn "\NUL" $ xs
+            else return Nothing
+
+    case mfiles of
+         Nothing    -> failure (Git.BackendError "Could not pull from remote")
+         Just files -> return files
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
