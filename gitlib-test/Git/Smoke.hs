@@ -255,13 +255,13 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 
-  it "pushRef between repositories" $ do
+  it "push commit between repositories" $ do
       let masterRef = "refs/heads/master"
           sig = Signature { signatureName   = "First Name"
                           , signatureEmail = "user1@email.org"
                           , signatureWhen  = fakeTime 1348981883 }
 
-      withNewRepository pr "pushRefSource.git" $ do
+      withNewRepository pr "pushSource.git" $ do
           tree <- newTree
 
           putBlob tree "foo/README.md"
@@ -289,27 +289,23 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
           c <- createCommit [commitRef c] (treeRef tree) sig sig
                    "This is another log message.\n" (Just masterRef)
 
-          mref <- lookupRef masterRef
-          case mref of
-              Nothing  -> lift $ True @?= False
-              Just ref -> do
-                  Just cref <- referenceToRef Nothing mref
-                  let coid = renderObjOid (commitRefOid cref)
+          Just cref <- resolveRef masterRef
+          let coid = renderObjOid (commitRefOid cref)
 
-                  withNewRepository pr2 "pushRefDest.git" $ do
-                      pushRef ref Nothing masterRef
-                      mref2 <- lookupRef masterRef
-                      Just cref <- referenceToRef Nothing mref2
-                      lift . lift $
-                          coid @?= renderObjOid (commitRefOid cref)
+          withNewRepository pr2 "pushDest.git" $ do
+              pushCommit (CommitRefName masterRef) Nothing masterRef
+              mref2 <- lookupRef masterRef
+              Just cref <- referenceToRef Nothing mref2
+              lift . lift $
+                  coid @?= renderObjOid (commitRefOid cref)
 
-                  withNewRepository pr2 "pushRefDest.git" $ do
-                      pushRef ref (Just "file://pushRefDest.git")
-                          masterRef
-                      mref2 <- lookupRef masterRef
-                      Just cref <- referenceToRef Nothing mref2
-                      lift . lift $
-                          coid @?= renderObjOid (commitRefOid cref)
+          withNewRepository pr2 "pushDest.git" $ do
+              pushCommit (CommitRefName masterRef)
+                  (Just "file://pushRefDest.git") masterRef
+              mref2 <- lookupRef masterRef
+              Just cref <- referenceToRef Nothing mref2
+              lift . lift $
+                  coid @?= renderObjOid (commitRefOid cref)
 
   where
     control' f = liftWith f >>= restoreT . return

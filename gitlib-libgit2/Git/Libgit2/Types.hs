@@ -75,22 +75,23 @@ instance (MonadIO m, MonadBaseControl IO m)
     liftBaseWith = defaultLiftBaseWith StMT
     restoreM     = defaultRestoreM unStMT
 
-type Oid m       = Git.Oid (LgRepository m)
+type Oid m        = Git.Oid (LgRepository m)
 
-type BlobOid m   = Git.BlobOid (LgRepository m)
-type TreeOid m   = Git.TreeOid (LgRepository m)
-type CommitOid m = Git.CommitOid (LgRepository m)
+type BlobOid m    = Git.BlobOid (LgRepository m)
+type TreeOid m    = Git.TreeOid (LgRepository m)
+type CommitOid m  = Git.CommitOid (LgRepository m)
 
-type Tree m      = Git.Tree (LgRepository m)
-type Commit m    = Git.Commit (LgRepository m)
-type Tag m       = Git.Tag (LgRepository m)
+type Tree m       = Git.Tree (LgRepository m)
+type Commit m     = Git.Commit (LgRepository m)
+type Tag m        = Git.Tag (LgRepository m)
 
-type TreeRef m   = Git.TreeRef (LgRepository m)
-type CommitRef m = Git.CommitRef (LgRepository m)
+type TreeRef m    = Git.TreeRef (LgRepository m)
+type CommitRef m  = Git.CommitRef (LgRepository m)
+type CommitName m = Git.CommitName (LgRepository m)
 
-type Reference m = Git.Reference (LgRepository m) (Commit m)
+type Reference m  = Git.Reference (LgRepository m) (Commit m)
 
-type Options m   = Git.Options (LgRepository m)
+type Options m    = Git.Options (LgRepository m)
 
 lgGet :: Monad m => LgRepository m Repository
 lgGet = LgRepository ask

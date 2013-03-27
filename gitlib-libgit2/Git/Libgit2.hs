@@ -89,13 +89,13 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     deleteRef       = lgDeleteRef
     resolveRef      = lgResolveRef
     allRefNames     = lgAllRefNames
-    pushRef         = \ref _ rrefname -> Git.genericPushRef ref rrefname
     lookupCommit    = lgLookupCommit 40
     lookupTree      = lgLookupTree 40
     lookupBlob      = lgLookupBlob
     lookupTag       = undefined
     lookupObject    = lgLookupObject
     existsObject    = lgExistsObject
+    pushCommit      = \name _ rrefname -> Git.genericPushCommit name rrefname
     traverseCommits = lgTraverseCommits
     missingObjects  = lgMissingObjects
     newTree         = lgNewTree
@@ -577,13 +577,14 @@ lgExistsObject oid = do
                     return (Just (r == 0))
     maybe (failure Git.RepositoryInvalid) return result
 
-lgRevWalker :: Reference m -> Maybe (CommitOid m) -> Ptr C'git_revwalk
+lgRevWalker :: Git.MonadGit m
+            => CommitName m -> Maybe (CommitOid m) -> Ptr C'git_revwalk
             -> IO [CommitRef m]
-lgRevWalker ref moid walker = do
-    withCStringable (Git.refName ref) $ \rname -> do
-        r2 <- c'git_revwalk_push_ref walker rname
-        when (r2 < 0) $
-            failure (Git.BackendError "Could not push ref on revwalker")
+lgRevWalker name moid walker = do
+    case name of
+        Git.CommitObjectId (Tagged coid) -> pushOid (getOid coid)
+        Git.CommitRefName rname          -> pushRef rname
+        Git.CommitReference ref          -> pushRef (Git.refName ref)
 
     case moid of
         Nothing -> return ()
@@ -600,12 +601,24 @@ lgRevWalker ref moid walker = do
         whileM ((==) <$> pure 0
                      <*> c'git_revwalk_next coidPtr walker)
             (Git.ByOid . Tagged . Oid <$> coidPtrToOid coidPtr)
+  where
+    pushOid oid =
+        withForeignPtr oid $ \coid -> do
+            r2 <- c'git_revwalk_push walker coid
+            when (r2 < 0) $
+                failure (Git.BackendError "Could not push oid on revwalker")
+
+    pushRef name =
+        withCStringable name $ \namePtr -> do
+            r2 <- c'git_revwalk_push_ref walker namePtr
+            when (r2 < 0) $
+                failure (Git.BackendError "Could not push ref on revwalker")
 
 lgTraverseCommits :: Git.MonadGit m
                   => (CommitRef m -> LgRepository m a)
-                  -> Reference m
+                  -> CommitName m
                   -> LgRepository m [a]
-lgTraverseCommits f ref = do
+lgTraverseCommits f name = do
     repo <- lgGet
     refs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \pptr ->
@@ -615,15 +628,15 @@ lgTraverseCommits f ref = do
                         failure (Git.BackendError "Could not create revwalker")
                     peek pptr)
                 c'git_revwalk_free
-                (lgRevWalker ref Nothing)
+                (lgRevWalker name Nothing)
     mapM f refs
 
 lgMissingObjects :: Git.MonadGit m
-                 => Maybe (Reference m) -> Reference m
+                 => Maybe (CommitName m) -> CommitName m
                  -> LgRepository m [Oid m]
 lgMissingObjects mhave need = do
     repo <- lgGet
-    mref <- Git.referenceToRef Nothing mhave
+    mref <- maybe (return Nothing) Git.commitNameToRef mhave
     refs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \pptr ->
             Exc.bracket

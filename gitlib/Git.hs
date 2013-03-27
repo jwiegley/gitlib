@@ -22,6 +22,8 @@ import           Control.Monad.Trans.Class
 import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.Default
+import           Data.Map (Map)
+import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Tagged
 import           Data.Text (Text)
@@ -73,13 +75,6 @@ class (Applicative m, Monad m, Failure GitException m,
     resolveRef :: Text -> m (Maybe (CommitRef m))
     resolveRef name = lookupRef name >>= referenceToRef (Just name)
 
-    pushRef :: (MonadTrans t, MonadGit m, MonadGit (t m),
-                Repository m, Repository (t m))
-            => Reference m (Commit m)
-            -> Maybe Text
-            -> Text
-            -> t m Bool
-
     -- Lookup
     lookupCommit :: CommitOid m -> m (Commit m)
     lookupTree   :: TreeOid m -> m (Tree m)
@@ -89,13 +84,18 @@ class (Applicative m, Monad m, Failure GitException m,
     lookupObject :: Text -> m (Object m)
     existsObject :: Oid m -> m Bool
 
+    pushCommit :: (MonadTrans t, MonadGit m, MonadGit (t m),
+                   Repository m, Repository (t m))
+               => CommitName m -> Maybe Text -> Text -> t m Bool
+
     traverseCommits :: forall a.
-                       (CommitRef m -> m a) -> Reference m (Commit m) -> m [a]
-    traverseCommits_ :: (CommitRef m -> m ()) -> Reference m (Commit m) -> m ()
+                       (CommitRef m -> m a) -> CommitName m -> m [a]
+    traverseCommits_ :: (CommitRef m -> m ()) -> CommitName m -> m ()
     traverseCommits_ = (void .) . traverseCommits
 
-    missingObjects :: Maybe (Reference m (Commit m)) -> Reference m (Commit m)
-                   -> m [Oid m]
+    missingObjects :: Maybe (CommitName m) -- ^ A commit we may already have
+                   -> CommitName m         -- ^ The commit we need
+                   -> m [Oid m]            -- ^ All the objects in between
 
     -- Object creation
     newTree :: m (Tree m)
@@ -159,6 +159,32 @@ data RefTarget m a = RefObj !(ObjRef m a) | RefSymbolic !Text
 data Reference m a = Reference
     { refName   :: !Text
     , refTarget :: !(RefTarget m a) }
+
+data CommitName m = CommitObjectId !(Tagged (Commit m) (Oid m))
+                  | CommitRefName !Text
+                  | CommitReference !(Reference m (Commit m))
+
+instance Repository m => Show (CommitName m) where
+    show (CommitObjectId coid) = T.unpack (renderObjOid coid)
+    show (CommitRefName name)  = show name
+    show (CommitReference ref) = show (refName ref)
+
+nameOfCommit :: Commit m -> CommitName m
+nameOfCommit = CommitObjectId . commitOid
+
+commitNameToRef :: Repository m => CommitName m -> m (Maybe (CommitRef m))
+commitNameToRef (CommitObjectId coid) = return (Just (ByOid coid))
+commitNameToRef (CommitRefName name)  = resolveRef name
+commitNameToRef (CommitReference ref) = referenceToRef Nothing (Just ref)
+
+copyCommitName :: (MonadTrans t, MonadGit m, MonadGit (t m), Repository m,
+                   Repository (t m))
+               => CommitName m -> t m (Maybe (CommitName (t m)))
+copyCommitName (CommitObjectId coid) =
+    Just . CommitObjectId . Tagged <$> parseOid (renderObjOid coid)
+copyCommitName (CommitRefName name) = return (Just (CommitRefName name))
+copyCommitName (CommitReference ref) =
+    fmap CommitReference <$> lookupRef (refName ref)
 
 {- $objects -}
 data ObjRef m a = ByOid !(Tagged a (Oid m)) | Known !a
@@ -325,8 +351,7 @@ resolveCommitRef (ByOid oid) = lookupCommit oid
 resolveCommitRef (Known obj) = return obj
 
 referenceToRef :: Repository m
-               => Maybe Text
-               -> Maybe (Reference m (Commit m))
+               => Maybe Text -> Maybe (Reference m (Commit m))
                -> m (Maybe (CommitRef m))
 referenceToRef mname mref =
     case mref of
@@ -341,6 +366,37 @@ referenceToRef mname mref =
 {- $tags -}
 
 data Tag m = Tag { tagCommit :: !(CommitRef m) }
+
+{- $merges -}
+
+data MergeConflict m
+    = NoConflict
+    | MergeConflict
+        { conflictedHead      :: CommitOid m
+        , conflictedMergeHead :: CommitOid m
+        , conflictedFiles     :: Map FilePath ByteString
+        }
+
+instance Repository m => Eq (MergeConflict m) where
+    NoConflict == NoConflict = True
+    NoConflict == _          = False
+    _ == NoConflict          = False
+
+    x == y =   conflictedHead x      == conflictedHead y
+             && conflictedMergeHead x == conflictedMergeHead y
+             &&    Map.keys (conflictedFiles x)
+               == Map.keys (conflictedFiles y)
+
+copyConflict :: (MonadTrans t, MonadGit m, MonadGit (t m), Repository m,
+                 Repository (t m))
+             => MergeConflict m -> t m (MergeConflict (t m))
+copyConflict NoConflict = return NoConflict
+copyConflict (MergeConflict h mh files) =
+    MergeConflict <$> (Tagged <$> parseOid (renderObjOid h))
+                  <*> (Tagged <$> parseOid (renderObjOid mh))
+                  <*> pure files
+
+{- $miscellaneous -}
 
 data RepositoryOptions = RepositoryOptions
     { repoPath       :: !FilePath

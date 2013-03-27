@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
@@ -27,6 +28,7 @@ import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import           Data.IORef
 import           Data.List as L
+import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
@@ -53,23 +55,24 @@ import           Text.Parsec.Language (haskellDef)
 import           Text.Parsec.Prim
 import           Text.Parsec.Token
 
-type Oid m       = Git.Oid (CmdLineRepository m)
+type Oid m        = Git.Oid (CmdLineRepository m)
 
-type BlobOid m   = Git.BlobOid (CmdLineRepository m)
-type TreeOid m   = Git.TreeOid (CmdLineRepository m)
-type CommitOid m = Git.CommitOid (CmdLineRepository m)
-type TagOid m    = Git.TagOid (CmdLineRepository m)
+type BlobOid m    = Git.BlobOid (CmdLineRepository m)
+type TreeOid m    = Git.TreeOid (CmdLineRepository m)
+type CommitOid m  = Git.CommitOid (CmdLineRepository m)
+type TagOid m     = Git.TagOid (CmdLineRepository m)
 
-type Blob m      = Git.Blob (CmdLineRepository m)
-type Tree m      = Git.Tree (CmdLineRepository m)
-type TreeEntry m = Git.TreeEntry (CmdLineRepository m)
-type Commit m    = Git.Commit (CmdLineRepository m)
-type Tag m       = Git.Tag (CmdLineRepository m)
+type Blob m       = Git.Blob (CmdLineRepository m)
+type Tree m       = Git.Tree (CmdLineRepository m)
+type TreeEntry m  = Git.TreeEntry (CmdLineRepository m)
+type Commit m     = Git.Commit (CmdLineRepository m)
+type Tag m        = Git.Tag (CmdLineRepository m)
 
-type TreeRef m   = Git.TreeRef (CmdLineRepository m)
-type CommitRef m = Git.CommitRef (CmdLineRepository m)
+type TreeRef m    = Git.TreeRef (CmdLineRepository m)
+type CommitRef m  = Git.CommitRef (CmdLineRepository m)
+type CommitName m = Git.CommitName (CmdLineRepository m)
 
-type Reference m = Git.Reference (CmdLineRepository m) (Commit m)
+type Reference m  = Git.Reference (CmdLineRepository m) (Commit m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     data Oid (CmdLineRepository m) = Oid { getOid :: TL.Text }
@@ -92,7 +95,6 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     updateRef       = cliUpdateRef
     deleteRef       = cliDeleteRef
     resolveRef      = cliResolveRef
-    pushRef         = cliPushRef
     allRefs         = cliAllRefs
     lookupCommit    = cliLookupCommit
     lookupTree      = cliLookupTree
@@ -100,6 +102,7 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupTag       = error "Not defined CmdLineRepository.cliLookupTag"
     lookupObject    = error "Not defined CmdLineRepository.cliLookupObject"
     existsObject    = cliExistsObject
+    pushCommit      = cliPushCommit
     traverseCommits = cliTraverseCommits
     missingObjects  = cliMissingObjects
     newTree         = cliNewTree
@@ -137,32 +140,54 @@ runGit_ :: Git.MonadGit m
         => [TL.Text] -> CmdLineRepository m ()
 runGit_ = flip (doRunGit run_) (return ())
 
-cliPushRefDirectly :: Git.MonadGit m
-                   => Text -> Text -> Text -> Maybe FilePath
-                   -> CmdLineRepository m Bool
-cliPushRefDirectly refName remoteNameOrURI remoteRefName msshCmd = do
+cliDoesRepoExist :: Text -> IO Bool
+cliDoesRepoExist remoteURI = do
+    shellyNoDir $ silently $ errExit False $ do
+        setenv "SSH_ASKPASS" "echo"
+        setenv "GIT_ASKPASS" "echo"
+        run_ "git" [ "ls-remote", TL.fromStrict remoteURI ]
+        (==0) <$> lastExitCode
+
+cliCheckRemoteRepo :: Git.MonadGit m => Text -> CmdLineRepository m ()
+cliCheckRemoteRepo remoteNameOrURI =
+    when (isJust $ T.find (== ':') remoteNameOrURI) $ do
+        exists <- liftIO (cliDoesRepoExist remoteNameOrURI)
+        unless exists $
+            failure (Git.BackendError $ "Repository does not exist: "
+                             `T.append` T.pack (show remoteNameOrURI))
+
+cliPushCommitDirectly :: Git.MonadGit m
+                      => CommitName m -> Text -> Text -> Maybe FilePath
+                      -> CmdLineRepository m Bool
+cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
+    cliCheckRemoteRepo remoteNameOrURI
     repo <- cliGet
-    r <- shellyNoDir $ silently $ errExit False $ do
+    merr <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
             Nothing -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "push", TL.fromStrict remoteNameOrURI
-                     , TL.concat [ TL.fromStrict refName
+                     , TL.concat [ TL.pack (show cname)
                                  , ":", TL.fromStrict remoteRefName ] ]
-        lastExitCode
-    return (r == 0)
+        r <- lastExitCode
+        if r == 0
+            then return Nothing
+            else Just . TL.toStrict <$> lastStderr
+    case merr of
+        Nothing  -> return True
+        Just err -> failure (Git.BackendError $
+                             "git push failed:\n" `T.append` err)
 
-cliPushRef :: (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
-               Git.Repository (t (CmdLineRepository m)), MonadTrans t)
-           => Reference m -> Maybe Text -> Text
-           -> t (CmdLineRepository m) Bool
-cliPushRef ref remoteNameOrURI remoteRefName =
+cliPushCommit :: (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
+                  Git.Repository (t (CmdLineRepository m)), MonadTrans t)
+              => CommitName m -> Maybe Text -> Text
+              -> t (CmdLineRepository m) Bool
+cliPushCommit cname remoteNameOrURI remoteRefName =
     case remoteNameOrURI of
-        Nothing  -> Git.genericPushRef ref remoteRefName
-        Just uri -> lift $ cliPushRefDirectly (Git.refName ref) uri
-                        remoteRefName Nothing
+        Nothing  -> Git.genericPushCommit cname remoteRefName
+        Just uri -> lift $ cliPushCommitDirectly cname uri remoteRefName Nothing
 
 cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliResetHard refname =
@@ -170,8 +195,10 @@ cliResetHard refname =
 
 cliPullRefDirectly :: Git.MonadGit m
                    => Text -> Text -> Maybe FilePath
-                   -> CmdLineRepository m [FilePath]
+                   -> CmdLineRepository m
+                         (Git.MergeConflict (CmdLineRepository m))
 cliPullRefDirectly remoteNameOrURI remoteRefName msshCmd = do
+    cliCheckRemoteRepo remoteNameOrURI
     repo <- cliGet
     mfiles <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
@@ -183,17 +210,25 @@ cliPullRefDirectly remoteNameOrURI remoteRefName msshCmd = do
                      , TL.fromStrict remoteRefName ]
         r <- lastExitCode
         if r == 0
-            then do
-                xs <- run "git" $ [ "--git-dir", repoPath repo ]
-                               <> [ "ls-files", "-z", "unmerged" ]
-                if TL.null xs
-                    then return (Just [])
-                    else return . Just . map fromText . TL.splitOn "\NUL" $ xs
+            then Just <$> (run "git" $ [ "--git-dir", repoPath repo ]
+                                    <> [ "ls-files", "-z", "unmerged" ])
             else return Nothing
 
     case mfiles of
-         Nothing    -> failure (Git.BackendError "Could not pull from remote")
-         Just files -> return files
+         Nothing -> failure (Git.BackendError "Could not pull from remote")
+         Just xs -> returnConflict xs
+  where
+    getOid name = Git.commitRefOid . fromJust <$> Git.resolveRef name
+
+    returnConflict xs = do
+        if TL.null xs
+            then return Git.NoConflict
+            else do
+                let paths = map fromText . TL.splitOn "\NUL" $ xs
+                ours     <- getOid "HEAD"
+                theirs   <- getOid "MERGE_HEAD"
+                contents <- forM paths $ \p -> (p,) <$> liftIO (F.readFile p)
+                return $ Git.MergeConflict ours theirs (Map.fromList contents)
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
@@ -244,28 +279,25 @@ cliExistsObject (Oid sha) = do
 
 cliTraverseCommits :: Git.MonadGit m
                    => (CommitRef m -> CmdLineRepository m a)
-                   -> Reference m
+                   -> CommitName m
                    -> CmdLineRepository m [a]
-cliTraverseCommits f ref = do
+cliTraverseCommits f name = do
     shas <- doRunGit run [ "--no-pager", "log"
-                         , "--format=%H", TL.fromStrict (Git.refName ref) ]
+                         , "--format=%H", TL.pack (show name) ]
             $ return ()
-    mapM (\sha -> f =<< (Git.ByOid . Tagged
-                         <$> Git.parseOid (TL.toStrict sha)))
+    mapM (\sha -> f =<< (Git.ByOid . Tagged <$> Git.parseOid (TL.toStrict sha)))
         (TL.lines shas)
 
 cliMissingObjects :: Git.MonadGit m
-                  => Maybe (Reference m) -> Reference m
+                  => Maybe (CommitName m) -> CommitName m
                   -> CmdLineRepository m [Oid m]
 cliMissingObjects mhave need = do
     shas <- doRunGit run
             ([ "--no-pager", "rev-list", "--objects"]
              <> (case mhave of
-                      Nothing ->
-                          [TL.fromStrict (Git.refName need)]
-                      Just have ->
-                          [ TL.fromStrict (Git.refName have)
-                          , TL.fromStrict (T.append "^" (Git.refName need)) ]))
+                      Nothing   -> [ TL.pack (show need) ]
+                      Just have -> [ TL.pack (show have)
+                                   , TL.append "^" (TL.pack (show need)) ]))
             $ return ()
     mapM (Git.parseOid . T.take 40 . TL.toStrict) (TL.lines shas)
 

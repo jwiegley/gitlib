@@ -7,8 +7,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Git.S3
-       ( odbS3Backend
-       , addS3Backend
+       ( s3Factory, odbS3Backend, addS3Backend
        , readRefs, writeRefs
        , mirrorRefsFromS3, mirrorRefsToS3 )
        where
@@ -448,5 +447,19 @@ addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
         manager bucket prefix
     liftIO $ odbBackendAdd repo odbS3 100
     return repo
+
+s3Factory :: Git.MonadGit m
+          => Maybe Text -> Text -> Text
+          -> Git.RepositoryFactory (LgRepository m) m Repository
+s3Factory bucket accessKey secretKey = lgFactory
+    { Git.runRepository = \ctxt -> runLgRepository ctxt . (s3back >>) }
+  where
+    s3back = do
+        repo <- lgGet
+        void $ liftIO $ addS3Backend
+            repo (fromMaybe "test-bucket" bucket) ""
+            accessKey secretKey Nothing
+            (if isNothing bucket then Just "127.0.0.1" else Nothing)
+            Error
 
 -- S3.hs

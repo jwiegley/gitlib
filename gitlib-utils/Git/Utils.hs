@@ -187,13 +187,11 @@ copyCommit cr mref needed = do
 
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works.
-genericPushRef :: (Repository m, Repository (t m), MonadTrans t)
-               => Reference m (Commit m)
-               -> Text
-               -> t m Bool
-genericPushRef ref remoteRefName = do
+genericPushCommit :: (Repository m, Repository (t m), MonadTrans t)
+                  => CommitName m -> Text -> t m Bool
+genericPushCommit cname remoteRefName = do
     mrref    <- lookupRef remoteRefName
-    commits1 <- lift $ traverseCommits crefToSha ref
+    commits1 <- lift $ traverseCommits crefToSha cname
     fastForward <- case mrref of
         Just rref -> do
             mrsha <- referenceSha rref
@@ -203,21 +201,21 @@ genericPushRef ref remoteRefName = do
                     | rsha `elem` commits1 -> do
                         roid <- lift $ parseOid rsha
                         return $
-                            Just (Just (Reference rsha
-                                        (RefObj (ByOid (Tagged roid)))))
+                            Just (Just (CommitObjectId (Tagged roid)))
                     | otherwise -> return Nothing
         Nothing -> return (Just Nothing)
     case fastForward of
-        Nothing   -> return False
+        Nothing -> return False
         Just liftedMrref -> do
-            case refTarget ref of
-                RefObj cr -> do
-                    oids <- lift $ missingObjects liftedMrref ref
-                    let shas = map renderOid oids
-                    (cref,_) <- copyCommit cr Nothing (HashSet.fromList shas)
+            oids <- lift $ missingObjects liftedMrref cname
+            let shas = map renderOid oids
+            mref <- lift $ commitNameToRef cname
+            case mref of
+                Nothing -> failure (ReferenceLookupFailed (T.pack (show cname)))
+                Just ref -> do
+                    (cref,_) <- copyCommit ref Nothing (HashSet.fromList shas)
                     updateRef remoteRefName (RefObj cref)
                     return True
-                _ -> return False
   where
     referenceSha ref = do
         r <- referenceToRef Nothing (Just ref)
