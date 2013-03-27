@@ -169,7 +169,7 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
                                =<< liftIO (F.canonicalizePath sshCmd)
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "push", TL.fromStrict remoteNameOrURI
-                     , TL.concat [ TL.pack (show cname)
+                     , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
                                  , ":", TL.fromStrict remoteRefName ] ]
         r <- lastExitCode
         if r == 0
@@ -282,8 +282,8 @@ cliTraverseCommits :: Git.MonadGit m
                    -> CommitName m
                    -> CmdLineRepository m [a]
 cliTraverseCommits f name = do
-    shas <- doRunGit run [ "--no-pager", "log"
-                         , "--format=%H", TL.pack (show name) ]
+    shas <- doRunGit run [ "--no-pager", "log", "--format=%H"
+                         , TL.fromStrict (Git.renderCommitName name) ]
             $ return ()
     mapM (\sha -> f =<< (Git.ByOid . Tagged <$> Git.parseOid (TL.toStrict sha)))
         (TL.lines shas)
@@ -295,9 +295,11 @@ cliMissingObjects mhave need = do
     shas <- doRunGit run
             ([ "--no-pager", "rev-list", "--objects"]
              <> (case mhave of
-                      Nothing   -> [ TL.pack (show need) ]
-                      Just have -> [ TL.pack (show have)
-                                   , TL.append "^" (TL.pack (show need)) ]))
+                      Nothing   -> [ TL.fromStrict (Git.renderCommitName need) ]
+                      Just have ->
+                          [ TL.fromStrict (Git.renderCommitName have)
+                          , TL.append "^"
+                            (TL.fromStrict (Git.renderCommitName need)) ]))
             $ return ()
     mapM (Git.parseOid . T.take 40 . TL.toStrict) (TL.lines shas)
 

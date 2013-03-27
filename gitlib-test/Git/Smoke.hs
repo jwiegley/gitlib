@@ -301,7 +301,7 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
 
           withNewRepository pr2 "pushDest.git" $ do
               pushCommit (CommitRefName masterRef)
-                  (Just "file://pushRefDest.git") masterRef
+                  (Just "file://pushDest.git") masterRef
               mref2 <- lookupRef masterRef
               Just cref <- referenceToRef Nothing mref2
               lift . lift $

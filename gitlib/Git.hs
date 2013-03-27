@@ -177,6 +177,11 @@ commitNameToRef (CommitObjectId coid) = return (Just (ByOid coid))
 commitNameToRef (CommitRefName name)  = resolveRef name
 commitNameToRef (CommitReference ref) = referenceToRef Nothing (Just ref)
 
+renderCommitName :: Repository m => CommitName m -> Text
+renderCommitName (CommitObjectId coid) = renderObjOid coid
+renderCommitName (CommitRefName name)  = name
+renderCommitName (CommitReference ref) = refName ref
+
 copyCommitName :: (MonadTrans t, MonadGit m, MonadGit (t m), Repository m,
                    Repository (t m))
                => CommitName m -> t m (Maybe (CommitName (t m)))
