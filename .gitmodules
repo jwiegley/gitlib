@@ -37,6 +37,3 @@
 [submodule "vendor/github"]
 	path = vendor/github
 	url = https://github.com/fpco/github.git
-[submodule "gitlib-fpco"]
-	path = gitlib-fpco
-	url = git@github.com:fpco/gitlib-fpco.git
