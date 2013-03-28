@@ -875,7 +875,7 @@ openOrCreateGhRepository opts owner repoName token = do
 ghFactory :: Git.MonadGit m
           => GitHubOwner
           -> Maybe Text
-          -> Git.RepositoryFactory (GitHubRepository m) m Repository
+          -> Git.RepositoryFactory GitHubRepository m Repository
 ghFactory owner token = Git.RepositoryFactory
     { Git.openRepository  = \opts ->
        openGhRepository opts owner

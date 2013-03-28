@@ -182,9 +182,16 @@ renderCommitName (CommitObjectId coid) = renderObjOid coid
 renderCommitName (CommitRefName name)  = name
 renderCommitName (CommitReference ref) = refName ref
 
-copyCommitName :: (MonadTrans t, MonadGit m, MonadGit (t m), Repository m,
-                   Repository (t m))
-               => CommitName m -> t m (Maybe (CommitName (t m)))
+copyOid :: (Repository m, MonadGit m, Repository n, MonadGit n)
+        => Oid m -> n (Oid n)
+copyOid = parseOid . renderOid
+
+copyCommitOid :: (Repository m, MonadGit m, Repository n, MonadGit n)
+              => CommitOid m -> n (CommitOid n)
+copyCommitOid = fmap Tagged . parseOid . renderObjOid
+
+copyCommitName :: (Repository m, MonadGit m, Repository n, MonadGit n)
+               => CommitName m -> n (Maybe (CommitName n))
 copyCommitName (CommitObjectId coid) =
     Just . CommitObjectId . Tagged <$> parseOid (renderObjOid coid)
 copyCommitName (CommitRefName name) = return (Just (CommitRefName name))
@@ -392,9 +399,8 @@ instance Repository m => Eq (MergeConflict m) where
              &&    Map.keys (conflictedFiles x)
                == Map.keys (conflictedFiles y)
 
-copyConflict :: (MonadTrans t, MonadGit m, MonadGit (t m), Repository m,
-                 Repository (t m))
-             => MergeConflict m -> t m (MergeConflict (t m))
+copyConflict :: (Repository m, MonadGit m, Repository n, MonadGit n)
+             => MergeConflict m -> n (MergeConflict n)
 copyConflict NoConflict = return NoConflict
 copyConflict (MergeConflict h mh files) =
     MergeConflict <$> (Tagged <$> parseOid (renderObjOid h))
@@ -412,16 +418,16 @@ data RepositoryOptions = RepositoryOptions
 instance Default RepositoryOptions where
     def = RepositoryOptions "" True True
 
-data RepositoryFactory r m c = RepositoryFactory
+data RepositoryFactory t m c = RepositoryFactory
     { openRepository  :: RepositoryOptions -> m c
-    , runRepository   :: forall a. c -> r a -> m a
+    , runRepository   :: forall a. c -> t m a -> m a
     , closeRepository :: c -> m ()
     , defaultOptions  :: !RepositoryOptions
     }
 
 withRepository' :: (Repository (t m), MonadTrans t,
                     MonadBaseControl IO m, MonadIO m)
-                => RepositoryFactory (t m) m c
+                => RepositoryFactory t m c
                 -> RepositoryOptions
                 -> t m a
                 -> m a
@@ -433,7 +439,7 @@ withRepository' factory opts action =
 
 withRepository :: (Repository (t m), MonadTrans t,
                    MonadBaseControl IO m, MonadIO m)
-               => RepositoryFactory (t m) m c
+               => RepositoryFactory t m c
                -> FilePath
                -> t m a
                -> m a

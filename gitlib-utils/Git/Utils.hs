@@ -274,7 +274,7 @@ resolveRefTree refName = do
 
 withNewRepository :: (Repository (t m), MonadGit (t m),
                       MonadBaseControl IO m, MonadIO m, MonadTrans t)
-                  => RepositoryFactory (t m) m c
+                  => RepositoryFactory t m c
                   -> FilePath -> t m a -> m a
 withNewRepository factory path action = do
     liftIO $ do
@@ -296,7 +296,7 @@ withNewRepository factory path action = do
 
 withNewRepository' :: (Repository (t m), MonadGit (t m),
                        MonadBaseControl IO m, MonadIO m, MonadTrans t)
-                   => RepositoryFactory (t m) m c -> FilePath -> t m a -> m a
+                   => RepositoryFactory t m c -> FilePath -> t m a -> m a
 withNewRepository' factory path action = do
     liftIO $ do
         exists <- isDirectory path

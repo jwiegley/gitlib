@@ -27,7 +27,7 @@ import           Test.Hspec.Runner
 ghFactory :: Git.MonadGit m
           => Text
           -> Maybe Text
-          -> Git.RepositoryFactory (Gh.GitHubRepository m) m Gh.Repository
+          -> Git.RepositoryFactory Gh.GitHubRepository m Gh.Repository
 ghFactory owner token = Gh.ghFactory (Gh.GitHubUser owner) token
 
 main :: IO ()

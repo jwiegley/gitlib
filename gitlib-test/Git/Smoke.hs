@@ -36,8 +36,8 @@ sampleCommit tr sig =
 smokeTestSpec :: (Repository (t IO), MonadGit (t IO), MonadTrans t,
                   Repository (t2 (t IO)), MonadGit (t2 (t IO)), MonadTrans t2,
                   MonadBaseControl IO (t IO))
-              => RepositoryFactory (t IO) IO c
-              -> RepositoryFactory (t2 (t IO)) (t IO) c2
+              => RepositoryFactory t IO c
+              -> RepositoryFactory t2 (t IO) c2
               -> Spec
 smokeTestSpec pr pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do

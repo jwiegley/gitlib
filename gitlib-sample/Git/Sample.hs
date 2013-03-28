@@ -102,7 +102,7 @@ sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
 
 sampleFactory :: Git.MonadGit m
-              => Git.RepositoryFactory (SampleRepository m) m Repository
+              => Git.RepositoryFactory SampleRepository m Repository
 sampleFactory = Git.RepositoryFactory
     { Git.openRepository  = openSampleRepository
     , Git.runRepository   = runSampleRepository

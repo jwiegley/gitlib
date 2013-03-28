@@ -722,7 +722,7 @@ cliGet :: Monad m => CmdLineRepository m Repository
 cliGet = CmdLineRepository ask
 
 cliFactory :: Git.MonadGit m
-           => Git.RepositoryFactory (CmdLineRepository m) m Repository
+           => Git.RepositoryFactory CmdLineRepository m Repository
 cliFactory = Git.RepositoryFactory
     { Git.openRepository  = openCliRepository
     , Git.runRepository   = runCliRepository

@@ -28,7 +28,7 @@ import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
 s3Factory :: Git.MonadGit m
-          => Git.RepositoryFactory (Lg.LgRepository m) m Lg.Repository
+          => Git.RepositoryFactory Lg.LgRepository m Lg.Repository
 s3Factory = Lg.lgFactory
     { Git.runRepository = \ctxt -> Lg.runLgRepository ctxt . (s3back >>) }
   where

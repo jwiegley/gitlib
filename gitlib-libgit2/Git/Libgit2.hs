@@ -931,7 +931,7 @@ lgAllRefNames = listRefNames allRefsFlag
 --compareRef = c'git_reference_cmp
 
 lgFactory :: Git.MonadGit m
-          => Git.RepositoryFactory (LgRepository m) m Repository
+          => Git.RepositoryFactory LgRepository m Repository
 lgFactory = Git.RepositoryFactory
     { Git.openRepository  = openLgRepository
     , Git.runRepository   = runLgRepository

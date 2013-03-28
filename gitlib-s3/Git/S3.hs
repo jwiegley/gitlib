@@ -450,7 +450,7 @@ addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
 
 s3Factory :: Git.MonadGit m
           => Maybe Text -> Text -> Text
-          -> Git.RepositoryFactory (LgRepository m) m Repository
+          -> Git.RepositoryFactory LgRepository m Repository
 s3Factory bucket accessKey secretKey = lgFactory
     { Git.runRepository = \ctxt -> runLgRepository ctxt . (s3back >>) }
   where
