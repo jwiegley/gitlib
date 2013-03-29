@@ -936,6 +936,7 @@ lgFactory = Git.RepositoryFactory
     { Git.openRepository  = openLgRepository
     , Git.runRepository   = runLgRepository
     , Git.closeRepository = closeLgRepository
+    , Git.getRepository   = lgGet
     , Git.defaultOptions  = defaultLgOptions
     }
 

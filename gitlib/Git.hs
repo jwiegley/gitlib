@@ -140,7 +140,7 @@ data GitException = BackendError Text
                   | ObjectRefRequiresFullOid
                   | OidCopyFailed
                   | OidParseFailed Text
-                  deriving (Show, Typeable)
+                  deriving (Eq, Show, Typeable)
 
 -- jww (2013-02-11): Create a BackendException data constructor of forall
 -- e. Exception e => BackendException e, so that each can throw a derived
@@ -188,7 +188,9 @@ copyOid = parseOid . renderOid
 
 copyCommitOid :: (Repository m, MonadGit m, Repository n, MonadGit n)
               => CommitOid m -> n (CommitOid n)
-copyCommitOid = fmap Tagged . parseOid . renderObjOid
+copyCommitOid coid = do
+    ncoid <- parseOid (renderObjOid coid)
+    return (Tagged ncoid)
 
 copyCommitName :: (Repository m, MonadGit m, Repository n, MonadGit n)
                => CommitName m -> n (Maybe (CommitName n))
@@ -399,6 +401,15 @@ instance Repository m => Eq (MergeConflict m) where
              &&    Map.keys (conflictedFiles x)
                == Map.keys (conflictedFiles y)
 
+instance Repository m => Show (MergeConflict m) where
+    show NoConflict = "NoConflict"
+
+    show (MergeConflict h mh fs) =
+        "MergeConflict { conflictedHead = " ++ show h
+        ++ ", conflictedMergeHead = " ++ show mh
+        ++ ", conflictedFiles = " ++ show fs
+        ++ " }"
+
 copyConflict :: (Repository m, MonadGit m, Repository n, MonadGit n)
              => MergeConflict m -> n (MergeConflict n)
 copyConflict NoConflict = return NoConflict
@@ -422,6 +433,7 @@ data RepositoryFactory t m c = RepositoryFactory
     { openRepository  :: RepositoryOptions -> m c
     , runRepository   :: forall a. c -> t m a -> m a
     , closeRepository :: c -> m ()
+    , getRepository   :: t m c
     , defaultOptions  :: !RepositoryOptions
     }
 

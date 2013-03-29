@@ -28,7 +28,7 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Traversable hiding (mapM, forM, sequence)
--- import           Debug.Trace
+import           Debug.Trace
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null)
 import           Git
@@ -196,13 +196,12 @@ genericPushCommit cname remoteRefName = do
         Just rref -> do
             mrsha <- referenceSha rref
             case mrsha of
-                Nothing -> return Nothing
+                Nothing -> return (trace "1.." Nothing)
                 Just rsha
                     | rsha `elem` commits1 -> do
                         roid <- lift $ parseOid rsha
-                        return $
-                            Just (Just (CommitObjectId (Tagged roid)))
-                    | otherwise -> return Nothing
+                        return $ Just (Just (CommitObjectId (Tagged roid)))
+                    | otherwise -> return (trace "2.." Nothing)
         Nothing -> return (Just Nothing)
     case fastForward of
         Nothing -> return False

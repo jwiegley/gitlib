@@ -107,6 +107,7 @@ sampleFactory = Git.RepositoryFactory
     { Git.openRepository  = openSampleRepository
     , Git.runRepository   = runSampleRepository
     , Git.closeRepository = closeSampleRepository
+    , Git.getRepository   = sampleGet
     , Git.defaultOptions  = defaultSampleOptions
     }
 

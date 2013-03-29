@@ -193,13 +193,13 @@ cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliResetHard refname =
     doRunGit run_ [ "reset", "--hard", TL.fromStrict refname ] $ return ()
 
-cliPullRefDirectly :: Git.MonadGit m
-                   => Text -> Text -> Maybe FilePath
-                   -> CmdLineRepository m
-                         (Git.MergeConflict (CmdLineRepository m))
-cliPullRefDirectly remoteNameOrURI remoteRefName msshCmd = do
+cliPullCommitDirectly :: Git.MonadGit m
+                      => Text -> Text -> Maybe FilePath
+                      -> CmdLineRepository m
+                          (Git.MergeConflict (CmdLineRepository m))
+cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
     cliCheckRemoteRepo remoteNameOrURI
-    repo <- cliGet
+    repo   <- cliGet
     mfiles <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
             Nothing -> return ()
@@ -218,7 +218,12 @@ cliPullRefDirectly remoteNameOrURI remoteRefName msshCmd = do
          Nothing -> failure (Git.BackendError "Could not pull from remote")
          Just xs -> returnConflict xs
   where
-    getOid name = Git.commitRefOid . fromJust <$> Git.resolveRef name
+    getOid name = do
+        mref <- Git.resolveRef name
+        case mref of
+            Nothing -> failure (Git.BackendError $
+                                T.append "Reference missing: " name)
+            Just ref -> return (Git.commitRefOid ref)
 
     returnConflict xs = do
         if TL.null xs
@@ -727,6 +732,7 @@ cliFactory = Git.RepositoryFactory
     { Git.openRepository  = openCliRepository
     , Git.runRepository   = runCliRepository
     , Git.closeRepository = closeCliRepository
+    , Git.getRepository   = cliGet
     , Git.defaultOptions  = defaultCliOptions
     }
 

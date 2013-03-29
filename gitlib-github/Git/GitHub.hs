@@ -882,6 +882,7 @@ ghFactory owner token = Git.RepositoryFactory
            (either id id (F.toText (F.basename (Git.repoPath opts)))) token
     , Git.runRepository   = runGhRepository
     , Git.closeRepository = closeGhRepository
+    , Git.getRepository   = ghGet
     , Git.defaultOptions  = defaultGhOptions
     }
 
