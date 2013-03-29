@@ -38,7 +38,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time
 import           Data.Tuple
--- import           Debug.Trace
+import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -167,6 +167,7 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
             Nothing -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
+
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "push", TL.fromStrict remoteNameOrURI
                      , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
@@ -205,35 +206,35 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
             Nothing -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
+
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "pull", TL.fromStrict remoteNameOrURI
                      , TL.fromStrict remoteRefName ]
         r <- lastExitCode
         if r == 0
-            then Just <$> (run "git" $ [ "--git-dir", repoPath repo ]
-                                    <> [ "ls-files", "-z", "unmerged" ])
-            else return Nothing
+            then return Nothing
+            else Just <$> (run "git" $ [ "--git-dir", repoPath repo ]
+                                    <> [ "ls-files", "-z", "--unmerged" ])
 
     case mfiles of
-         Nothing -> failure (Git.BackendError "Could not pull from remote")
-         Just xs -> returnConflict xs
+         Nothing -> return Git.NoConflict
+         Just xs -> returnConflict (TL.init xs)
   where
     getOid name = do
         mref <- Git.resolveRef name
         case mref of
-            Nothing -> failure (Git.BackendError $
-                                T.append "Reference missing: " name)
+            Nothing  -> failure (Git.BackendError $
+                                 T.append "Reference missing: " name)
             Just ref -> return (Git.commitRefOid ref)
 
     returnConflict xs = do
-        if TL.null xs
-            then return Git.NoConflict
-            else do
-                let paths = map fromText . TL.splitOn "\NUL" $ xs
-                ours     <- getOid "HEAD"
-                theirs   <- getOid "MERGE_HEAD"
-                contents <- forM paths $ \p -> (p,) <$> liftIO (F.readFile p)
-                return $ Git.MergeConflict ours theirs (Map.fromList contents)
+        let paths = nub . sort
+                    . map (fromText . last . TL.splitOn "\t") . init
+                    . TL.splitOn "\NUL" $ xs
+        ours     <- getOid "HEAD"
+        theirs   <- getOid "MERGE_HEAD"
+        contents <- forM paths $ \p -> (p,) <$> liftIO (F.readFile p)
+        return $ Git.MergeConflict ours theirs (Map.fromList contents)
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
