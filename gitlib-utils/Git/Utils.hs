@@ -168,7 +168,7 @@ copyCommit cr mref needed = do
         (parentRefs,needed') <- foldM copyParent ([],needed) parents
         (tr,needed'') <- copyTree (commitTree commit) needed'
 
-        commit <- createCommit parentRefs tr
+        commit <- createCommit (reverse parentRefs) tr
             (commitAuthor commit)
             (commitCommitter commit)
             (commitLog commit)
@@ -187,8 +187,8 @@ copyCommit cr mref needed = do
 
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works.
-genericPushCommit :: (Repository m, Repository (t m), MonadTrans t)
-                  => CommitName m -> Text -> t m Bool
+genericPushCommit :: (Repository m, Repository (t m), MonadTrans t, MonadIO (t m))
+                  => CommitName m -> Text -> t m (CommitRef (t m))
 genericPushCommit cname remoteRefName = do
     mrref    <- lookupRef remoteRefName
     commits1 <- lift $ traverseCommits crefToSha cname
@@ -196,15 +196,20 @@ genericPushCommit cname remoteRefName = do
         Just rref -> do
             mrsha <- referenceSha rref
             case mrsha of
-                Nothing -> return (trace "1.." Nothing)
+                Nothing -> failure (Git.PushNotFastForward $
+                                    "Could not find SHA for " <> remoteRefName)
                 Just rsha
                     | rsha `elem` commits1 -> do
                         roid <- lift $ parseOid rsha
                         return $ Just (Just (CommitObjectId (Tagged roid)))
-                    | otherwise -> return (trace "2.." Nothing)
+                    | otherwise -> do
+                        mapM (liftIO . putStrLn . T.unpack) commits1
+                        failure (Git.PushNotFastForward $
+                                 "SHA " <> rsha
+                                        <> " not found in remote")
         Nothing -> return (Just Nothing)
     case fastForward of
-        Nothing -> return False
+        Nothing -> failure (Git.PushNotFastForward "unexpected")
         Just liftedMrref -> do
             oids <- lift $ missingObjects liftedMrref cname
             let shas = map renderOid oids
@@ -214,7 +219,7 @@ genericPushCommit cname remoteRefName = do
                 Just ref -> do
                     (cref,_) <- copyCommit ref Nothing (HashSet.fromList shas)
                     updateRef remoteRefName (RefObj cref)
-                    return True
+                    return cref
   where
     referenceSha ref = do
         r <- referenceToRef Nothing (Just ref)

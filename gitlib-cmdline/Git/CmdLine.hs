@@ -38,7 +38,6 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time
 import           Data.Tuple
-import           Debug.Trace
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
@@ -102,7 +101,7 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupTag       = error "Not defined CmdLineRepository.cliLookupTag"
     lookupObject    = error "Not defined CmdLineRepository.cliLookupObject"
     existsObject    = cliExistsObject
-    pushCommit      = cliPushCommit
+    pushCommit      = \name _ rrefname -> Git.genericPushCommit name rrefname
     traverseCommits = cliTraverseCommits
     missingObjects  = cliMissingObjects
     newTree         = cliNewTree
@@ -158,7 +157,7 @@ cliCheckRemoteRepo remoteNameOrURI =
 
 cliPushCommitDirectly :: Git.MonadGit m
                       => CommitName m -> Text -> Text -> Maybe FilePath
-                      -> CmdLineRepository m Bool
+                      -> CmdLineRepository m (CommitRef m)
 cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
     cliCheckRemoteRepo remoteNameOrURI
     repo <- cliGet
@@ -177,18 +176,13 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
             then return Nothing
             else Just . TL.toStrict <$> lastStderr
     case merr of
-        Nothing  -> return True
-        Just err -> failure (Git.BackendError $
-                             "git push failed:\n" `T.append` err)
-
-cliPushCommit :: (Git.MonadGit m, Git.MonadGit (t (CmdLineRepository m)),
-                  Git.Repository (t (CmdLineRepository m)), MonadTrans t)
-              => CommitName m -> Maybe Text -> Text
-              -> t (CmdLineRepository m) Bool
-cliPushCommit cname remoteNameOrURI remoteRefName =
-    case remoteNameOrURI of
-        Nothing  -> Git.genericPushCommit cname remoteRefName
-        Just uri -> lift $ cliPushCommitDirectly cname uri remoteRefName Nothing
+        Nothing  -> do
+            mcref <- Git.resolveRef remoteNameOrURI
+            case mcref of
+                Nothing   -> failure (Git.BackendError $ "git push failed")
+                Just cref -> return cref
+        Just err ->
+            failure (Git.BackendError $ "git push failed:\n" <> err)
 
 cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliResetHard refname =
@@ -531,7 +525,7 @@ cliLookupCommit (Tagged (Oid sha)) = do
             , Git.commitCommitter = committer
             , Git.commitLog       = T.pack (init message)
             , Git.commitTree      = Git.ByOid treeOid
-            , Git.commitParents   = map Git.ByOid (Prelude.reverse parentOids)
+            , Git.commitParents   = map Git.ByOid parentOids
             , Git.commitEncoding  = "utf-8"
             }
 

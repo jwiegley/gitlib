@@ -86,7 +86,8 @@ class (Applicative m, Monad m, Failure GitException m,
 
     pushCommit :: (MonadTrans t, MonadGit m, MonadGit (t m),
                    Repository m, Repository (t m))
-               => CommitName m -> Maybe Text -> Text -> t m Bool
+               => CommitName m -> Maybe Text -> Text
+               -> t m (CommitRef (t m))
 
     traverseCommits :: forall a.
                        (CommitRef m -> m a) -> CommitName m -> m [a]
@@ -117,6 +118,7 @@ data GitException = BackendError Text
                   | BlobEmptyCreateFailed
                   | BlobEncodingUnknown Text
                   | BlobLookupFailed
+                  | PushNotFastForward Text
                   | TranslationException Text
                   | TreeCreateFailed Text
                   | TreeBuilderCreateFailed
