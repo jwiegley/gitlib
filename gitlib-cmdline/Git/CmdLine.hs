@@ -177,7 +177,7 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
             else Just . TL.toStrict <$> lastStderr
     case merr of
         Nothing  -> do
-            mcref <- Git.resolveRef remoteNameOrURI
+            mcref <- Git.resolveRef remoteRefName
             case mcref of
                 Nothing   -> failure (Git.BackendError $ "git push failed")
                 Just cref -> return cref
