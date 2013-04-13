@@ -390,18 +390,18 @@ data MergeConflict m
     | MergeConflict
         { conflictedHead      :: CommitOid m
         , conflictedMergeHead :: CommitOid m
-        , conflictedFiles     :: Map FilePath ByteString
+        , conflictedFiles     :: Map FilePath (Either ByteString ByteString)
         }
 
-instance Repository m => Eq (MergeConflict m) where
-    NoConflict == NoConflict = True
-    NoConflict == _          = False
-    _ == NoConflict          = False
-
-    x == y =   conflictedHead x      == conflictedHead y
-             && conflictedMergeHead x == conflictedMergeHead y
-             &&    Map.keys (conflictedFiles x)
-               == Map.keys (conflictedFiles y)
+sameMergeBasis :: Repository m => MergeConflict m -> MergeConflict m -> Bool
+sameMergeBasis NoConflict NoConflict = True
+sameMergeBasis NoConflict _          = False
+sameMergeBasis _ NoConflict          = False
+sameMergeBasis x y =
+      conflictedHead x      == conflictedHead y
+    && conflictedMergeHead x == conflictedMergeHead y
+    &&    Map.keys (conflictedFiles x)
+      == Map.keys (conflictedFiles y)
 
 instance Repository m => Show (MergeConflict m) where
     show NoConflict = "NoConflict"

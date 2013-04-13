@@ -195,7 +195,7 @@ cliPullCommitDirectly :: Git.MonadGit m
 cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
     cliCheckRemoteRepo remoteNameOrURI
     repo   <- cliGet
-    mfiles <- shellyNoDir $ silently $ errExit False $ do
+    mpaths <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
             Nothing -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
@@ -207,12 +207,23 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
         r <- lastExitCode
         if r == 0
             then return Nothing
-            else Just <$> (run "git" $ [ "--git-dir", repoPath repo ]
-                                    <> [ "ls-files", "-z", "--unmerged" ])
+            else do
+                cs <- run "git" $ [ "--git-dir", repoPath repo ]
+                               <> [ "ls-files", "-z", "--unmerged" ]
+                conflicted <- liftIO $ returnConflict Left (TL.init cs)
 
-    case mfiles of
-         Nothing -> return Git.NoConflict
-         Just xs -> returnConflict (TL.init xs)
+                ms <- run "git" $ [ "--git-dir", repoPath repo ]
+                               <> [ "ls-files", "-z", "--stage" ]
+                merged <- liftIO $ returnConflict Right (TL.init ms)
+
+                return $ Just (merged <> conflicted)
+
+    case mpaths of
+        Nothing    -> return Git.NoConflict
+        Just paths -> do
+            ours   <- getOid "HEAD"
+            theirs <- getOid "MERGE_HEAD"
+            return $ Git.MergeConflict ours theirs paths
   where
     getOid name = do
         mref <- Git.resolveRef name
@@ -221,14 +232,14 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
                                  T.append "Reference missing: " name)
             Just ref -> return (Git.commitRefOid ref)
 
-    returnConflict xs = do
+    returnConflict f xs = do
         let paths = nub . sort
                     . map (fromText . last . TL.splitOn "\t") . init
                     . TL.splitOn "\NUL" $ xs
-        ours     <- getOid "HEAD"
-        theirs   <- getOid "MERGE_HEAD"
-        contents <- forM paths $ \p -> (p,) <$> liftIO (F.readFile p)
-        return $ Git.MergeConflict ours theirs (Map.fromList contents)
+        contents <- forM paths $ \p -> do
+            bs <- F.readFile p
+            return (p, f bs)
+        return (Map.fromList contents)
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
