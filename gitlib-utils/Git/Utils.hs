@@ -218,7 +218,9 @@ genericPushCommit cname remoteRefName = do
                 Nothing -> failure (ReferenceLookupFailed (T.pack (show cname)))
                 Just ref -> do
                     (cref,_) <- copyCommit ref Nothing (HashSet.fromList shas)
-                    updateRef remoteRefName (RefObj cref)
+                    -- jww (2013-04-18): This is something the user must
+                    -- decide to do
+                    -- updateRef_ remoteRefName (RefObj cref)
                     return cref
   where
     referenceSha ref = do
