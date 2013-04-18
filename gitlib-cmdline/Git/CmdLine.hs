@@ -191,40 +191,48 @@ cliResetHard refname =
 cliPullCommitDirectly :: Git.MonadGit m
                       => Text -> Text -> Maybe FilePath
                       -> CmdLineRepository m
-                          (Git.MergeConflict (CmdLineRepository m))
+                          (Git.MergeResult (CmdLineRepository m))
 cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
     cliCheckRemoteRepo remoteNameOrURI
-    repo   <- cliGet
-    mpaths <- shellyNoDir $ silently $ errExit False $ do
+
+    repo     <- cliGet
+    leftHead <- Git.resolveRef "HEAD"
+
+    r <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
-            Nothing -> return ()
+            Nothing     -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
 
         run_ "git" $ [ "--git-dir", repoPath repo ]
                   <> [ "pull", TL.fromStrict remoteNameOrURI
                      , TL.fromStrict remoteRefName ]
-        r <- lastExitCode
-        if r == 0
-            then return Nothing
-            else do
-                cs <- run "git" $ [ "--git-dir", repoPath repo ]
-                               <> [ "ls-files", "-z", "--unmerged" ]
-                conflicted <- liftIO $ returnConflict Left (TL.init cs)
+        lastExitCode
+    if r == 0
+        then Git.MergeSuccess <$> getOid "HEAD"
+        else case leftHead of
+            Nothing ->
+                failure (Git.BackendError "Reference missing: HEAD (left)")
+            Just lh -> performMerge repo (Git.commitRefOid lh)
 
-                ms <- run "git" $ [ "--git-dir", repoPath repo ]
-                               <> [ "ls-files", "-z", "--stage" ]
-                merged <- liftIO $ returnConflict Right (TL.init ms)
-
-                return $ Just (merged <> conflicted)
-
-    case mpaths of
-        Nothing    -> return Git.NoConflict
-        Just paths -> do
-            ours   <- getOid "HEAD"
-            theirs <- getOid "MERGE_HEAD"
-            return $ Git.MergeConflict ours theirs paths
   where
+    performMerge repo leftHead = do
+        rightHead <- getOid "MERGE_HEAD"
+        xs <- shellyNoDir $ silently $ errExit False $ do
+            xs <- returnConflict . TL.init
+                  <$> run "git" [ "--git-dir", repoPath repo
+                                , "status", "-z", "--porcelain" ]
+            forM_ (Map.keys xs) $ \fp ->
+                run_ "git" [ "--git-dir", repoPath repo
+                           , "add", toTextIgnore fp ]
+            run_ "git" [ "--git-dir", repoPath repo
+                       , "commit", "-F", ".git/MERGE_MSG" ]
+            return xs
+        Git.MergeConflicted <$> pure leftHead
+                            <*> pure rightHead
+                            <*> getOid "HEAD"
+                            <*> pure xs
+
     getOid name = do
         mref <- Git.resolveRef name
         case mref of
@@ -232,14 +240,19 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
                                  T.append "Reference missing: " name)
             Just ref -> return (Git.commitRefOid ref)
 
-    returnConflict f xs = do
-        let paths = nub . sort
-                    . map (fromText . last . TL.splitOn "\t") . init
-                    . TL.splitOn "\NUL" $ xs
-        contents <- forM paths $ \p -> do
-            bs <- F.readFile p
-            return (p, f bs)
-        return (Map.fromList contents)
+    charToModKind 'M' = Git.Modified
+    charToModKind 'U' = Git.Modified
+    charToModKind 'A' = Git.Added
+    charToModKind 'D' = Git.Deleted
+    charToModKind _   = Git.Unchanged
+
+    returnConflict xs =
+        Map.fromList
+            . filter (\(_, (l, r)) -> ((&&) `on` (/= Git.Unchanged)) l r)
+            . map (\l -> (fromText $ TL.drop 3 l,
+                          (charToModKind (TL.index l 0),
+                           charToModKind (TL.index l 1)))) . init
+            . TL.splitOn "\NUL" $ xs
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)

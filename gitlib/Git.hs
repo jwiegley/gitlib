@@ -101,7 +101,7 @@ class (Applicative m, Monad m, Failure GitException m,
     -- Object creation
     newTree :: m (Tree m)
     hashContents :: BlobContents m -> m (BlobOid m)
-    createBlob :: BlobContents m -> m (BlobOid m)
+    createBlob   :: BlobContents m -> m (BlobOid m)
     createCommit :: [CommitRef m] -> TreeRef m
                  -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
@@ -112,6 +112,7 @@ class (Applicative m, Monad m, Failure GitException m,
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
 data GitException = BackendError Text
+                  | GitError Text
                   | RepositoryNotExist
                   | RepositoryInvalid
                   | BlobCreateFailed
@@ -385,40 +386,39 @@ data Tag m = Tag { tagCommit :: !(CommitRef m) }
 
 {- $merges -}
 
-data MergeConflict m
-    = NoConflict
-    | MergeConflict
-        { conflictedHead      :: CommitOid m
-        , conflictedMergeHead :: CommitOid m
-        , conflictedFiles     :: Map FilePath (Either ByteString ByteString)
+data ModificationKind = Unchanged | Modified | Added | Deleted
+                      deriving (Eq, Ord, Enum, Show)
+
+data MergeResult m
+    = MergeSuccess
+        { mergeCommit    :: CommitOid m
+        }
+    | MergeConflicted
+        { mergeCommit    :: CommitOid m
+        , mergeHeadLeft  :: CommitOid m
+        , mergeHeadRight :: CommitOid m
+        , mergeConflicts :: Map FilePath (ModificationKind, ModificationKind)
         }
 
-sameMergeBasis :: Repository m => MergeConflict m -> MergeConflict m -> Bool
-sameMergeBasis NoConflict NoConflict = True
-sameMergeBasis NoConflict _          = False
-sameMergeBasis _ NoConflict          = False
-sameMergeBasis x y =
-      conflictedHead x      == conflictedHead y
-    && conflictedMergeHead x == conflictedMergeHead y
-    &&    Map.keys (conflictedFiles x)
-      == Map.keys (conflictedFiles y)
-
-instance Repository m => Show (MergeConflict m) where
-    show NoConflict = "NoConflict"
-
-    show (MergeConflict h mh fs) =
-        "MergeConflict { conflictedHead = " ++ show h
-        ++ ", conflictedMergeHead = " ++ show mh
-        ++ ", conflictedFiles = " ++ show fs
-        ++ " }"
+instance Repository m => Show (MergeResult m) where
+    show (MergeSuccess mc) = "MergeSuccess (" ++ show mc ++ ")"
+    show (MergeConflicted hl hr mc cs) =
+        "MergeResult"
+     ++ "\n    { mergeHeadLeft  = " ++ show hl
+     ++ "\n    , mergeHeadRight = " ++ show hr
+     ++ "\n    , mergeCommit    = " ++ show mc
+     ++ "\n    , mergeConflicts = " ++ show cs
+     ++ "\n    }"
 
 copyConflict :: (Repository m, MonadGit m, Repository n, MonadGit n)
-             => MergeConflict m -> n (MergeConflict n)
-copyConflict NoConflict = return NoConflict
-copyConflict (MergeConflict h mh files) =
-    MergeConflict <$> (Tagged <$> parseOid (renderObjOid h))
-                  <*> (Tagged <$> parseOid (renderObjOid mh))
-                  <*> pure files
+             => MergeResult m -> n (MergeResult n)
+copyConflict (MergeSuccess mc) =
+    MergeSuccess <$> (Tagged <$> parseOid (renderObjOid mc))
+copyConflict (MergeConflicted hl hr mc cs) =
+    MergeConflicted <$> (Tagged <$> parseOid (renderObjOid hl))
+                    <*> (Tagged <$> parseOid (renderObjOid hr))
+                    <*> (Tagged <$> parseOid (renderObjOid mc))
+                    <*> pure cs
 
 {- $miscellaneous -}
 
