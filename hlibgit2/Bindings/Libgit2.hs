@@ -19,6 +19,7 @@ module Bindings.Libgit2 (
     module Bindings.Libgit2.Tree,
     module Bindings.Libgit2.Odb,
     module Bindings.Libgit2.Common,
+    module Bindings.Libgit2.Remote,
     module Bindings.Libgit2.Object) where
 import Bindings.Libgit2.Repository
 import Bindings.Libgit2.Config
@@ -39,4 +40,5 @@ import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Tree
 import Bindings.Libgit2.Odb
 import Bindings.Libgit2.Common
+import Bindings.Libgit2.Remote
 import Bindings.Libgit2.Object
