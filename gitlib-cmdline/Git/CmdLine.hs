@@ -147,19 +147,18 @@ cliDoesRepoExist remoteURI = do
         run_ "git" [ "ls-remote", TL.fromStrict remoteURI ]
         (==0) <$> lastExitCode
 
-cliCheckRemoteRepo :: Git.MonadGit m => Text -> CmdLineRepository m ()
-cliCheckRemoteRepo remoteNameOrURI =
-    when (isJust $ T.find (== ':') remoteNameOrURI) $ do
-        exists <- liftIO (cliDoesRepoExist remoteNameOrURI)
-        unless exists $
-            failure (Git.BackendError $ "Repository does not exist: "
-                             `T.append` T.pack (show remoteNameOrURI))
+cliCheckRemoteRepo :: Git.MonadGit m => Text -> CmdLineRepository m Bool
+cliCheckRemoteRepo = liftIO . cliDoesRepoExist
 
 cliPushCommitDirectly :: Git.MonadGit m
                       => CommitName m -> Text -> Text -> Maybe FilePath
                       -> CmdLineRepository m (CommitRef m)
 cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
-    cliCheckRemoteRepo remoteNameOrURI
+    exists <- cliCheckRemoteRepo remoteNameOrURI
+    unless exists $
+        failure (Git.BackendError $ "Repository does not exist: "
+                         `T.append` T.pack (show remoteNameOrURI))
+
     repo <- cliGet
     merr <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
@@ -193,7 +192,10 @@ cliPullCommitDirectly :: Git.MonadGit m
                       -> CmdLineRepository m
                           (Git.MergeResult (CmdLineRepository m))
 cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
-    cliCheckRemoteRepo remoteNameOrURI
+    exists <- cliCheckRemoteRepo remoteNameOrURI
+    unless exists $
+        failure (Git.BackendError $ "Repository does not exist: "
+                         `T.append` T.pack (show remoteNameOrURI))
 
     repo     <- cliGet
     leftHead <- Git.resolveRef "HEAD"
