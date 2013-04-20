@@ -96,3 +96,21 @@ import Bindings.Libgit2.Tree
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Version
 import Bindings.Libgit2.Windows
+
+-- import Control.Monad.IO.Class (MonadIO, liftIO)
+-- import Control.Monad.Trans.Control (MonadBaseControl)
+-- import Control.Exception.Lifted (finally)
+import Control.Exception (finally)
+import System.Mem (performGC)
+
+-- withLibGitDoT :: (MonadIO m, MonadBaseControl IO m) => m a -> m a
+-- withLibGitDoT f = do
+--     liftIO c'git_threads_init
+--     finally f (liftIO $ performGC >> c'git_threads_shutdown)
+
+-- | Write an IO action so that proper initialization and shutdown of the
+--   thread libgit2 library is performed.
+withLibGitDo :: IO a -> IO a
+withLibGitDo f = do
+    c'git_threads_init
+    finally f (performGC >> c'git_threads_shutdown)

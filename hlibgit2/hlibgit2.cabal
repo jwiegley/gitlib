@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.18.0.1
+Version:             0.18.0.3
 Synopsis:            Low-level bindings to libgit2
 Description:         Bindings to libgit2 v0.18.0.
 License-file:        LICENSE
@@ -15,6 +15,7 @@ Extra-source-files:
   libgit2/include/git2.h
   libgit2/include/git2/*.h
   libgit2/src/*.h
+  libgit2/src/hash/*.h
   libgit2/src/unix/*.h
   libgit2/src/win32/*.h
   libgit2/src/xdiff/*.h
