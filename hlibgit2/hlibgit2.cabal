@@ -15,7 +15,6 @@ Extra-source-files:
   libgit2/include/git2.h
   libgit2/include/git2/*.h
   libgit2/src/*.h
-  libgit2/src/compat/*.h
   libgit2/src/unix/*.h
   libgit2/src/win32/*.h
   libgit2/src/xdiff/*.h
