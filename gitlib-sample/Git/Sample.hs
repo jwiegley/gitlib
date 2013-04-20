@@ -109,6 +109,8 @@ sampleFactory = Git.RepositoryFactory
     , Git.closeRepository = closeSampleRepository
     , Git.getRepository   = sampleGet
     , Git.defaultOptions  = defaultSampleOptions
+    , Git.startupBackend  = return ()
+    , Git.shutdownBackend = return ()
     }
 
 openSampleRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository

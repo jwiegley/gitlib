@@ -9,6 +9,7 @@
 module Main where
 
 import           Control.Monad
+import           Control.Exception (finally)
 import qualified Git as Git
 import qualified Git.Smoke as Git
 import qualified Git.Libgit2 as Lg
@@ -20,6 +21,10 @@ import           Test.Hspec.Runner
 import           Test.Hspec.HUnit ()
 
 main :: IO ()
-main = hspec $ Git.smokeTestSpec Lg.lgFactory Lg.lgFactory
+main = do
+    Git.startupBackend Lg.lgFactory
+    finally
+        (hspec $ Git.smokeTestSpec Lg.lgFactory Lg.lgFactory)
+        (Git.shutdownBackend Lg.lgFactory)
 
 -- Smoke.hs ends here

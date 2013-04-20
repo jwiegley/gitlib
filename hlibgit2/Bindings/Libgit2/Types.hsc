@@ -1,6 +1,8 @@
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Types where
+import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common
@@ -33,12 +35,18 @@ import Bindings.Libgit2.Common
 #num GIT_OBJ_REF_DELTA
 {- typedef struct git_odb git_odb; -}
 #opaque_t git_odb
--- {- typedef struct git_odb_backend git_odb_backend; -}
--- #opaque_t git_odb_backend
+{- typedef struct git_odb_backend git_odb_backend; -}
+{- #opaque_t git_odb_backend -}
 {- typedef struct git_odb_object git_odb_object; -}
 #opaque_t git_odb_object
--- {- typedef struct git_odb_stream git_odb_stream; -}
--- #opaque_t git_odb_stream
+{- typedef struct git_odb_stream git_odb_stream; -}
+{- #opaque_t git_odb_stream -}
+{- typedef struct git_odb_writepack git_odb_writepack; -}
+{- #opaque_t git_odb_writepack -}
+{- typedef struct git_refdb git_refdb; -}
+#opaque_t git_refdb
+{- typedef struct git_refdb_backend git_refdb_backend; -}
+{- #opaque_t git_refdb_backend -}
 {- typedef struct git_repository git_repository; -}
 #opaque_t git_repository
 {- typedef struct git_object git_object; -}
@@ -61,14 +69,16 @@ import Bindings.Libgit2.Common
 #opaque_t git_index
 {- typedef struct git_config git_config; -}
 #opaque_t git_config
--- {- typedef struct git_config_file git_config_file; -}
--- #opaque_t git_config_file
+{- typedef struct git_config_backend git_config_backend; -}
+{- #opaque_t git_config_backend -}
 {- typedef struct git_reflog_entry git_reflog_entry; -}
 #opaque_t git_reflog_entry
 {- typedef struct git_reflog git_reflog; -}
 #opaque_t git_reflog
 {- typedef struct git_note git_note; -}
 #opaque_t git_note
+{- typedef struct git_packbuilder git_packbuilder; -}
+#opaque_t git_packbuilder
 {- typedef struct git_time {
             git_time_t time; int offset;
         } git_time; -}
@@ -90,16 +100,12 @@ import Bindings.Libgit2.Common
             GIT_REF_INVALID = 0,
             GIT_REF_OID = 1,
             GIT_REF_SYMBOLIC = 2,
-            GIT_REF_PACKED = 4,
-            GIT_REF_HAS_PEEL = 8,
-            GIT_REF_LISTALL = GIT_REF_OID | GIT_REF_SYMBOLIC | GIT_REF_PACKED
+            GIT_REF_LISTALL = GIT_REF_OID | GIT_REF_SYMBOLIC
         } git_ref_t; -}
 #integral_t git_ref_t
 #num GIT_REF_INVALID
 #num GIT_REF_OID
 #num GIT_REF_SYMBOLIC
-#num GIT_REF_PACKED
-#num GIT_REF_HAS_PEEL
 #num GIT_REF_LISTALL
 {- typedef enum {
             GIT_BRANCH_LOCAL = 1, GIT_BRANCH_REMOTE = 2
@@ -107,9 +113,28 @@ import Bindings.Libgit2.Common
 #integral_t git_branch_t
 #num GIT_BRANCH_LOCAL
 #num GIT_BRANCH_REMOTE
+{- typedef enum {
+            GIT_FILEMODE_NEW = 00,
+            GIT_FILEMODE_TREE = 040000,
+            GIT_FILEMODE_BLOB = 0100644,
+            GIT_FILEMODE_BLOB_EXECUTABLE = 0100755,
+            GIT_FILEMODE_LINK = 0120000,
+            GIT_FILEMODE_COMMIT = 0160000
+        } git_filemode_t; -}
+#integral_t git_filemode_t
+#num GIT_FILEMODE_NEW
+#num GIT_FILEMODE_TREE
+#num GIT_FILEMODE_BLOB
+#num GIT_FILEMODE_BLOB_EXECUTABLE
+#num GIT_FILEMODE_LINK
+#num GIT_FILEMODE_COMMIT
 {- typedef struct git_refspec git_refspec; -}
 #opaque_t git_refspec
 {- typedef struct git_remote git_remote; -}
 #opaque_t git_remote
--- {- typedef struct git_remote_head git_remote_head; -}
--- #opaque_t git_remote_head
+{- typedef struct git_push git_push; -}
+#opaque_t git_push
+{- typedef struct git_remote_head git_remote_head; -}
+{- #opaque_t git_remote_head -}
+{- typedef struct git_remote_callbacks git_remote_callbacks; -}
+{- #opaque_t git_remote_callbacks -}

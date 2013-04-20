@@ -210,7 +210,7 @@ lgTraverseEntries tree f = go "" tree f
                            (lgTreeContents (Git.getTreeData tree)) $ \tb -> do
                 ior <- newIORef []
                 bracket
-                    (mk'git_treebuilder_filter_callback (callback fp ior))
+                    (mk'git_treebuilder_filter_cb (callback fp ior))
                     freeHaskellFunPtr
                     (flip (c'git_treebuilder_filter tb) nullPtr)
                 readIORef ior
@@ -292,9 +292,9 @@ entryToTreeEntry entry = do
     typ  <- c'git_tree_entry_type entry
     case () of
         () | typ == c'GIT_OBJ_BLOB ->
-             do attrs <- c'git_tree_entry_attributes entry
+             do mode <- c'git_tree_entry_filemode entry
                 return $ Git.BlobEntry (Tagged (Oid oid)) $
-                    case attrs of
+                    case mode of
                         0o100644 -> Git.PlainBlob
                         0o100755 -> Git.ExecutableBlob
                         0o120000 -> Git.SymlinkBlob
@@ -502,13 +502,13 @@ lgLookupCommit len oid =
         msg   <- c'git_commit_message c   >>= B.packCString
         auth  <- c'git_commit_author c    >>= packSignature conv
         comm  <- c'git_commit_committer c >>= packSignature conv
-        toid  <- c'git_commit_tree_oid c
+        toid  <- c'git_commit_tree_id c
         toid' <- coidPtrToOid toid
 
         pn    <- c'git_commit_parentcount c
         poids <- sequence
                  (zipWith ($) (replicate (fromIntegral (toInteger pn))
-                               (c'git_commit_parent_oid c)) [0..pn])
+                               (c'git_commit_parent_id c)) [0..pn])
         poids' <- mapM (\x -> Git.ByOid . Tagged . Oid <$> coidPtrToOid x) poids
 
         return Git.Commit
@@ -733,10 +733,10 @@ lgLookupRef name = do
             ref  <- peek ptr
             typ  <- c'git_reference_type ref
             targ <- if typ == c'GIT_REF_OID
-                    then do oidPtr <- c'git_reference_oid ref
+                    then do oidPtr <- c'git_reference_target ref
                             Git.RefObj . Git.ByOid . Tagged . Oid
                                 <$> coidPtrToOid oidPtr
-                    else do targName <- c'git_reference_target ref
+                    else do targName <- c'git_reference_symbolic_target ref
                             B.packCString targName
                                 >>= return . Git.RefSymbolic . T.decodeUtf8
             c'git_reference_free ref
@@ -757,18 +757,18 @@ lgUpdateRef name refTarg = do
             r <- case refTarg of
                 Git.RefObj (Git.ByOid oid) ->
                     withForeignPtr (getOid (unTagged oid)) $ \coidPtr ->
-                        c'git_reference_create_oid ptr repoPtr namePtr
-                                                   coidPtr (fromBool True)
+                        c'git_reference_create ptr repoPtr namePtr
+                                               coidPtr (fromBool True)
 
                 Git.RefObj (Git.Known c) ->
                     withForeignPtr
                         (getOid (unTagged (Git.commitOid c))) $ \coidPtr ->
-                        c'git_reference_create_oid ptr repoPtr namePtr
-                                                   coidPtr (fromBool True)
+                        c'git_reference_create ptr repoPtr namePtr
+                                               coidPtr (fromBool True)
 
                 Git.RefSymbolic symName ->
                   withCStringable symName $ \symPtr ->
-                    c'git_reference_create_symbolic ptr repoPtr namePtr
+                    c'git_reference_symbolic_create ptr repoPtr namePtr
                                                     symPtr (fromBool True)
             when (r < 0) $ failure Git.ReferenceCreateFailed
 
@@ -784,7 +784,7 @@ lgResolveRef name = do
     oid <- liftIO $ alloca $ \ptr ->
         withCStringable name $ \namePtr ->
         withForeignPtr (repoObj repo) $ \repoPtr -> do
-            r <- c'git_reference_name_to_oid ptr repoPtr namePtr
+            r <- c'git_reference_name_to_id ptr repoPtr namePtr
             if r < 0
                 then return Nothing
                 else Just <$> coidPtrToOid ptr
@@ -938,6 +938,8 @@ lgFactory = Git.RepositoryFactory
     , Git.closeRepository = closeLgRepository
     , Git.getRepository   = lgGet
     , Git.defaultOptions  = defaultLgOptions
+    , Git.startupBackend  = startupLgBackend
+    , Git.shutdownBackend = shutdownLgBackend
     }
 
 openLgRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
@@ -972,5 +974,11 @@ closeLgRepository = const (return ())
 
 defaultLgOptions :: Git.RepositoryOptions
 defaultLgOptions = Git.RepositoryOptions "" False False
+
+startupLgBackend :: MonadIO m => m ()
+startupLgBackend = liftIO (void c'git_threads_init)
+
+shutdownLgBackend :: MonadIO m => m ()
+shutdownLgBackend = liftIO c'git_threads_shutdown
 
 -- Libgit2.hs

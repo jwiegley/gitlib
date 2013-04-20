@@ -437,6 +437,8 @@ data RepositoryFactory t m c = RepositoryFactory
     , closeRepository :: c -> m ()
     , getRepository   :: t m c
     , defaultOptions  :: !RepositoryOptions
+    , startupBackend  :: m ()
+    , shutdownBackend :: m ()
     }
 
 withRepository' :: (Repository (t m), MonadTrans t,

@@ -1,6 +1,8 @@
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Errors where
+import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common
@@ -11,8 +13,15 @@ import Bindings.Libgit2.Common
     GIT_EEXISTS = -4,
     GIT_EAMBIGUOUS = -5,
     GIT_EBUFS = -6,
+    GIT_EUSER = -7,
+    GIT_EBAREREPO = -8,
+    GIT_EORPHANEDHEAD = -9,
+    GIT_EUNMERGED = -10,
+    GIT_ENONFASTFORWARD = -11,
+    GIT_EINVALIDSPEC = -12,
+    GIT_EMERGECONFLICT = -13,
     GIT_PASSTHROUGH = -30,
-    GIT_REVWALKOVER = -31
+    GIT_ITEROVER = -31
 }; -}
 #num GIT_OK
 #num GIT_ERROR
@@ -20,8 +29,15 @@ import Bindings.Libgit2.Common
 #num GIT_EEXISTS
 #num GIT_EAMBIGUOUS
 #num GIT_EBUFS
+#num GIT_EUSER
+#num GIT_EBAREREPO
+#num GIT_EORPHANEDHEAD
+#num GIT_EUNMERGED
+#num GIT_ENONFASTFORWARD
+#num GIT_EINVALIDSPEC
+#num GIT_EMERGECONFLICT
 #num GIT_PASSTHROUGH
-#num GIT_REVWALKOVER
+#num GIT_ITEROVER
 {- typedef struct {
             char * message; int klass;
         } git_error; -}
@@ -44,7 +60,14 @@ import Bindings.Libgit2.Common
             GITERR_NET,
             GITERR_TAG,
             GITERR_TREE,
-            GITERR_INDEXER
+            GITERR_INDEXER,
+            GITERR_SSL,
+            GITERR_SUBMODULE,
+            GITERR_THREAD,
+            GITERR_STASH,
+            GITERR_CHECKOUT,
+            GITERR_FETCHHEAD,
+            GITERR_MERGE
         } git_error_t; -}
 #integral_t git_error_t
 #num GITERR_NOMEMORY
@@ -62,5 +85,14 @@ import Bindings.Libgit2.Common
 #num GITERR_TAG
 #num GITERR_TREE
 #num GITERR_INDEXER
+#num GITERR_SSL
+#num GITERR_SUBMODULE
+#num GITERR_THREAD
+#num GITERR_STASH
+#num GITERR_CHECKOUT
+#num GITERR_FETCHHEAD
+#num GITERR_MERGE
 #ccall giterr_last , IO (Ptr <git_error>)
 #ccall giterr_clear , IO ()
+#ccall giterr_set_str , CInt -> CString -> IO ()
+#ccall giterr_set_oom , IO ()

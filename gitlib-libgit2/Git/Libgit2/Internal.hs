@@ -76,7 +76,7 @@ lookupObject'
   :: Git.MonadGit m
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
-  -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CUInt -> IO CInt)
+  -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CSize -> IO CInt)
   -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> IO b)
   -> LgRepository m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do

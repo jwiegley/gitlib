@@ -884,6 +884,8 @@ ghFactory owner token = Git.RepositoryFactory
     , Git.closeRepository = closeGhRepository
     , Git.getRepository   = ghGet
     , Git.defaultOptions  = defaultGhOptions
+    , Git.startupBackend  = return ()
+    , Git.shutdownBackend = return ()
     }
 
 openGhRepository :: Git.MonadGit m

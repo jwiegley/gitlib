@@ -11,6 +11,7 @@ import           Aws
 import           Aws.Core
 import           Aws.S3 hiding (bucketName)
 import           Control.Applicative
+import           Control.Exception (finally)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Maybe (fromMaybe, isNothing)
@@ -51,6 +52,10 @@ s3Factory = Lg.lgFactory
             Error
 
 main :: IO ()
-main = hspec $ Git.smokeTestSpec s3Factory s3Factory
+main = do
+    Git.startupBackend Lg.lgFactory
+    finally
+        (hspec $ Git.smokeTestSpec s3Factory s3Factory)
+        (Git.shutdownBackend Lg.lgFactory)
 
 -- Smoke.hs ends here

@@ -112,7 +112,8 @@ traceBackend be = do
 
   castPtr <$> new TraceBackend {
     traceParent = C'git_odb_backend {
-         c'git_odb_backend'odb         = nullPtr
+         c'git_odb_backend'version     = fromIntegral 1
+       , c'git_odb_backend'odb         = nullPtr
        , c'git_odb_backend'read        = readFun
        , c'git_odb_backend'read_prefix = readPrefixFun
        , c'git_odb_backend'readstream  = nullFunPtr
@@ -120,7 +121,11 @@ traceBackend be = do
        , c'git_odb_backend'write       = writeFun
        , c'git_odb_backend'writestream = nullFunPtr
        , c'git_odb_backend'exists      = existsFun
-       , c'git_odb_backend'free        = traceBackendFreeCallbackPtr }
+       , c'git_odb_backend'refresh     = undefined
+       , c'git_odb_backend'foreach     = undefined
+       , c'git_odb_backend'writepack   = undefined
+       , c'git_odb_backend'free        = traceBackendFreeCallbackPtr
+       }
     , traceNext = be }
 
 -- Trace.hs

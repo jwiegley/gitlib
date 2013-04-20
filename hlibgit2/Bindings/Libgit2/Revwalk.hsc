@@ -1,6 +1,8 @@
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Revwalk where
+import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common
@@ -18,5 +20,6 @@ import Bindings.Libgit2.Oid
 #ccall git_revwalk_hide_ref , Ptr <git_revwalk> -> CString -> IO (CInt)
 #ccall git_revwalk_next , Ptr <git_oid> -> Ptr <git_revwalk> -> IO (CInt)
 #ccall git_revwalk_sorting , Ptr <git_revwalk> -> CUInt -> IO ()
+#ccall git_revwalk_push_range , Ptr <git_revwalk> -> CString -> IO (CInt)
 #ccall git_revwalk_free , Ptr <git_revwalk> -> IO ()
 #ccall git_revwalk_repository , Ptr <git_revwalk> -> IO (Ptr <git_repository>)

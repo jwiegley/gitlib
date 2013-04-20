@@ -755,6 +755,8 @@ cliFactory = Git.RepositoryFactory
     , Git.closeRepository = closeCliRepository
     , Git.getRepository   = cliGet
     , Git.defaultOptions  = defaultCliOptions
+    , Git.startupBackend  = return ()
+    , Git.shutdownBackend = return ()
     }
 
 openCliRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository

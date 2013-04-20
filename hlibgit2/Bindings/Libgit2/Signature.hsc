@@ -1,6 +1,8 @@
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Signature where
+import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common

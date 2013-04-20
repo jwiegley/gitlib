@@ -25,7 +25,7 @@ Test-suite smoke
     , gitlib-s3
     , gitlib-test
     , gitlib-libgit2
-    , hlibgit2           >= 0.17
+    , hlibgit2           >= 0.18.0.1
     , aws                >= 0.7.5
     , HUnit              >= 1.2.5
     , hspec              >= 1.4.4
@@ -40,7 +40,7 @@ Library
       base                 >= 3 && < 5
     , gitlib
     , gitlib-libgit2
-    , hlibgit2             >= 0.17
+    , hlibgit2             >= 0.18.0.1
     , HUnit                >= 1.2.5
     , aeson                >= 0.6.1.0
     , attempt              >= 0.4.0

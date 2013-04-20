@@ -254,12 +254,12 @@ mirrorRefsFromS3 be = do
         r <- case ref of
             Just (Git.Reference { Git.refTarget = Git.RefSymbolic target }) ->
               withCStringable target $ \targetPtr ->
-                c'git_reference_create_symbolic ptr repoPtr namePtr
+                c'git_reference_symbolic_create ptr repoPtr namePtr
                                                 targetPtr 1
             Just (Git.Reference {
                 Git.refTarget = (Git.RefObj x@(Git.ByOid (Tagged coid))) }) ->
               withForeignPtr (getOid coid) $ \coidPtr ->
-                c'git_reference_create_oid ptr repoPtr namePtr coidPtr 1
+                c'git_reference_create ptr repoPtr namePtr coidPtr 1
             Nothing -> return 0
         when (r < 0) $ throwIO Git.RepositoryInvalid
 
@@ -399,6 +399,10 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
   writeFun      <- mk'git_odb_backend_write_callback odbS3BackendWriteCallback
   existsFun     <- mk'git_odb_backend_exists_callback odbS3BackendExistsCallback
 
+  refreshFun   <- mk'git_odb_backend_refresh_callback (const . return $ 0)
+  foreachFun   <- mk'git_odb_backend_foreach_callback (const . const . const . return $ 0)
+  writepackFun <- mk'git_odb_backend_writepack_callback (const . const . const . const . return $ 0)
+
   manager'  <- newStablePtr manager
   bucket'   <- newStablePtr bucket
   prefix'   <- newStablePtr prefix
@@ -407,7 +411,8 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
 
   castPtr <$> new OdbS3Backend {
     odbS3Parent = C'git_odb_backend {
-         c'git_odb_backend'odb         = nullPtr
+         c'git_odb_backend'version     = fromIntegral 1
+       , c'git_odb_backend'odb         = nullPtr
        , c'git_odb_backend'read        = readFun
        , c'git_odb_backend'read_prefix = readPrefixFun
        , c'git_odb_backend'readstream  = nullFunPtr
@@ -415,6 +420,9 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
        , c'git_odb_backend'write       = writeFun
        , c'git_odb_backend'writestream = nullFunPtr
        , c'git_odb_backend'exists      = existsFun
+       , c'git_odb_backend'refresh     = refreshFun
+       , c'git_odb_backend'foreach     = foreachFun
+       , c'git_odb_backend'writepack   = writepackFun
        , c'git_odb_backend'free        = odbS3BackendFreeCallbackPtr }
     , httpManager     = manager'
     , bucketName      = bucket'
