@@ -18,7 +18,7 @@ module Git.Libgit2
        , TreeRef(..), CommitRef(..), Reference(..)
        , lgFactory, openLgRepository, runLgRepository
        , closeLgRepository, defaultLgOptions
-       , lgGet, addTracingBackend
+       , lgGet, addTracingBackend, withLibGitDo
        ) where
 
 import           Bindings.Libgit2

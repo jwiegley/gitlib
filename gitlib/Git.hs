@@ -32,6 +32,7 @@ import           Data.Time
 import           Data.Typeable
 import           Filesystem.Path.CurrentOS
 import           Prelude hiding (FilePath)
+import           System.Mem (performGC)
 
 {- $repositories -}
 data RepositoryFacts = RepositoryFacts
@@ -440,6 +441,12 @@ data RepositoryFactory t m c = RepositoryFactory
     , startupBackend  :: m ()
     , shutdownBackend :: m ()
     }
+
+withBackendDo :: (MonadIO m, MonadBaseControl IO m)
+              => RepositoryFactory t m a -> m b -> m b
+withBackendDo fact f = do
+    startupBackend fact
+    Exc.finally f (liftIO performGC >> shutdownBackend fact)
 
 withRepository' :: (Repository (t m), MonadTrans t,
                     MonadBaseControl IO m, MonadIO m)

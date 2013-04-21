@@ -47,6 +47,7 @@ module Bindings.Libgit2
     , module Bindings.Libgit2.Types
     , module Bindings.Libgit2.Version
     , module Bindings.Libgit2.Windows
+    , withLibGitDo
     ) where
 import Bindings.Libgit2.Attr
 import Bindings.Libgit2.Blob

@@ -365,6 +365,21 @@ odbS3BackendExistsCallback be oid = do
                            return False)
   return $ if exists then 1 else 0
 
+odbS3BackendRefreshCallback :: F'git_odb_backend_refresh_callback
+odbS3BackendRefreshCallback be = do
+    putStrLn "Calling odbS3BackendRefreshCallback"
+    return 0
+
+odbS3BackendForeachCallback :: F'git_odb_backend_foreach_callback
+odbS3BackendForeachCallback be callback payload = do
+    putStrLn "Calling odbS3BackendForeachCallback"
+    return 0
+
+odbS3BackendWritePackCallback :: F'git_odb_backend_writepack_callback
+odbS3BackendWritePackCallback writePackPtr be callback payload = do
+    putStrLn "Calling odbS3BackendWritePackCallback"
+    return 0
+
 odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
 odbS3BackendFreeCallback be = do
   backend <- peek be
@@ -393,15 +408,17 @@ odbS3Backend :: Git.MonadGit m => S3Configuration NormalQuery
 odbS3Backend s3config config manager bucket prefix = liftIO $ do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
   readPrefixFun <-
-    mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
+      mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
   readHeaderFun <-
-    mk'git_odb_backend_read_header_callback odbS3BackendReadHeaderCallback
+      mk'git_odb_backend_read_header_callback odbS3BackendReadHeaderCallback
   writeFun      <- mk'git_odb_backend_write_callback odbS3BackendWriteCallback
   existsFun     <- mk'git_odb_backend_exists_callback odbS3BackendExistsCallback
-
-  refreshFun   <- mk'git_odb_backend_refresh_callback (const . return $ 0)
-  foreachFun   <- mk'git_odb_backend_foreach_callback (const . const . const . return $ 0)
-  writepackFun <- mk'git_odb_backend_writepack_callback (const . const . const . const . return $ 0)
+  refreshFun    <-
+      mk'git_odb_backend_refresh_callback odbS3BackendRefreshCallback
+  foreachFun    <-
+      mk'git_odb_backend_foreach_callback odbS3BackendForeachCallback
+  writepackFun  <-
+      mk'git_odb_backend_writepack_callback odbS3BackendWritePackCallback
 
   manager'  <- newStablePtr manager
   bucket'   <- newStablePtr bucket
