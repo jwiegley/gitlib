@@ -25,6 +25,7 @@ import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
 import           Control.Concurrent (threadDelay)
+import           Control.Concurrent.MVar
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -42,6 +43,7 @@ import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
 import           Data.Conduit.Binary
 import qualified Data.Conduit.List as CList
+import           Data.Default
 import           Data.Foldable (for_)
 import           Data.HashMap.Strict as M
 import           Data.Int (Int64)
@@ -73,6 +75,27 @@ import           System.IO
 import           System.IO.Temp
 import           System.IO.Unsafe
 
+data OdbS3Callbacks = OdbS3Callbacks
+    { registerPackFile :: Text -> [Text] -> IO ()
+      -- 'registerPackFile' takes the basename of a pack file, and a list of
+      -- SHAs which are contained with the pack.  It must register this in an
+      -- index, for the sake of the next function.
+
+    , locateObject     :: Text -> IO (Maybe Text)
+      -- 'locateObject' takes a SHA, and returns: Nothing if the object is
+      -- "loose", or Just Text identifying the basename of the packfile that
+      -- the object is located within.
+
+    , updateReference :: Text -> Text -> IO ()
+    , readReference   :: Text   -> Text -> IO Text
+    }
+
+instance Default OdbS3Callbacks where
+    def = OdbS3Callbacks
+        { registerPackFile = \_ _ -> return ()
+        , locateObject     = \_   -> return Nothing
+        }
+
 data OdbS3Backend = OdbS3Backend
     { odbS3Parent     :: C'git_odb_backend
     , packWriter      :: Ptr C'git_odb_writepack
@@ -81,6 +104,7 @@ data OdbS3Backend = OdbS3Backend
     , objectPrefix    :: StablePtr Text
     , configuration   :: StablePtr Configuration
     , s3configuration :: StablePtr (S3Configuration NormalQuery)
+    , callbacks       :: StablePtr OdbS3Callbacks
     }
 
 instance Storable OdbS3Backend where
@@ -90,7 +114,8 @@ instance Storable OdbS3Backend where
              sizeOf (undefined :: StablePtr Text) +
              sizeOf (undefined :: StablePtr Text) +
              sizeOf (undefined :: StablePtr Configuration) +
-             sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
+             sizeOf (undefined :: StablePtr (S3Configuration NormalQuery)) +
+             sizeOf (undefined :: StablePtr OdbS3Callbacks)
   alignment _ = alignment (undefined :: Ptr C'git_odb_backend)
   peek p = do
     v0 <- peekByteOff p 0
@@ -106,8 +131,11 @@ instance Storable OdbS3Backend where
     v5 <- peekByteOff p sizev5
     let sizev6 = sizev5 + sizeOf (undefined :: StablePtr Configuration)
     v6 <- peekByteOff p sizev6
-    return (OdbS3Backend v0 v1 v2 v3 v4 v5 v6)
-  poke p (OdbS3Backend v0 v1 v2 v3 v4 v5 v6) = do
+    let sizev7 = sizev6
+               + sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
+    v7 <- peekByteOff p sizev7
+    return (OdbS3Backend v0 v1 v2 v3 v4 v5 v6 v7)
+  poke p (OdbS3Backend v0 v1 v2 v3 v4 v5 v6 v7) = do
     pokeByteOff p 0 v0
     let sizev1 = sizeOf (undefined :: C'git_odb_backend)
     pokeByteOff p sizev1 v1
@@ -121,6 +149,9 @@ instance Storable OdbS3Backend where
     pokeByteOff p sizev5 v5
     let sizev6 = sizev5 + sizeOf (undefined :: StablePtr Configuration)
     pokeByteOff p sizev6 v6
+    let sizev7 = sizev6
+               + sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
+    pokeByteOff p sizev7 v7
     return ()
 
 odbS3dispatch ::
@@ -409,6 +440,7 @@ odbS3BackendFreeCallback be = do
   freeStablePtr (objectPrefix odbS3)
   freeStablePtr (configuration odbS3)
   freeStablePtr (s3configuration odbS3)
+  freeStablePtr (callbacks odbS3)
 
 foreign export ccall "odbS3BackendFreeCallback"
   odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
@@ -416,38 +448,85 @@ foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
 odbS3WritePackAddCallback :: F'git_odb_writepack_add_callback
-odbS3WritePackAddCallback wp bytes len progress = alloca $ \idxPtrPtr -> do
-    withSystemTempDirectory "s3pack" $ \dir -> alloca $ \statsPtr -> do
-        writepack <- peek wp
-        let be = c'git_odb_writepack'backend writepack
+odbS3WritePackAddCallback wp bytes len progress =
+    withSystemTempDirectory "s3pack" $ \dir -> do
+        be    <- c'git_odb_writepack'backend <$> peek wp
         odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
-
-        withCString dir $ \dirStr -> runResourceT $ do
-            r <- liftIO $ c'git_indexer_stream_new idxPtrPtr dirStr
-                     nullFunPtr nullPtr
-            when (r < 0) $
-                failure (Git.BackendError "c'git_indexer_stream_new failed")
-            idxPtr <- liftIO $ peek idxPtrPtr
-            register $ c'git_indexer_stream_free idxPtr
-
-            r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
-            when (r < 0) $
-                failure (Git.BackendError "c'git_indexer_stream_add failed")
-
-            r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
-            when (r < 0) $
-                failure (Git.BackendError
-                         "c'git_indexer_stream_finalize failed")
-
-            oidPtr <- liftIO $ c'git_indexer_stream_hash idxPtr
-            sha <- liftIO $ allocaBytes 64 $ \oidStr ->
-                E.decodeUtf8
-                    <$> (B.packCString =<< c'git_oid_tostr oidStr 41 oidPtr)
-
-            uploadFile odbS3 dir sha ".pack"
-            uploadFile odbS3 dir sha ".idx"
-    return 0
+        receivePack odbS3 dir
   where
+    receivePack odbS3 dir =
+        withCString dir $ \dirStr ->
+        alloca $ \odbPtrPtr ->
+        alloca $ \backendPtrPtr ->
+        alloca $ \idxPtrPtr ->
+        alloca $ \statsPtr -> runResourceT $ do
+
+        -- Allocate a new indexer stream
+        r <- liftIO $ c'git_indexer_stream_new idxPtrPtr dirStr
+                 nullFunPtr nullPtr
+        checkResult r "c'git_indexer_stream_new failed"
+        idxPtr <- liftIO $ peek idxPtrPtr
+        register $ c'git_indexer_stream_free idxPtr
+
+        -- Add the incoming packfile data to the stream
+        r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
+        checkResult r "c'git_indexer_stream_add failed"
+
+        -- Finalize the stream, which writes it out to disk
+        r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
+        checkResult r "c'git_indexer_stream_finalize failed"
+
+        -- Discover the hash used to identify the pack file
+        oidPtr  <- liftIO $ c'git_indexer_stream_hash idxPtr
+        packSha <- liftIO $ oidToSha oidPtr
+
+        -- Create a temporary, in-memory object database
+        r <- liftIO $ c'git_odb_new odbPtrPtr
+        checkResult r "c'git_odb_new failed"
+        odbPtr <- liftIO $ peek odbPtrPtr
+        register $ c'git_odb_free odbPtr
+
+        -- Load the pack file's index into a temporary objects into a
+        -- database, so we can iterate the objects within it
+        let basename = "pack-" <> T.unpack packSha <> ".idx"
+            idxFile = dir <> "/" <> basename
+        r <- liftIO $ withCString idxFile $ \idxFileStr ->
+                 c'git_odb_backend_one_pack backendPtrPtr idxFileStr
+        checkResult r "c'git_odb_backend_one_pack failed"
+        backendPtr <- liftIO $ peek backendPtrPtr
+        backend    <- liftIO $ peek backendPtr
+        register $ mK'git_odb_backend_free_callback
+            (c'git_odb_backend'free backend) backendPtr
+
+        -- Associate the new backend containing our single index file with the
+        -- in-memory object database
+        r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
+        checkResult r "c'git_odb_add_backend failed"
+
+        -- Iterate the "database", which gives us a list of all the oids
+        -- contained within it
+        shas <- liftIO $ newMVar []
+        foreachCallback <- liftIO $ mk'git_odb_foreach_cb $ \oid _ -> do
+            modifyMVar_ shas $ \shas -> (:) <$> oidToSha oid <*> pure shas
+            return 0
+        r <- liftIO $ c'git_odb_foreach odbPtr foreachCallback nullPtr
+        checkResult r "c'git_odb_add_foreach failed"
+
+        -- Let whoever is listening know about this pack files and its
+        -- contained objects
+        cbs <- liftIO $ deRefStablePtr (callbacks odbS3)
+        liftIO $ registerPackFile cbs packSha =<< readMVar shas
+
+        -- Upload the actual files to S3
+        uploadFile odbS3 dir packSha ".pack"
+        uploadFile odbS3 dir packSha ".idx"
+        return 0
+
+    oidToSha oidPtr = allocaBytes 42 $ \oidStr ->
+        E.decodeUtf8 <$> (B.packCString =<< c'git_oid_tostr oidStr 41 oidPtr)
+
+    checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
+
     uploadFile odbS3 dir sha ext =
         let basename = "pack-" <> T.unpack sha <> ext
             fullpath = dir <> "/" <> basename
@@ -486,8 +565,9 @@ odbS3Backend :: Git.MonadGit m
              -> Manager
              -> Text
              -> Text
+             -> OdbS3Callbacks
              -> m (Ptr C'git_odb_backend)
-odbS3Backend s3config config manager bucket prefix = liftIO $ do
+odbS3Backend s3config config manager bucket prefix callbacks = liftIO $ do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
   readPrefixFun <-
       mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
@@ -507,11 +587,12 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
   writePackCommitFun  <-
       mk'git_odb_writepack_commit_callback odbS3WritePackCommitCallback
 
-  manager'  <- newStablePtr manager
-  bucket'   <- newStablePtr bucket
-  prefix'   <- newStablePtr prefix
-  s3config' <- newStablePtr s3config
-  config'   <- newStablePtr config
+  manager'   <- newStablePtr manager
+  bucket'    <- newStablePtr bucket
+  prefix'    <- newStablePtr prefix
+  s3config'  <- newStablePtr s3config
+  config'    <- newStablePtr config
+  callbacks' <- newStablePtr callbacks
 
   let odbS3Parent = C'git_odb_backend
           { c'git_odb_backend'version     = fromIntegral 1
@@ -536,6 +617,7 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
       , objectPrefix    = prefix'
       , configuration   = config'
       , s3configuration = s3config'
+      , callbacks       = callbacks'
       }
   packWriterPtr <- new C'git_odb_writepack
       { c'git_odb_writepack'backend = ptr
@@ -556,8 +638,10 @@ addS3Backend :: Git.MonadGit m
              -> Maybe Manager
              -> Maybe Text -- ^ mock address
              -> LogLevel
+             -> OdbS3Callbacks -- ^ callbacks
              -> m Repository
-addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
+addS3Backend repo bucket prefix access secret
+    mmanager mockAddr level callbacks = do
     manager <- maybe (liftIO $ newManager def) return mmanager
     odbS3   <- liftIO $ odbS3Backend
         (case mockAddr of
@@ -569,14 +653,14 @@ addS3Backend repo bucket prefix access secret mmanager mockAddr level = do
               accessKeyID     = E.encodeUtf8 access
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
-        manager bucket prefix
+        manager bucket prefix callbacks
     liftIO $ odbBackendAdd repo odbS3 100
     return repo
 
 s3Factory :: Git.MonadGit m
-          => Maybe Text -> Text -> Text
+          => Maybe Text -> Text -> Text -> OdbS3Callbacks
           -> Git.RepositoryFactory LgRepository m Repository
-s3Factory bucket accessKey secretKey = lgFactory
+s3Factory bucket accessKey secretKey callbacks = lgFactory
     { Git.runRepository = \ctxt -> runLgRepository ctxt . (s3back >>) }
   where
     s3back = do
@@ -585,6 +669,6 @@ s3Factory bucket accessKey secretKey = lgFactory
             repo (fromMaybe "test-bucket" bucket) ""
             accessKey secretKey Nothing
             (if isNothing bucket then Just "127.0.0.1" else Nothing)
-            Error
+            Error callbacks
 
 -- S3.hs

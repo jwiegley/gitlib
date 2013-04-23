@@ -14,6 +14,7 @@ import           Control.Applicative
 import           Control.Exception (finally)
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Data.Default (def)
 import           Data.Maybe (fromMaybe, isNothing)
 import           Data.Text as T
 import qualified Git as Git
@@ -49,7 +50,7 @@ s3Factory = Lg.lgFactory
             (if isNothing bucket
              then Just "127.0.0.1"
              else Nothing)
-            Error
+            Error def
 
 main :: IO ()
 main = do
