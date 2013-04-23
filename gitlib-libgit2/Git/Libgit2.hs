@@ -962,11 +962,12 @@ openLgRepository opts = do
     openRepositoryWith path fn = do
         fptr <- alloca $ \ptr ->
             case F.toText path of
-                Left p  -> error $ "Repository does not exist: " ++ T.unpack p
+                Left p  -> error $ "Could not translate repository path: "
+                                ++ T.unpack p
                 Right p -> withCStringable p $ \str -> do
                     r <- fn ptr str
                     when (r < 0) $
-                        error $ "Repository does not exist: " ++ T.unpack p
+                        error $ "Could not open repository " ++ T.unpack p
                     ptr' <- peek ptr
                     newForeignPtr p'git_repository_free ptr'
         return Repository { repoOptions = opts
