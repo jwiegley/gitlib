@@ -468,11 +468,10 @@ odbS3WritePackAddCallback wp bytes len progress =
         alloca $ \statsPtr -> runResourceT $ do
 
         -- Allocate a new indexer stream
-        r <- liftIO $ c'git_indexer_stream_new idxPtrPtr dirStr
-                 nullFunPtr nullPtr
-        checkResult r "c'git_indexer_stream_new failed"
-        idxPtr <- liftIO $ peek idxPtrPtr
-        register $ c'git_indexer_stream_free idxPtr
+        (_,idxPtr) <- flip allocate c'git_indexer_stream_free $ do
+            r <- c'git_indexer_stream_new idxPtrPtr dirStr nullFunPtr nullPtr
+            checkResult r "c'git_indexer_stream_new failed"
+            peek idxPtrPtr
 
         -- Add the incoming packfile data to the stream
         r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
@@ -486,22 +485,24 @@ odbS3WritePackAddCallback wp bytes len progress =
         packSha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
 
         -- Create a temporary, in-memory object database
-        r <- liftIO $ c'git_odb_new odbPtrPtr
-        checkResult r "c'git_odb_new failed"
-        odbPtr <- liftIO $ peek odbPtrPtr
-        freeKey <- register $ c'git_odb_free odbPtr
+        (freeKey,odbPtr) <- flip allocate c'git_odb_free $ do
+            r <- c'git_odb_new odbPtrPtr
+            checkResult r "c'git_odb_new failed"
+            peek odbPtrPtr
 
         -- Load the pack file's index into a temporary object database, so we
         -- can iterate the objects within it
         let basename = "pack-" <> T.unpack packSha <> ".idx"
             idxFile = dir <> "/" <> basename
-        r <- liftIO $ withCString idxFile $ \idxFileStr ->
-                 c'git_odb_backend_one_pack backendPtrPtr idxFileStr
-        checkResult r "c'git_odb_backend_one_pack failed"
-        backendPtr <- liftIO $ peek backendPtrPtr
-        backend    <- liftIO $ peek backendPtr
-        register $ mK'git_odb_backend_free_callback
-            (c'git_odb_backend'free backend) backendPtr
+        (_,backendPtr) <- allocate
+            (do r <- withCString idxFile $ \idxFileStr ->
+                    c'git_odb_backend_one_pack backendPtrPtr idxFileStr
+                checkResult r "c'git_odb_backend_one_pack failed"
+                peek backendPtrPtr)
+            (\backendPtr -> do
+                  backend <- peek backendPtr
+                  mK'git_odb_backend_free_callback
+                      (c'git_odb_backend'free backend) backendPtr)
 
         -- Since freeing the backend will now free the object database,
         -- unregister the finalizer we had setup for the odbPtr
@@ -514,20 +515,19 @@ odbS3WritePackAddCallback wp bytes len progress =
 
         -- Iterate the "database", which gives us a list of all the oids
         -- contained within it
-        shas <- liftIO $ do
-            shas <- newMVar []
-            foreachCallback <- mk'git_odb_foreach_cb $ \oid _ -> do
+        shas <- liftIO $ newMVar []
+        (_,foreachCallback) <- flip allocate freeHaskellFunPtr $
+             mk'git_odb_foreach_cb $ \oid _ -> do
                 modifyMVar_ shas $ \shas -> (:) <$> oidToSha oid <*> pure shas
                 return 0
-            r <- c'git_odb_foreach odbPtr foreachCallback nullPtr
-            checkResult r "c'git_odb_add_foreach failed"
-            readMVar shas
+        r <- liftIO $ c'git_odb_foreach odbPtr foreachCallback nullPtr
+        checkResult r "c'git_odb_add_foreach failed"
 
         -- Let whoever is listening know about this pack files and its
         -- contained objects
         liftIO $ do
             cbs <- deRefStablePtr (callbacks odbS3)
-            registerPackFile cbs packSha shas
+            registerPackFile cbs packSha =<< readMVar shas
 
         -- Upload the actual files to S3
         uploadFile odbS3 dir packSha ".pack"
