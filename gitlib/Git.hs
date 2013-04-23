@@ -109,6 +109,11 @@ class (Applicative m, Monad m, Failure GitException m,
 
     deleteRepository :: m ()
 
+    -- Pack files
+    writePackFile :: FilePath -> FilePath -> [Oid m] -> m ()
+    writePackFile _ _ _ =
+        failure (BackendError "Backend does not support writing of pack files")
+
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.

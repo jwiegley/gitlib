@@ -15,16 +15,19 @@ module Git.S3
 import           Aws
 import           Aws.Core
 import           Aws.S3 hiding (bucketName)
+import           Bindings.Libgit2.Indexer
 import           Bindings.Libgit2.Odb
 import           Bindings.Libgit2.OdbBackend
 import           Bindings.Libgit2.Oid
 import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
+import           Control.Concurrent (threadDelay)
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Resource
 import           Control.Retry
 import           Data.Aeson (object, (.=), (.:))
 import           Data.Attempt
@@ -33,15 +36,16 @@ import           Data.ByteString as B hiding (putStrLn)
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BLC
-import           Data.ByteString.Unsafe
+import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
 import           Data.Conduit.Binary
 import qualified Data.Conduit.List as CList
 import           Data.Foldable (for_)
+import           Data.HashMap.Strict as M
 import           Data.Int (Int64)
 import qualified Data.List as L
-import           Data.HashMap.Strict as M
 import           Data.Maybe
+import           Data.Monoid
 import           Data.Stringable
 import           Data.Tagged
 import           Data.Text as T
@@ -63,18 +67,23 @@ import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 import           Network.HTTP.Conduit hiding (Response)
 import           Prelude hiding (mapM_, catch)
+import           System.IO
+import           System.IO.Temp
 import           System.IO.Unsafe
 
-data OdbS3Backend =
-  OdbS3Backend { odbS3Parent     :: C'git_odb_backend
-               , httpManager     :: StablePtr Manager
-               , bucketName      :: StablePtr Text
-               , objectPrefix    :: StablePtr Text
-               , configuration   :: StablePtr Configuration
-               , s3configuration :: StablePtr (S3Configuration NormalQuery) }
+data OdbS3Backend = OdbS3Backend
+    { odbS3Parent     :: C'git_odb_backend
+    , packWriter      :: Ptr C'git_odb_writepack
+    , httpManager     :: StablePtr Manager
+    , bucketName      :: StablePtr Text
+    , objectPrefix    :: StablePtr Text
+    , configuration   :: StablePtr Configuration
+    , s3configuration :: StablePtr (S3Configuration NormalQuery)
+    }
 
 instance Storable OdbS3Backend where
   sizeOf _ = sizeOf (undefined :: C'git_odb_backend) +
+             sizeOf (undefined :: Ptr C'git_odb_writepack) +
              sizeOf (undefined :: StablePtr Manager) +
              sizeOf (undefined :: StablePtr Text) +
              sizeOf (undefined :: StablePtr Text) +
@@ -85,27 +94,31 @@ instance Storable OdbS3Backend where
     v0 <- peekByteOff p 0
     let sizev1 = sizeOf (undefined :: C'git_odb_backend)
     v1 <- peekByteOff p sizev1
-    let sizev2 = sizev1 + sizeOf (undefined :: StablePtr Manager)
+    let sizev2 = sizev1 + sizeOf (undefined :: Ptr C'git_odb_writepack)
     v2 <- peekByteOff p sizev2
-    let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Text)
+    let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Manager)
     v3 <- peekByteOff p sizev3
     let sizev4 = sizev3 + sizeOf (undefined :: StablePtr Text)
     v4 <- peekByteOff p sizev4
-    let sizev5 = sizev4 + sizeOf (undefined :: StablePtr Configuration)
+    let sizev5 = sizev4 + sizeOf (undefined :: StablePtr Text)
     v5 <- peekByteOff p sizev5
-    return (OdbS3Backend v0 v1 v2 v3 v4 v5)
-  poke p (OdbS3Backend v0 v1 v2 v3 v4 v5) = do
+    let sizev6 = sizev5 + sizeOf (undefined :: StablePtr Configuration)
+    v6 <- peekByteOff p sizev6
+    return (OdbS3Backend v0 v1 v2 v3 v4 v5 v6)
+  poke p (OdbS3Backend v0 v1 v2 v3 v4 v5 v6) = do
     pokeByteOff p 0 v0
     let sizev1 = sizeOf (undefined :: C'git_odb_backend)
     pokeByteOff p sizev1 v1
-    let sizev2 = sizev1 + sizeOf (undefined :: StablePtr Manager)
+    let sizev2 = sizev1 + sizeOf (undefined :: Ptr C'git_odb_writepack)
     pokeByteOff p sizev2 v2
-    let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Text)
+    let sizev3 = sizev2 + sizeOf (undefined :: StablePtr Manager)
     pokeByteOff p sizev3 v3
     let sizev4 = sizev3 + sizeOf (undefined :: StablePtr Text)
     pokeByteOff p sizev4 v4
-    let sizev5 = sizev4 + sizeOf (undefined :: StablePtr Configuration)
+    let sizev5 = sizev4 + sizeOf (undefined :: StablePtr Text)
     pokeByteOff p sizev5 v5
+    let sizev6 = sizev5 + sizeOf (undefined :: StablePtr Configuration)
+    pokeByteOff p sizev6 v6
     return ()
 
 odbS3dispatch ::
@@ -135,7 +148,7 @@ testFileS3' :: Manager -> Text -> Text
                -> ResourceT IO Bool
 testFileS3' manager bucket prefix config s3config filepath =
   isJust . readResponse <$>
-      awsRetry config s3config manager
+      aws config s3config manager
           (headObject bucket (T.append prefix filepath))
 
 testFileS3 :: OdbS3Backend -> Text -> ResourceT IO Bool
@@ -278,7 +291,7 @@ mapPair :: (a -> b) -> (a,a) -> (b,b)
 mapPair f (x,y) = (f x, f y)
 
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
-odbS3BackendReadCallback data_p len_p type_p be oid =
+odbS3BackendReadCallback data_p len_p type_p be oid = do
   catch go (\e -> do putStrLn "odbS3BackendReadCallback failed"
                      print (e :: SomeException)
                      return (-1))
@@ -300,7 +313,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
           foldM (\offset x -> do
                   let xOffset = if offset == 0 then hdrLen else 0
                       innerLen = B.length x - xOffset
-                  unsafeUseAsCString x $ \cstr ->
+                  BU.unsafeUseAsCString x $ \cstr ->
                       copyBytes (content `plusPtr` offset)
                                 (cstr `plusPtr` xOffset) innerLen
                   return (offset + innerLen)) 0 bs
@@ -310,11 +323,11 @@ odbS3BackendReadCallback data_p len_p type_p be oid =
           return 0
 
 odbS3BackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
-odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len =
-  return 0
+odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
+  return (-1)                   -- jww (2013-04-22): NYI
 
 odbS3BackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
-odbS3BackendReadHeaderCallback len_p type_p be oid =
+odbS3BackendReadHeaderCallback len_p type_p be oid = do
   catch go (\e -> do putStrLn "odbS3BackendReadHeaderCallback failed"
                      print (e :: SomeException)
                      return (-1))
@@ -343,7 +356,7 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
       odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
       let hdr = encode ((fromIntegral len,
                          fromIntegral obj_type) :: (Int64,Int64))
-      bytes <- curry unsafePackCStringLen
+      bytes <- curry BU.unsafePackCStringLen
                     (castPtr obj_data) (fromIntegral len)
       let payload = BL.append hdr (BL.fromChunks [bytes])
       catch (go odbS3 oidStr payload >> return 0)
@@ -366,18 +379,16 @@ odbS3BackendExistsCallback be oid = do
   return $ if exists then 1 else 0
 
 odbS3BackendRefreshCallback :: F'git_odb_backend_refresh_callback
-odbS3BackendRefreshCallback be = do
-    putStrLn "Calling odbS3BackendRefreshCallback"
-    return 0
+odbS3BackendRefreshCallback _ = return 0 -- do nothing
 
 odbS3BackendForeachCallback :: F'git_odb_backend_foreach_callback
 odbS3BackendForeachCallback be callback payload = do
-    putStrLn "Calling odbS3BackendForeachCallback"
-    return 0
+    return (-1)                 -- jww (2013-04-22): NYI
 
-odbS3BackendWritePackCallback :: F'git_odb_backend_writepack_callback
-odbS3BackendWritePackCallback writePackPtr be callback payload = do
-    putStrLn "Calling odbS3BackendWritePackCallback"
+odbS3WritePackCallback :: F'git_odb_backend_writepack_callback
+odbS3WritePackCallback writePackPtr be callback payload = do
+    odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+    poke writePackPtr $ packWriter odbS3
     return 0
 
 odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
@@ -390,6 +401,7 @@ odbS3BackendFreeCallback be = do
   freeHaskellFunPtr (c'git_odb_backend'exists backend)
 
   odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+  free (packWriter odbS3)
   freeStablePtr (httpManager odbS3)
   freeStablePtr (bucketName odbS3)
   freeStablePtr (objectPrefix odbS3)
@@ -401,9 +413,65 @@ foreign export ccall "odbS3BackendFreeCallback"
 foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-odbS3Backend :: Git.MonadGit m => S3Configuration NormalQuery
+odbS3WritePackAddCallback :: F'git_odb_writepack_add_callback
+odbS3WritePackAddCallback wp bytes len progress = alloca $ \idxPtrPtr -> do
+    withSystemTempDirectory "s3pack" $ \dir -> alloca $ \statsPtr -> do
+        writepack <- peek wp
+        let be = c'git_odb_writepack'backend writepack
+        odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+
+        withCString dir $ \dirStr -> runResourceT $ do
+            r <- liftIO $ c'git_indexer_stream_new idxPtrPtr dirStr
+                     nullFunPtr nullPtr
+            when (r < 0) $
+                failure (Git.BackendError "c'git_indexer_stream_new failed")
+            idxPtr <- liftIO $ peek idxPtrPtr
+            register $ c'git_indexer_stream_free idxPtr
+
+            r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
+            when (r < 0) $
+                failure (Git.BackendError "c'git_indexer_stream_add failed")
+
+            r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
+            when (r < 0) $
+                failure (Git.BackendError
+                         "c'git_indexer_stream_finalize failed")
+
+            oidPtr <- liftIO $ c'git_indexer_stream_hash idxPtr
+            sha <- liftIO $ allocaBytes 64 $ \oidStr ->
+                E.decodeUtf8
+                    <$> (B.packCString =<< c'git_oid_tostr oidStr 41 oidPtr)
+
+            uploadFile odbS3 dir sha ".pack"
+            uploadFile odbS3 dir sha ".idx"
+    return 0
+  where
+    uploadFile odbS3 dir sha ext =
+        let basename = "pack-" <> T.unpack sha <> ext
+            fullpath = dir <> "/" <> basename
+        in liftIO (BL.readFile fullpath)
+               >>= putFileS3 odbS3 (T.pack basename) . sourceLbs
+
+odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
+odbS3WritePackCommitCallback wp progress = return 0 -- do nothing
+
+odbS3WritePackFreeCallback :: F'git_odb_writepack_free_callback
+odbS3WritePackFreeCallback wp = do
+  writepack <- peek wp
+  freeHaskellFunPtr (c'git_odb_writepack'add writepack)
+  freeHaskellFunPtr (c'git_odb_writepack'commit writepack)
+
+foreign export ccall "odbS3WritePackFreeCallback"
+  odbS3WritePackFreeCallback :: F'git_odb_writepack_free_callback
+foreign import ccall "&odbS3WritePackFreeCallback"
+  odbS3WritePackFreeCallbackPtr :: FunPtr F'git_odb_writepack_free_callback
+
+odbS3Backend :: Git.MonadGit m
+             => S3Configuration NormalQuery
              -> Configuration
-             -> Manager -> Text -> Text
+             -> Manager
+             -> Text
+             -> Text
              -> m (Ptr C'git_odb_backend)
 odbS3Backend s3config config manager bucket prefix = liftIO $ do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
@@ -418,7 +486,12 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
   foreachFun    <-
       mk'git_odb_backend_foreach_callback odbS3BackendForeachCallback
   writepackFun  <-
-      mk'git_odb_backend_writepack_callback odbS3BackendWritePackCallback
+      mk'git_odb_backend_writepack_callback odbS3WritePackCallback
+
+  writePackAddFun  <-
+      mk'git_odb_writepack_add_callback odbS3WritePackAddCallback
+  writePackCommitFun  <-
+      mk'git_odb_writepack_commit_callback odbS3WritePackCommitCallback
 
   manager'  <- newStablePtr manager
   bucket'   <- newStablePtr bucket
@@ -426,26 +499,39 @@ odbS3Backend s3config config manager bucket prefix = liftIO $ do
   s3config' <- newStablePtr s3config
   config'   <- newStablePtr config
 
-  castPtr <$> new OdbS3Backend {
-    odbS3Parent = C'git_odb_backend {
-         c'git_odb_backend'version     = fromIntegral 1
-       , c'git_odb_backend'odb         = nullPtr
-       , c'git_odb_backend'read        = readFun
-       , c'git_odb_backend'read_prefix = readPrefixFun
-       , c'git_odb_backend'readstream  = nullFunPtr
-       , c'git_odb_backend'read_header = readHeaderFun
-       , c'git_odb_backend'write       = writeFun
-       , c'git_odb_backend'writestream = nullFunPtr
-       , c'git_odb_backend'exists      = existsFun
-       , c'git_odb_backend'refresh     = refreshFun
-       , c'git_odb_backend'foreach     = foreachFun
-       , c'git_odb_backend'writepack   = writepackFun
-       , c'git_odb_backend'free        = odbS3BackendFreeCallbackPtr }
-    , httpManager     = manager'
-    , bucketName      = bucket'
-    , objectPrefix    = prefix'
-    , configuration   = config'
-    , s3configuration = s3config' }
+  let odbS3Parent = C'git_odb_backend
+          { c'git_odb_backend'version     = fromIntegral 1
+          , c'git_odb_backend'odb         = nullPtr
+          , c'git_odb_backend'read        = readFun
+          , c'git_odb_backend'read_prefix = readPrefixFun
+          , c'git_odb_backend'readstream  = nullFunPtr
+          , c'git_odb_backend'read_header = readHeaderFun
+          , c'git_odb_backend'write       = writeFun
+          , c'git_odb_backend'writestream = nullFunPtr
+          , c'git_odb_backend'exists      = existsFun
+          , c'git_odb_backend'refresh     = refreshFun
+          , c'git_odb_backend'foreach     = foreachFun
+          , c'git_odb_backend'writepack   = writepackFun
+          , c'git_odb_backend'free        = odbS3BackendFreeCallbackPtr
+          }
+  ptr <- castPtr <$> new OdbS3Backend
+      { odbS3Parent     = odbS3Parent
+      , packWriter      = nullPtr
+      , httpManager     = manager'
+      , bucketName      = bucket'
+      , objectPrefix    = prefix'
+      , configuration   = config'
+      , s3configuration = s3config'
+      }
+  packWriterPtr <- new C'git_odb_writepack
+      { c'git_odb_writepack'backend = ptr
+      , c'git_odb_writepack'add     = writePackAddFun
+      , c'git_odb_writepack'commit  = writePackCommitFun
+      , c'git_odb_writepack'free    = odbS3WritePackFreeCallbackPtr
+      }
+  pokeByteOff ptr (sizeOf (undefined :: C'git_odb_backend)) packWriterPtr
+
+  return ptr
 
 addS3Backend :: Git.MonadGit m
              => Repository

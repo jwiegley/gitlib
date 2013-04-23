@@ -106,6 +106,8 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
 
     deleteRepository = lgGet >>= liftIO . removeTree . repoPath
 
+    writePackFile   = lgWritePackFile
+
 lgParseOid :: Git.MonadGit m => Text -> LgRepository m (Oid m)
 lgParseOid str
   | len > 40 = failure (Git.OidParseFailed str)
@@ -148,12 +150,12 @@ lgHashContents :: Git.MonadGit m => Git.BlobContents (LgRepository m)
 lgHashContents b = do
     repo <- lgGet
     ptr  <- liftIO $ mallocForeignPtr
-    r    <- Git.blobContentsToByteString b
-            >>= \bs -> liftIO $ withForeignPtr ptr $ \oidPtr ->
+    r    <- Git.blobContentsToByteString b >>= \bs ->
+        liftIO $ withForeignPtr ptr $ \oidPtr ->
             BU.unsafeUseAsCStringLen bs $
-            uncurry (\cstr len ->
-                      c'git_odb_hash oidPtr (castPtr cstr)
-                                     (fromIntegral len) c'GIT_OBJ_BLOB)
+                uncurry (\cstr len ->
+                          c'git_odb_hash oidPtr (castPtr cstr)
+                                         (fromIntegral len) c'GIT_OBJ_BLOB)
     when (r < 0) $ failure Git.BlobCreateFailed
     return (Tagged (Oid ptr))
 
@@ -929,6 +931,11 @@ lgAllRefNames = listRefNames allRefsFlag
 -- int git_reference_cmp(git_reference *ref1, git_reference *ref2)
 
 --compareRef = c'git_reference_cmp
+
+lgWritePackFile :: Git.MonadGit m
+                => FilePath -> FilePath -> [Oid m] -> LgRepository m ()
+lgWritePackFile packFile idxFile oids = do
+    failure (Git.BackendError "oops!")
 
 lgFactory :: Git.MonadGit m
           => Git.RepositoryFactory LgRepository m Repository

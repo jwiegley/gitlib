@@ -16,6 +16,10 @@ module Git.Libgit2.Backend
        , F'git_odb_backend_foreach_callback
        , F'git_odb_backend_writepack_callback
        , F'git_odb_backend_free_callback
+
+       , F'git_odb_writepack_add_callback
+       , F'git_odb_writepack_commit_callback
+       , F'git_odb_writepack_free_callback
        )
        where
 
@@ -49,11 +53,19 @@ type F'git_odb_backend_exists_callback =
   Ptr C'git_odb_backend -> Ptr C'git_oid -> IO CInt
 type F'git_odb_backend_refresh_callback = Ptr C'git_odb_backend -> IO CInt
 type F'git_odb_backend_foreach_callback =
-    Ptr C'git_odb_backend -> C'git_odb_foreach_cb -> Ptr () -> IO CInt
+  Ptr C'git_odb_backend -> C'git_odb_foreach_cb -> Ptr () -> IO CInt
 type F'git_odb_backend_writepack_callback =
-    Ptr (Ptr C'git_odb_writepack) -> Ptr C'git_odb_backend
+  Ptr (Ptr C'git_odb_writepack) -> Ptr C'git_odb_backend
     -> C'git_transfer_progress_callback -> Ptr () -> IO CInt
 type F'git_odb_backend_free_callback = Ptr C'git_odb_backend -> IO ()
+
+type F'git_odb_writepack_add_callback =
+  Ptr C'git_odb_writepack -> Ptr () -> CSize -> Ptr C'git_transfer_progress
+    -> IO CInt
+type F'git_odb_writepack_commit_callback =
+  Ptr C'git_odb_writepack -> Ptr C'git_transfer_progress -> IO CInt
+type F'git_odb_writepack_free_callback = Ptr C'git_odb_writepack -> IO ()
+
 
 odbBackendAdd :: Repository -> Ptr C'git_odb_backend -> Int
               -> IO (Either String Repository)
