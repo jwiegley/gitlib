@@ -9,7 +9,9 @@
 module Git.S3
        ( s3Factory, odbS3Backend, addS3Backend
        , readRefs, writeRefs
-       , mirrorRefsFromS3, mirrorRefsToS3 )
+       , mirrorRefsFromS3, mirrorRefsToS3
+       , odbS3UploadPackAndIndex
+       )
        where
 
 import           Aws
@@ -451,6 +453,18 @@ odbS3WritePackAddCallback wp bytes len progress = alloca $ \idxPtrPtr -> do
             fullpath = dir <> "/" <> basename
         in liftIO (BL.readFile fullpath)
                >>= putFileS3 odbS3 (T.pack basename) . sourceLbs
+
+odbS3UploadPackAndIndex :: Ptr OdbS3Backend -> Text -> Text -> Text -> IO ()
+odbS3UploadPackAndIndex be dir packFile idxFile = do
+    odbS3 <- peek be
+    void $ runResourceT $ do
+        uploadFile odbS3 packFile
+        uploadFile odbS3 idxFile
+  where
+    uploadFile odbS3 file =
+        let fullpath = dir <> "/" <> file
+        in liftIO (BL.readFile (T.unpack fullpath))
+               >>= putFileS3 odbS3 file . sourceLbs
 
 odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
 odbS3WritePackCommitCallback wp progress = return 0 -- do nothing
