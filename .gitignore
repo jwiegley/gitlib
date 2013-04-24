@@ -2,3 +2,4 @@ fpbuild/
 */dist/
 */*.git/
 /TAGS
+/gitlib-s3/s3cache/
