@@ -9,7 +9,7 @@
 
 module Git.S3
        ( s3Factory, odbS3Backend, addS3Backend
-       , S3ObjectStatus(..), S3Callbacks(..)
+       , ObjectStatus(..), BackendCallbacks(..)
        -- , readRefs, writeRefs
        -- , mirrorRefsFromS3, mirrorRefsToS3
        ) where
@@ -84,10 +84,10 @@ import           System.IO.Unsafe
 debug :: MonadIO m => String -> m ()
 debug = liftIO . putStrLn
 
-data S3ObjectStatus = ObjectLoose | ObjectInPack Text
-                    deriving (Eq, Show)
+data ObjectStatus = ObjectLoose | ObjectInPack Text
+                  deriving (Eq, Show)
 
-data S3Callbacks = S3Callbacks
+data BackendCallbacks = BackendCallbacks
     { registerObject   :: Text -> IO ()
       -- 'registerObject' reports that a SHA has been written as a loose
       -- object to the S3 repository.  The for tracking it is that sometimes
@@ -98,13 +98,13 @@ data S3Callbacks = S3Callbacks
       -- SHAs which are contained with the pack.  It must register this in an
       -- index, for the sake of the next function.
 
-    , lookupObject :: Text -> IO (Maybe S3ObjectStatus)
+    , lookupObject :: Text -> IO (Maybe ObjectStatus)
       -- 'locateObject' takes a SHA, and returns: Nothing if the object is
       -- "loose", or Just Text identifying the basename of the packfile that
       -- the object is located within.
 
-    , updateS3Ref  :: Text  -> Text -> IO ()
-    , resolveS3Ref :: Text -> IO (Maybe Text)
+    , updateRef  :: Text  -> Text -> IO ()
+    , resolveRef :: Text -> IO (Maybe Text)
 
     -- jww (2013-04-23): To be implemented, if needed in future
     -- , acquireLock :: Text -> IO Text
@@ -116,13 +116,13 @@ data S3Callbacks = S3Callbacks
       -- on behalf of this backend should be released.
     }
 
-instance Default S3Callbacks where
-    def = S3Callbacks
+instance Default BackendCallbacks where
+    def = BackendCallbacks
         { registerObject   = \_   -> return ()
         , registerPackFile = \_ _ -> return ()
         , lookupObject     = \_   -> return Nothing
-        , updateS3Ref      = \_ _ -> return ()
-        , resolveS3Ref     = \_   -> return Nothing
+        , updateRef        = \_ _ -> return ()
+        , resolveRef       = \_   -> return Nothing
         , shuttingDown     = return ()
         }
 
@@ -157,7 +157,7 @@ data OdbS3Details = OdbS3Details
     , objectPrefix    :: Text
     , configuration   :: Configuration
     , s3configuration :: S3Configuration NormalQuery
-    , callbacks       :: S3Callbacks
+    , callbacks       :: BackendCallbacks
       -- In the 'knownObjects' map, if the object is not present, we must query
       -- via the 'lookupObject' callback above.  If it is present, it can be
       -- one of the OdbS3Object's possible states.
@@ -181,7 +181,7 @@ instance Storable OdbS3Backend where
       + sizeOf (undefined :: StablePtr Text)
       + sizeOf (undefined :: StablePtr Configuration)
       + sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
-      + sizeOf (undefined :: StablePtr S3Callbacks)
+      + sizeOf (undefined :: StablePtr BackendCallbacks)
 
   peek p = do
     v0 <- peekByteOff p 0
@@ -904,7 +904,7 @@ odbS3Backend :: Git.MonadGit m
              -> Manager
              -> Text
              -> Text
-             -> S3Callbacks
+             -> BackendCallbacks
              -> m (Ptr C'git_odb_backend)
 odbS3Backend s3config config manager bucket prefix callbacks = liftIO $ do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
@@ -983,7 +983,7 @@ addS3Backend :: Git.MonadGit m
              -> Maybe Manager
              -> Maybe Text     -- ^ mock address
              -> LogLevel
-             -> S3Callbacks -- ^ callbacks
+             -> BackendCallbacks -- ^ callbacks
              -> m Repository
 addS3Backend repo bucket prefix access secret
     mmanager mockAddr level callbacks = do
@@ -1003,7 +1003,7 @@ addS3Backend repo bucket prefix access secret
     return repo
 
 s3Factory :: Git.MonadGit m
-          => Maybe Text -> Text -> Text -> S3Callbacks
+          => Maybe Text -> Text -> Text -> BackendCallbacks
           -> Git.RepositoryFactory LgRepository m Repository
 s3Factory bucket accessKey secretKey callbacks = lgFactory
     { Git.runRepository = \ctxt -> runLgRepository ctxt . (s3back >>) }
