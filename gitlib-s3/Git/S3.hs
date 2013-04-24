@@ -460,6 +460,19 @@ unpackDetails be oid = do
     oidStr <- oidToStr oid
     return (dets, oidStr, T.pack oidStr)
 
+loadFromRemote :: OdbS3Details
+               -> Text
+               -> (OdbS3Details -> FilePath -> FilePath -> Text -> IO a)
+               -> (Maybe ObjectStatus -> IO a)
+               -> IO a
+loadFromRemote dets sha loader action = do
+    location <- lookupObject (callbacks dets) sha
+    case location of
+        Just (ObjectInPack packBase) -> do
+            (packPath, idxPath) <- downloadPack dets packBase
+            loader dets packPath idxPath sha
+        _ -> action location
+
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid = do
     str <- oidToStr oid
@@ -490,7 +503,8 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
             Just (PackedCachedMetaKnown _ _ (PackedCached pack idx _)) ->
                 loadFromPack dets pack idx sha
 
-            _ -> loadFromRemote dets sha
+            _ -> loadFromRemote dets sha loadFromPack $
+                    downloadLoose dets sha
 
     loadFromPack dets pack idx sha = do
         result <- getObjectFromPack dets pack idx sha False
@@ -509,15 +523,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
             copyBytes content cstr (fromIntegral len)
         poke data_p (castPtr content)
 
-    loadFromRemote dets sha = do
-        location <- lookupObject (callbacks dets) sha
-        case location of
-            Just (ObjectInPack packBase) -> do
-                (packPath, idxPath) <- downloadPack dets packBase
-                loadFromPack dets packPath idxPath sha
-            _ -> downloadLoose dets location sha
-
-    downloadLoose dets location sha = do
+    downloadLoose dets sha location = do
         result <- downloadFile dets sha
         case result of
             Just (typ,len,bytes) -> do
@@ -566,7 +572,8 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
                 (packPath, idxPath) <- downloadPack dets base
                 loadFromPack dets packPath idxPath sha
 
-            _ -> loadFromRemote dets sha
+            _ -> loadFromRemote dets sha loadFromPack $
+                    downloadHeader dets sha
 
     loadFromPack dets pack idx sha = do
         result <- getObjectFromPack dets pack idx sha True
@@ -576,27 +583,21 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
             Nothing -> throwIO (Git.BackendError
                                 "Could not find object in pack file")
 
-    loadFromRemote dets sha = do
-        location <- lookupObject (callbacks dets) sha
-        case location of
-            Just (ObjectInPack packBase) -> do
-                (packPath, idxPath) <- downloadPack dets packBase
-                loadFromPack dets packPath idxPath sha
-            _ -> do
-                result <- downloadHeader dets sha
-                case result of
-                    Just (len,typ) -> do
-                        let (len',typ') = (fromIntegral len, fromIntegral typ)
-                        poke len_p len'
-                        poke type_p typ'
-                        when (isNothing location) $
-                            registerObject (callbacks dets) sha
-                                (Just (fromIntegral typ, fromIntegral len))
-                        writeObjMetaDataToCache dets sha typ' len'
-                        return 0
-                    Nothing -> return c'GIT_ENOTFOUND
+    downloadHeader dets sha location = do
+        result <- doDownloadHeader dets sha
+        case result of
+            Just (len,typ) -> do
+                let (len',typ') = (fromIntegral len, fromIntegral typ)
+                poke len_p len'
+                poke type_p typ'
+                when (isNothing location) $
+                    registerObject (callbacks dets) sha
+                        (Just (fromIntegral typ, fromIntegral len))
+                writeObjMetaDataToCache dets sha typ' len'
+                return 0
+            Nothing -> return c'GIT_ENOTFOUND
 
-    downloadHeader dets sha = do
+    doDownloadHeader dets sha = do
         bytes <- runResourceT $ do
             let hdrLen = sizeOf (undefined :: Int64) * 2
             result <- getFileS3 dets sha (Just (0,hdrLen - 1))
@@ -954,9 +955,10 @@ odbS3Backend :: Git.MonadGit m
              -> Manager
              -> Text
              -> Text
+             -> FilePath
              -> BackendCallbacks
              -> m (Ptr C'git_odb_backend)
-odbS3Backend s3config config manager bucket prefix callbacks = liftIO $ do
+odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
   readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
   readPrefixFun <-
       mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
@@ -976,8 +978,6 @@ odbS3Backend s3config config manager bucket prefix callbacks = liftIO $ do
   writePackCommitFun  <-
       mk'git_odb_writepack_commit_callback odbS3WritePackCommitCallback
 
-  tempDir  <- getTemporaryDirectory
-  tempPath <- createTempDirectory tempDir "odbS3"
   objects  <- newMVar M.empty
 
   let odbS3details = OdbS3Details
@@ -988,7 +988,7 @@ odbS3Backend s3config config manager bucket prefix callbacks = liftIO $ do
           , s3configuration = s3config
           , callbacks       = callbacks
           , knownObjects    = objects
-          , tempDirectory   = fromText (T.pack tempPath)
+          , tempDirectory   = dir
           }
       odbS3Parent = C'git_odb_backend
           { c'git_odb_backend'version     = 1
@@ -1033,10 +1033,11 @@ addS3Backend :: Git.MonadGit m
              -> Maybe Manager
              -> Maybe Text     -- ^ mock address
              -> LogLevel
+             -> FilePath
              -> BackendCallbacks -- ^ callbacks
              -> m Repository
 addS3Backend repo bucket prefix access secret
-    mmanager mockAddr level callbacks = do
+    mmanager mockAddr level dir callbacks = do
     manager <- maybe (liftIO $ newManager def) return mmanager
     odbS3   <- liftIO $ odbS3Backend
         (case mockAddr of
@@ -1048,22 +1049,30 @@ addS3Backend repo bucket prefix access secret
               accessKeyID     = E.encodeUtf8 access
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
-        manager bucket prefix callbacks
+        manager bucket prefix dir callbacks
     liftIO $ odbBackendAdd repo odbS3 100
     return repo
 
 s3Factory :: Git.MonadGit m
-          => Maybe Text -> Text -> Text -> BackendCallbacks
+          => Maybe Text -> Text -> Text -> FilePath -> BackendCallbacks
           -> Git.RepositoryFactory LgRepository m Repository
-s3Factory bucket accessKey secretKey callbacks = lgFactory
+s3Factory bucket accessKey secretKey dir callbacks = lgFactory
     { Git.runRepository = \ctxt -> runLgRepository ctxt . (s3back >>) }
   where
     s3back = do
         repo <- lgGet
         void $ liftIO $ addS3Backend
-            repo (fromMaybe "test-bucket" bucket) ""
-            accessKey secretKey Nothing
-            (if isNothing bucket then Just "127.0.0.1" else Nothing)
-            Error callbacks
+            repo
+            (fromMaybe "test-bucket" bucket)
+            ""
+            accessKey
+            secretKey
+            Nothing
+            (if isNothing bucket
+             then Just "127.0.0.1"
+             else Nothing)
+            Error
+            dir
+            callbacks
 
 -- S3.hs

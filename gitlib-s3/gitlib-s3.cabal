@@ -30,7 +30,10 @@ Test-suite smoke
     , HUnit              >= 1.2.5
     , hspec              >= 1.4.4
     , hspec-expectations >= 0.3
-    , data-default         >= 0.5.1
+    , data-default       >= 0.5.1
+    , system-fileio      >= 0.3.9
+    , system-filepath    >= 0.4.7
+    , temporary          >= 1.1.2.4
     , text               >= 0.11.2
     , transformers       >= 0.2.2
 
