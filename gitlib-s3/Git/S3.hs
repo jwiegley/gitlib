@@ -1,3 +1,5 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -16,7 +18,8 @@ module Git.S3
 
 import           Aws
 import           Aws.Core
-import           Aws.S3 hiding (bucketName)
+import           Aws.S3 hiding (bucketName, headObject, getObject, putObject)
+import qualified Aws.S3 as Aws
 import           Bindings.Libgit2.Errors
 import           Bindings.Libgit2.Indexer
 import           Bindings.Libgit2.Odb
@@ -33,7 +36,7 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Resource
 import           Control.Retry
-import           Data.Aeson (object, (.=), (.:))
+import           Data.Aeson as A (object, (.=), (.:), ToJSON(..), FromJSON(..))
 import           Data.Attempt
 import           Data.Binary
 import           Data.ByteString as B hiding (putStrLn, foldr)
@@ -69,6 +72,7 @@ import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.StablePtr
 import           Foreign.Storable
+import           GHC.Generics
 import qualified Git
 import           Git.Libgit2
 import           Git.Libgit2.Backend
@@ -84,8 +88,13 @@ import           System.IO.Unsafe
 debug :: MonadIO m => String -> m ()
 debug = liftIO . putStrLn
 
-data ObjectStatus = ObjectLoose | ObjectInPack Text
-                  deriving (Eq, Show)
+data ObjectStatus = ObjectLoose
+                  | ObjectLooseMetaKnown Int Int64
+                  | ObjectInPack Text
+                  deriving (Eq, Show, Generic)
+
+instance A.ToJSON ObjectStatus
+instance A.FromJSON ObjectStatus
 
 data BackendCallbacks = BackendCallbacks
     { registerObject   :: Text -> IO ()
@@ -103,12 +112,34 @@ data BackendCallbacks = BackendCallbacks
       -- "loose", or Just Text identifying the basename of the packfile that
       -- the object is located within.
 
-    , updateRef  :: Text  -> Text -> IO ()
+    , headObject :: Monad m => Text -> Text -> ResourceT m (Maybe Bool)
+    , getObject  :: Monad m => Text -> Text -> Maybe (Int, Int)
+                 -> ResourceT m (Maybe
+                                 (Either Text
+                                  (ResumableSource (ResourceT m) ByteString)))
+    , putObject  :: Monad m => Text -> Text -> Source (ResourceT m) ByteString
+                 -> ResourceT m (Maybe (Either Text ()))
+      -- These three methods allow mocking of S3.
+      --
+      -- - 'headObject' takes the bucket and path, and returns Just True if an
+      --   object exists at that path, Just False if not, and Nothing if the
+      --   method is not mocked.
+      --
+      -- - 'getObject' takes the bucket, path and an optional range of bytes
+      --   (see the S3 API for deatils), and returns a Just Right lazy
+      --   bytestring to represent the contents, a Just Left error, or
+      --   Nothing if the method is not mocked.
+      --
+      -- - 'putObject' takes the bucket, path and a lazy bytestring, and
+      --   stores the contents at that location.  It returns Just Right () if
+      --   it succeeds, a Just Left on error, or Nothing if the method is not
+      --   mocked.
+
+    , updateRef  :: Text -> Text -> IO ()
     , resolveRef :: Text -> IO (Maybe Text)
 
-    -- jww (2013-04-23): To be implemented, if needed in future
-    -- , acquireLock :: Text -> IO Text
-    -- , releaseLock :: Text -> IO ()
+    , acquireLock :: Text -> IO Text
+    , releaseLock :: Text -> IO ()
 
     , shuttingDown    :: IO ()
       -- 'shuttingDown' informs whoever registered with this backend that we
@@ -118,11 +149,16 @@ data BackendCallbacks = BackendCallbacks
 
 instance Default BackendCallbacks where
     def = BackendCallbacks
-        { registerObject   = \_   -> return ()
-        , registerPackFile = \_ _ -> return ()
-        , lookupObject     = \_   -> return Nothing
-        , updateRef        = \_ _ -> return ()
-        , resolveRef       = \_   -> return Nothing
+        { registerObject   = \_     -> return ()
+        , registerPackFile = \_ _   -> return ()
+        , lookupObject     = \_     -> return Nothing
+        , headObject       = \_ _   -> return Nothing
+        , getObject        = \_ _ _ -> return Nothing
+        , putObject        = \_ _ _ -> return Nothing
+        , updateRef        = \_ _   -> return ()
+        , resolveRef       = \_     -> return Nothing
+        , acquireLock      = \_     -> return ""
+        , releaseLock      = \_     -> return ()
         , shuttingDown     = return ()
         }
 
@@ -215,41 +251,51 @@ awsRetry = ((((retrying def (isFailure . responseResult) .) .) .) .) aws
 testFileS3 :: OdbS3Details -> Text -> ResourceT IO Bool
 testFileS3 dets filepath = do
     debug $ "testFileS3: " ++ show filepath
-    isJust . readResponse <$>
-        aws (configuration dets)
-            (s3configuration dets)
-            (httpManager dets)
-            (headObject (bucketName dets)
-                 (T.append (objectPrefix dets) filepath))
+    let bucket = bucketName dets
+        path   = T.append (objectPrefix dets) filepath
+    cbResult <- headObject (callbacks dets) bucket path
+    case cbResult of
+        Just r  -> return r
+        Nothing ->
+            isJust . readResponse
+                <$> aws (configuration dets) (s3configuration dets)
+                        (httpManager dets) (Aws.headObject bucket path)
 
 getFileS3 :: OdbS3Details -> Text -> Maybe (Int,Int)
           -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFileS3 dets filepath range = do
     debug $ "getFileS3: " ++ show filepath
-    res <- awsRetry
-               (configuration dets)
-               (s3configuration dets)
-               (httpManager dets)
-               (getObject (bucketName dets)
-                    (T.append (objectPrefix dets) filepath))
-                   { goResponseContentRange = range }
-    gor <- readResponseIO res
-    return (responseBody (gorResponse gor))
+    let bucket = bucketName dets
+        path   = T.append (objectPrefix dets) filepath
+    cbResult <- getObject (callbacks dets) bucket path range
+    case cbResult of
+        Just (Right r) -> return r
+        _ -> do
+            res <- awsRetry (configuration dets) (s3configuration dets)
+                       (httpManager dets) (Aws.getObject bucket path)
+                           { Aws.goResponseContentRange = range }
+            gor <- readResponseIO res
+            return (responseBody (Aws.gorResponse gor))
 
 putFileS3 :: OdbS3Details -> Text -> Source (ResourceT IO) ByteString
-          -> ResourceT IO BL.ByteString
+          -> ResourceT IO ()
 putFileS3 dets filepath src = do
     debug $ "putFileS3: " ++ show filepath
-    lbs <- BL.fromChunks <$> (src $$ CList.consume)
-    res <- awsRetry
-               (configuration dets)
-               (s3configuration dets)
-               (httpManager dets)
-               (putObject (bucketName dets)
-                          (T.append (objectPrefix dets) filepath)
-                    (RequestBodyLBS lbs))
-    void $ readResponseIO res
-    return lbs
+    let bucket = bucketName dets
+        path   = T.append (objectPrefix dets) filepath
+    cbResult <- putObject (callbacks dets) bucket path src
+    case cbResult of
+        Just (Right r) -> return r
+        _ -> do
+            lbs <- BL.fromChunks <$> (src $$ CList.consume)
+            res <- awsRetry
+                       (configuration dets)
+                       (s3configuration dets)
+                       (httpManager dets)
+                       (Aws.putObject (bucketName dets)
+                                  (T.append (objectPrefix dets) filepath)
+                            (RequestBodyLBS lbs))
+            void $ readResponseIO res
 
 type RefMap m =
     M.HashMap Text (Maybe (Git.Reference (LgRepository m) (Commit m)))
@@ -991,9 +1037,9 @@ addS3Backend repo bucket prefix access secret
     odbS3   <- liftIO $ odbS3Backend
         (case mockAddr of
             Nothing   -> defServiceConfig
-            Just addr -> (s3 HTTP (E.encodeUtf8 addr) False) {
-                               s3Port         = 10001
-                             , s3RequestStyle = PathStyle })
+            Just addr -> (Aws.s3 HTTP (E.encodeUtf8 addr) False) {
+                               Aws.s3Port         = 10001
+                             , Aws.s3RequestStyle = PathStyle })
         (Configuration Timestamp Credentials {
               accessKeyID     = E.encodeUtf8 access
             , secretAccessKey = E.encodeUtf8 secret }
