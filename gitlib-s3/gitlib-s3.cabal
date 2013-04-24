@@ -54,6 +54,7 @@ Library
     , directory            >= 1.1.0.2
     , http-conduit         >= 1.8.5.1
     , lens                 >= 2.8
+    , missing-foreign      >= 0.1.1
     , parallel-io          >= 0.3.2.1
     , resourcet            >= 0.4.6
     , retry                >= 0.2.0.0

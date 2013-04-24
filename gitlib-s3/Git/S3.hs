@@ -64,6 +64,7 @@ import           Foreign.C.String
 import           Foreign.C.Types
 import           Foreign.ForeignPtr
 import           Foreign.Marshal.Alloc
+import           Foreign.Marshal.MissingAlloc
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.StablePtr
@@ -83,7 +84,7 @@ import           System.IO.Unsafe
 debug :: MonadIO m => String -> m ()
 debug = liftIO . putStrLn
 
-data S3ObjectStatus = ObjectUnknown | ObjectLoose | ObjectInPack Text
+data S3ObjectStatus = ObjectLoose | ObjectInPack Text
                     deriving (Eq, Show)
 
 data S3Callbacks = S3Callbacks
@@ -97,7 +98,7 @@ data S3Callbacks = S3Callbacks
       -- SHAs which are contained with the pack.  It must register this in an
       -- index, for the sake of the next function.
 
-    , locateObject :: Text -> IO S3ObjectStatus
+    , lookupObject :: Text -> IO (Maybe S3ObjectStatus)
       -- 'locateObject' takes a SHA, and returns: Nothing if the object is
       -- "loose", or Just Text identifying the basename of the packfile that
       -- the object is located within.
@@ -119,7 +120,7 @@ instance Default S3Callbacks where
     def = S3Callbacks
         { registerObject   = \_   -> return ()
         , registerPackFile = \_ _ -> return ()
-        , locateObject     = \_   -> return ObjectUnknown
+        , lookupObject     = \_   -> return Nothing
         , updateS3Ref      = \_ _ -> return ()
         , resolveS3Ref     = \_   -> return Nothing
         , shuttingDown     = return ()
@@ -158,7 +159,7 @@ data OdbS3Details = OdbS3Details
     , s3configuration :: S3Configuration NormalQuery
     , callbacks       :: S3Callbacks
       -- In the 'knownObjects' map, if the object is not present, we must query
-      -- via the 'locateObject' callback above.  If it is present, it can be
+      -- via the 'lookupObject' callback above.  If it is present, it can be
       -- one of the OdbS3Object's possible states.
     , knownObjects    :: MVar (HashMap Text OdbS3Object)
     , tempDirectory   :: FilePath
@@ -461,9 +462,9 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
         poke data_p (castPtr content)
 
     loadFromRemote dets sha = do
-        location <- locateObject (callbacks dets) sha
+        location <- lookupObject (callbacks dets) sha
         case location of
-            ObjectInPack packBase -> do
+            Just (ObjectInPack packBase) -> do
                 (packPath, idxPath) <- downloadPack dets packBase
                 loadFromPack dets packPath idxPath sha
             _ -> downloadLoose dets location sha
@@ -477,7 +478,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                 poke type_p typ'
                 poke data_p (castPtr bytes)
                 bs <- BU.unsafePackCString bytes
-                when (location == ObjectUnknown) $
+                when (isNothing location) $
                     registerObject (callbacks dets) sha
                 writeObjectToCache dets sha typ' len' bs
                 return 0
@@ -528,9 +529,9 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
                                 "Could not find object in pack file")
 
     loadFromRemote dets sha = do
-        location <- locateObject (callbacks dets) sha
+        location <- lookupObject (callbacks dets) sha
         case location of
-            ObjectInPack packBase -> do
+            Just (ObjectInPack packBase) -> do
                 (packPath, idxPath) <- downloadPack dets packBase
                 loadFromPack dets packPath idxPath sha
             _ -> do
@@ -540,7 +541,7 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
                         let (len',typ') = (fromIntegral len, fromIntegral typ)
                         poke len_p len'
                         poke type_p typ'
-                        when (location == ObjectUnknown) $
+                        when (isNothing location) $
                             registerObject (callbacks dets) sha
                         writeObjMetaDataToCache dets sha typ' len'
                         return 0
@@ -674,11 +675,11 @@ odbS3BackendExistsCallback be oid = do
         Just DoesNotExist -> return 0
         Just _            -> return 1
         Nothing -> do
-            location <- locateObject (callbacks dets) sha
+            location <- lookupObject (callbacks dets) sha
             r <- case location of
-                ObjectInPack base -> return (PackedRemote base)
-                ObjectLoose       -> return LooseRemote
-                ObjectUnknown     -> do
+                Just (ObjectInPack base) -> return (PackedRemote base)
+                Just ObjectLoose         -> return LooseRemote
+                Nothing -> do
                     exists <-
                         wrapException "odbS3BackendExistsCallback failed" $
                             runResourceT $ testFileS3 dets sha
@@ -812,27 +813,42 @@ odbS3WritePackAddCallback wp bytes len progress = do
     receivePack dets (tempDirectory dets)
   where
     receivePack dets dir =
-        withCString (pathStr dir) $ \dirStr ->
-        alloca $ \idxPtrPtr ->
-        alloca $ \statsPtr -> runResourceT $ do
+        alloca $ \idxPtrPtr -> runResourceT $ do
 
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 1.."
         -- Allocate a new indexer stream
-        (_,idxPtr) <- flip allocate c'git_indexer_stream_free $ do
-            r <- c'git_indexer_stream_new idxPtrPtr dirStr nullFunPtr nullPtr
-            checkResult r "c'git_indexer_stream_new failed"
-            peek idxPtrPtr
+        (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
+            withCString (pathStr dir) $ \dirStr -> do
+                r <- c'git_indexer_stream_new idxPtrPtr dirStr
+                         nullFunPtr nullPtr
+                checkResult r "c'git_indexer_stream_new failed"
+                peek idxPtrPtr
 
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: len = " ++ show len
         -- Add the incoming packfile data to the stream
+        (_,statsPtr) <- allocate calloc free
         r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
         checkResult r "c'git_indexer_stream_add failed"
+        stats <- liftIO $ peek statsPtr
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: total_objects = "
+            ++ show (c'git_transfer_progress'total_objects stats)
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: indexed_objects = "
+            ++ show (c'git_transfer_progress'indexed_objects stats)
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: received_objects = "
+            ++ show (c'git_transfer_progress'received_objects stats)
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: received_bytes = "
+            ++ show (c'git_transfer_progress'received_bytes stats)
 
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 3.."
         -- Finalize the stream, which writes it out to disk
         r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
         checkResult r "c'git_indexer_stream_finalize failed"
 
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 4.."
         -- Discover the hash used to identify the pack file
         packSha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
 
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 5.."
         -- Load the pack file, and iterate over the objects within it to
         -- determine what it contains.  When 'withPackFile' returns, the pack
         -- file will be closed and any associated resources freed.
@@ -841,9 +857,11 @@ odbS3WritePackAddCallback wp bytes len progress = do
         liftIO $ withPackFile idxFile $
             observePackObjects dets packSha idxFile True
 
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 6.."
         -- Upload the actual files to S3
         uploadFile dets dir packSha ".pack"
         uploadFile dets dir packSha ".idx"
+        liftIO $ putStrLn $ "odbS3WritePackAddCallback 7.."
         return 0
 
     uploadFile odbS3 dir sha ext =
