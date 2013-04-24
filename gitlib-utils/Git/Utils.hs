@@ -304,20 +304,16 @@ withNewRepository' :: (Repository (t m), MonadGit (t m),
                        MonadBaseControl IO m, MonadIO m, MonadTrans t)
                    => RepositoryFactory t m c -> FilePath -> t m a -> m a
 withNewRepository' factory path action = do
-    liftIO $ do
+    Exc.bracket_ recover recover $
+        withRepository' factory (defaultOptions factory)
+            { repoPath       = path
+            , repoIsBare     = True
+            , repoAutoCreate = True
+            } action
+  where
+    recover = liftIO $ do
         exists <- isDirectory path
         when exists $ removeTree path
-
-    Exc.finally go (liftIO recover)
-  where
-    go = withRepository' factory (defaultOptions factory)
-        { repoPath       = path
-        , repoIsBare     = True
-        , repoAutoCreate = True
-        } action
-
-    recover = do exists <- isDirectory path
-                 when exists $ removeTree path
 
 
 -- Utils.hs ends here
