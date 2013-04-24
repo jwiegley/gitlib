@@ -256,7 +256,8 @@ testFileS3 dets filepath = do
     cbResult <- headObject (callbacks dets) bucket path
     case cbResult of
         Just r  -> return r
-        Nothing ->
+        Nothing -> do
+            debug $ "Aws.headObject: " ++ show filepath
             isJust . readResponse
                 <$> aws (configuration dets) (s3configuration dets)
                         (httpManager dets) (Aws.headObject bucket path)
@@ -271,6 +272,7 @@ getFileS3 dets filepath range = do
     case cbResult of
         Just (Right r) -> return r
         _ -> do
+            debug $ "Aws.getObject: " ++ show filepath ++ " " ++ show range
             res <- awsRetry (configuration dets) (s3configuration dets)
                        (httpManager dets) (Aws.getObject bucket path)
                            { Aws.goResponseContentRange = range }
@@ -290,6 +292,8 @@ putFileS3 dets filepath src = do
     case cbResult of
         Just (Right r) -> return r
         _ -> do
+            debug $ "Aws.putObject: " ++ show filepath
+                 ++ " len " ++ show (BL.length lbs)
             res <- awsRetry
                        (configuration dets)
                        (s3configuration dets)
