@@ -97,7 +97,7 @@ instance A.ToJSON ObjectStatus
 instance A.FromJSON ObjectStatus
 
 data BackendCallbacks = BackendCallbacks
-    { registerObject   :: Text -> IO ()
+    { registerObject :: Text -> Maybe (Int, Int) -> IO ()
       -- 'registerObject' reports that a SHA has been written as a loose
       -- object to the S3 repository.  The for tracking it is that sometimes
       -- calling 'locateObject' can be much faster than querying Amazon.
@@ -117,7 +117,7 @@ data BackendCallbacks = BackendCallbacks
                  -> ResourceT m (Maybe
                                  (Either Text
                                   (ResumableSource (ResourceT m) ByteString)))
-    , putObject  :: Monad m => Text -> Text -> Source (ResourceT m) ByteString
+    , putObject  :: Monad m => Text -> Text -> Int -> BL.ByteString
                  -> ResourceT m (Maybe (Either Text ()))
       -- These three methods allow mocking of S3.
       --
@@ -126,13 +126,13 @@ data BackendCallbacks = BackendCallbacks
       --   method is not mocked.
       --
       -- - 'getObject' takes the bucket, path and an optional range of bytes
-      --   (see the S3 API for deatils), and returns a Just Right lazy
-      --   bytestring to represent the contents, a Just Left error, or
-      --   Nothing if the method is not mocked.
+      --   (see the S3 API for deatils), and returns a Just Right bytestring
+      --   to represent the contents, a Just Left error, or Nothing if the
+      --   method is not mocked.
       --
-      -- - 'putObject' takes the bucket, path and a lazy bytestring, and
-      --   stores the contents at that location.  It returns Just Right () if
-      --   it succeeds, a Just Left on error, or Nothing if the method is not
+      -- - 'putObject' takes the bucket, path, length and a bytestring source,
+      --   and stores the contents at that location.  It returns Just Right ()
+      --   if it succeeds, a Just Left on error, or Nothing if the method is not
       --   mocked.
 
     , updateRef  :: Text -> Text -> IO ()
@@ -149,16 +149,16 @@ data BackendCallbacks = BackendCallbacks
 
 instance Default BackendCallbacks where
     def = BackendCallbacks
-        { registerObject   = \_     -> return ()
-        , registerPackFile = \_ _   -> return ()
-        , lookupObject     = \_     -> return Nothing
-        , headObject       = \_ _   -> return Nothing
-        , getObject        = \_ _ _ -> return Nothing
-        , putObject        = \_ _ _ -> return Nothing
-        , updateRef        = \_ _   -> return ()
-        , resolveRef       = \_     -> return Nothing
-        , acquireLock      = \_     -> return ""
-        , releaseLock      = \_     -> return ()
+        { registerObject   = \_ _     -> return ()
+        , registerPackFile = \_ _     -> return ()
+        , lookupObject     = \_       -> return Nothing
+        , headObject       = \_ _     -> return Nothing
+        , getObject        = \_ _ _   -> return Nothing
+        , putObject        = \_ _ _ _ -> return Nothing
+        , updateRef        = \_ _     -> return ()
+        , resolveRef       = \_       -> return Nothing
+        , acquireLock      = \_       -> return ""
+        , releaseLock      = \_       -> return ()
         , shuttingDown     = return ()
         }
 
@@ -280,14 +280,16 @@ getFileS3 dets filepath range = do
 putFileS3 :: OdbS3Details -> Text -> Source (ResourceT IO) ByteString
           -> ResourceT IO ()
 putFileS3 dets filepath src = do
+    -- jww (2013-04-24): Reading everything in memory here is not a good idea.
+    lbs <- BL.fromChunks <$> (src $$ CList.consume)
     debug $ "putFileS3: " ++ show filepath
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
-    cbResult <- putObject (callbacks dets) bucket path src
+    cbResult <- putObject (callbacks dets) bucket path
+                    (fromIntegral (BL.length lbs)) lbs
     case cbResult of
         Just (Right r) -> return r
         _ -> do
-            lbs <- BL.fromChunks <$> (src $$ CList.consume)
             res <- awsRetry
                        (configuration dets)
                        (s3configuration dets)
@@ -525,7 +527,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                 poke data_p (castPtr bytes)
                 bs <- BU.unsafePackCString bytes
                 when (isNothing location) $
-                    registerObject (callbacks dets) sha
+                    registerObject (callbacks dets) sha (Just (typ, len))
                 writeObjectToCache dets sha typ' len' bs
                 return 0
             Nothing -> throwIO (Git.BackendError $
@@ -589,6 +591,7 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
                         poke type_p typ'
                         when (isNothing location) $
                             registerObject (callbacks dets) sha
+                                (Just (fromIntegral typ, fromIntegral len))
                         writeObjMetaDataToCache dets sha typ' len'
                         return 0
                     Nothing -> return c'GIT_ENOTFOUND
@@ -703,6 +706,7 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
                 runResourceT $ putFileS3 dets sha (sourceLbs payload)
 
             registerObject (callbacks dets) sha
+                (Just (fromIntegral obj_type, fromIntegral len))
 
             -- Write a copy to the local cache
             writeObjectToCache dets sha obj_type len bytes
@@ -731,7 +735,7 @@ odbS3BackendExistsCallback be oid = do
                             runResourceT $ testFileS3 dets sha
                     if exists
                         then do
-                            registerObject (callbacks dets) sha
+                            registerObject (callbacks dets) sha Nothing
                             return LooseRemote
                         else return DoesNotExist
 
