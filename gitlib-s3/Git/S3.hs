@@ -870,7 +870,6 @@ odbS3WritePackAddCallback wp bytes len progress = do
     receivePack dets dir =
         alloca $ \idxPtrPtr -> runResourceT $ do
 
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 1.."
         -- Allocate a new indexer stream
         (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
             withCString (pathStr dir) $ \dirStr -> do
@@ -879,64 +878,42 @@ odbS3WritePackAddCallback wp bytes len progress = do
                 checkResult r "c'git_indexer_stream_new failed"
                 peek idxPtrPtr
 
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: len = " ++ show len
         -- Add the incoming packfile data to the stream
         (_,statsPtr) <- allocate calloc free
         r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
         checkResult r "c'git_indexer_stream_add failed"
-        stats <- liftIO $ peek statsPtr
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: total_objects = "
-            ++ show (c'git_transfer_progress'total_objects stats)
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: indexed_objects = "
-            ++ show (c'git_transfer_progress'indexed_objects stats)
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: received_objects = "
-            ++ show (c'git_transfer_progress'received_objects stats)
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 2: received_bytes = "
-            ++ show (c'git_transfer_progress'received_bytes stats)
 
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 3.."
         -- Finalize the stream, which writes it out to disk
         r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
         checkResult r "c'git_indexer_stream_finalize failed"
 
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 4.."
         -- Discover the hash used to identify the pack file
         packSha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
 
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 5.."
-        -- Load the pack file, and iterate over the objects within it to
-        -- determine what it contains.  When 'withPackFile' returns, the pack
-        -- file will be closed and any associated resources freed.
-        let basename = "pack-" <> packSha <> ".idx"
-            idxFile  = dir </> fromText basename
-        liftIO $ withPackFile idxFile $
-            observePackObjects dets packSha idxFile True
-
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 6.."
         -- Upload the actual files to S3
-        uploadFile dets dir packSha ".pack"
-        uploadFile dets dir packSha ".idx"
-        liftIO $ putStrLn $ "odbS3WritePackAddCallback 7.."
+        uploadPackAndIndex dets dir packSha
         return 0
 
-    uploadFile odbS3 dir sha ext =
-        let base = "pack-" <> sha <> ext
-            path = dir </> fromText base
-        in liftIO (BL.readFile (pathStr path))
-               >>= putFileS3 odbS3 base . sourceLbs
+uploadPackAndIndex :: OdbS3Details -> FilePath -> Text -> ResourceT IO ()
+uploadPackAndIndex dets dir packSha = do
+    let basename = "pack-" <> packSha <> ".idx"
+        idxFile  = dir </> fromText basename
 
--- odbS3UploadPackAndIndex :: Ptr OdbS3Backend -> Text -> Text -> Text -> IO ()
--- odbS3UploadPackAndIndex be dir packFile idxFile = do
---     odbS3 <- peek be
---     dets  <- deRefStablePtr (details odbS3)
---     void $ runResourceT $ do
---         uploadFile dets packFile
---         uploadFile dets idxFile
---   where
---     uploadFile odbS3 file =
---         let fullpath = dir <> "/" <> file
---         in liftIO (BL.readFile (T.unpack fullpath))
---                >>= putFileS3 odbS3 file . sourceLbs
+    -- Load the pack file, and iterate over the objects within it to determine
+    -- what it contains.  When 'withPackFile' returns, the pack file will be
+    -- closed and any associated resources freed.
+    liftIO $ withPackFile idxFile $
+        observePackObjects dets packSha idxFile True
+
+    uploadFile dets dir packSha ".pack"
+    uploadFile dets dir packSha ".idx"
+
+uploadFile :: OdbS3Details -> FilePath -> Text -> Text -> ResourceT IO ()
+uploadFile dets dir sha ext =
+    let base = "pack-" <> sha <> ext
+        path = dir </> fromText base
+    in liftIO (BL.readFile (pathStr path))
+           >>= putFileS3 dets base . sourceLbs
 
 odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
 odbS3WritePackCommitCallback wp progress = return 0 -- do nothing
