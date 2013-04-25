@@ -839,7 +839,9 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
   writePackCommitFun  <-
       mk'git_odb_writepack_commit_callback odbS3WritePackCommitCallback
 
-  objects  <- newMVar M.empty
+  objects   <- newMVar M.empty
+  dirExists <- isDirectory dir
+  unless dirExists $ createTree dir
 
   let odbS3details = OdbS3Details
           { httpManager     = manager
