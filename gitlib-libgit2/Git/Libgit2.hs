@@ -1054,7 +1054,7 @@ lgBuildPackIndex dir bytes = do
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_indexer_stream_add failed"
 
-        debug "Finalize the stream, which writes it out to disk"
+        debug "Finalize the stream"
         r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
         checkResult r "c'git_indexer_stream_finalize failed"
 
