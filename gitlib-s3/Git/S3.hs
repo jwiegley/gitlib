@@ -398,6 +398,7 @@ downloadFile dets path = do
     blocks <- runResourceT $ do
         result <- getFileS3 dets path Nothing
         result $$+- CList.consume
+    debug $ "downloadFile: downloaded " ++ show path
     case blocks of
       [] -> return Nothing
       bs -> do
@@ -405,6 +406,7 @@ downloadFile dets path = do
             (len,typ) =
                 mapPair fromIntegral
                     (Bin.decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
+        debug $ "downloadFile: length from header is " ++ show len
         content <- mallocBytes len
         foldM_ (\offset x -> do
                      let xOffset  = if offset == 0 then hdrLen else 0
