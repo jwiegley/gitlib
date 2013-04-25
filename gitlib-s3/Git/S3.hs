@@ -104,7 +104,7 @@ data BackendCallbacks = BackendCallbacks
       -- "loose", or Just Text identifying the basename of the packfile that
       -- the object is located within.
 
-    , lookupPackFile :: Text -> IO Bool
+    , lookupPackFile :: Text -> IO (Maybe Bool)
       -- 'locatePackFile' indicates whether a pack file with the given sha is
       -- present on the remote, regardless of which objects it contains.
 
@@ -146,7 +146,7 @@ instance Default BackendCallbacks where
         { registerObject   = \_ _     -> return ()
         , registerPackFile = \_ _     -> return ()
         , lookupObject     = \_       -> return Nothing
-        , lookupPackFile   = \_       -> return False
+        , lookupPackFile   = \_       -> return Nothing
         , headObject       = \_ _     -> return Nothing
         , getObject        = \_ _ _   -> return Nothing
         , putObject        = \_ _ _ _ -> return Nothing
@@ -770,8 +770,9 @@ odbS3WritePackAddCallback wp bytes len progress = do
     -- Upload the actual files to S3 if it's not already then, and then register
     -- the objects within the pack in the global index.
     packExists <- liftIO $ lookupPackFile (callbacks dets) packSha
-    unless packExists $ runResourceT $
-        uploadPackAndIndex dets packPath idxPath packSha
+    case packExists of
+        Just True -> return ()
+        _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
     return 0
 
 uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
