@@ -85,6 +85,11 @@ class (Applicative m, Monad m, Failure GitException m,
     lookupObject :: Text -> m (Object m)
     existsObject :: Oid m -> m Bool
 
+    traverseObjects :: forall a.
+                       (Object m -> m a) -> Maybe (CommitName m) -> m [a]
+    traverseObjects_ :: (Object m -> m ()) -> Maybe (CommitName m) -> m ()
+    traverseObjects_ = (void .) . traverseObjects
+
     pushCommit :: (MonadTrans t, MonadGit m, MonadGit (t m),
                    Repository m, Repository (t m))
                => CommitName m -> Maybe Text -> Text
@@ -97,7 +102,7 @@ class (Applicative m, Monad m, Failure GitException m,
 
     missingObjects :: Maybe (CommitName m) -- ^ A commit we may already have
                    -> CommitName m         -- ^ The commit we need
-                   -> m [Oid m]            -- ^ All the objects in between
+                   -> m [Object m]         -- ^ All the objects in between
 
     -- Object creation
     newTree :: m (Tree m)
@@ -110,9 +115,21 @@ class (Applicative m, Monad m, Failure GitException m,
     deleteRepository :: m ()
 
     -- Pack files
-    writePackFile :: FilePath -> FilePath -> [Oid m] -> m ()
-    writePackFile _ _ _ =
-        failure (BackendError "Backend does not support writing of pack files")
+    buildPackFile :: FilePath -> [Either (CommitOid m) (TreeOid m)]
+                  -> m FilePath
+    buildPackFile _ _ =
+        failure (BackendError "Backend does not support building pack files")
+
+    buildPackIndex :: FilePath -> ByteString -> m (Text, FilePath, FilePath)
+    buildPackIndex _ _ =
+        failure (BackendError "Backend does not support building pack indexes")
+
+    writePackFile :: FilePath -> m ()
+    writePackFile _ =
+        failure (BackendError "Backend does not support writing  pack files")
+
+    -- Git remotes
+    remoteFetch :: Text {- URI -} -> Text {- fetch spec -} -> m ()
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
@@ -217,10 +234,16 @@ type TreeRef m   = ObjRef m (Tree m)
 type CommitRef m = ObjRef m (Commit m)
 type TagRef m    = ObjRef m (Tag m)
 
-data Object m = BlobObj   !(BlobRef m)
-              | TreeObj   !(TreeRef m)
-              | CommitObj !(CommitRef m)
-              | TagObj    !(TagRef m)
+data Object m = BlobObj      !(BlobRef m)
+              | TreeObj      !(TreeRef m)
+              | CommitObj    !(CommitRef m)
+              | TagObj       !(TagRef m)
+
+objectOid :: Repository m => Object m -> m (Oid m)
+objectOid (BlobObj ref)   = return . unTagged $ blobRefOid ref
+objectOid (TreeObj ref)   = unTagged <$> treeRefOid ref
+objectOid (CommitObj ref) = return . unTagged $ commitRefOid ref
+objectOid (TagObj ref)    = return . unTagged $ tagRefOid ref
 
 {- $blobs -}
 data Blob m = Blob { blobOid      :: !(BlobOid m)
@@ -388,7 +411,14 @@ referenceToRef mname mref =
 
 {- $tags -}
 
-data Tag m = Tag { tagCommit :: !(CommitRef m) }
+data Tag m = Tag
+    { tagOid    :: !(TagOid m)
+    , tagCommit :: !(CommitRef m)
+    }
+
+tagRefOid :: Repository m => TagRef m -> TagOid m
+tagRefOid (ByOid x) = x
+tegRefOid (Known x) = tagOid x
 
 {- $merges -}
 

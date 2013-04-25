@@ -72,6 +72,7 @@ type CommitRef m  = Git.CommitRef (CmdLineRepository m)
 type CommitName m = Git.CommitName (CmdLineRepository m)
 
 type Reference m  = Git.Reference (CmdLineRepository m) (Commit m)
+type Object m     = Git.Object (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     data Oid (CmdLineRepository m) = Oid { getOid :: TL.Text }
@@ -316,10 +317,10 @@ cliTraverseCommits f name = do
 
 cliMissingObjects :: Git.MonadGit m
                   => Maybe (CommitName m) -> CommitName m
-                  -> CmdLineRepository m [Oid m]
+                  -> CmdLineRepository m [Object m]
 cliMissingObjects mhave need = do
     shas <- doRunGit run
-            ([ "--no-pager", "rev-list", "--objects"]
+            ([ "--no-pager", "log", "--format=%H %T", "-z"]
              <> (case mhave of
                       Nothing   -> [ TL.fromStrict (Git.renderCommitName need) ]
                       Just have ->
@@ -327,7 +328,16 @@ cliMissingObjects mhave need = do
                           , TL.append "^"
                             (TL.fromStrict (Git.renderCommitName need)) ]))
             $ return ()
-    mapM (Git.parseOid . T.take 40 . TL.toStrict) (TL.lines shas)
+    concat <$> mapM (go . T.words . TL.toStrict) (TL.lines shas)
+  where
+    go [csha,tsha] = do
+        coid <- Git.parseOid csha
+        toid <- Git.parseOid tsha
+        return [ Git.CommitObj (Git.ByOid (Tagged coid))
+               , Git.TreeObj (Git.ByOid (Tagged toid))
+               ]
+    go x = failure (Git.BackendError $
+                    "Unexpected output from git-log: " <> T.pack (show x))
 
 cliMakeTree :: Git.MonadGit m
             => IORef (Maybe (TreeOid m))
@@ -679,7 +689,7 @@ cliCreateTag :: Git.MonadGit m
              => CommitOid m -> Git.Signature -> Text -> Text
              -> CmdLineRepository m (Tag m)
 cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
-    doRunGit run_ ["mktag"] $ setStdin $ TL.unlines $
+    tsha <- doRunGit run ["mktag"] $ setStdin $ TL.unlines $
         [ "object " <> sha
         , "type commit"
         , "tag " <> TL.fromStrict name
@@ -688,7 +698,7 @@ cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
           <> TL.pack (formatTime defaultTimeLocale "%s %z"
                       (Git.signatureWhen tagger))
         , ""] <> TL.lines (TL.fromStrict msg)
-    return $ Git.Tag (Git.ByOid oid)
+    return $ Git.Tag (Tagged (Oid (TL.init tsha))) (Git.ByOid oid)
 
 data Repository = Repository
     { repoOptions :: Git.RepositoryOptions

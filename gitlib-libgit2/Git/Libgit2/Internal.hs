@@ -15,7 +15,6 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.ByteString
 import           Data.Dynamic
-import           Data.Stringable
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -54,7 +53,7 @@ addTracingBackend = do
     case F.toText (repoPath repo </> "objects") of
         Left p -> error $ "Object directory does not exist: " ++ T.unpack p
         Right p -> do
-            liftIO $ withCStringable p $ \objectsDir ->
+            liftIO $ withCString (T.unpack p) $ \objectsDir ->
                 alloca $ \loosePtr -> do
                     r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
                     when (r < 0) $
@@ -112,7 +111,7 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
 --         fptr <- liftIO $ do
 --             fptr <- mallocForeignPtr
 --             withForeignPtr fptr $ \ptr ->
---                 withCStringable str $ \cstr -> do
+--                 withCString str $ \cstr -> do
 --                     r <- c'git_oid_fromstrn ptr cstr (fromIntegral len)
 --                     return $ if r < 0
 --                              then Nothing

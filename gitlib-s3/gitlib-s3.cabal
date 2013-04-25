@@ -16,6 +16,7 @@ Source-repository head
 
 Test-suite smoke
   default-language: Haskell98
+  ghc-options: -Wall
   type: exitcode-stdio-1.0
   main-is: Smoke.hs
   hs-source-dirs: test
@@ -38,6 +39,7 @@ Test-suite smoke
     , transformers       >= 0.2.2
 
 Library
+  ghc-options: -Wall
   hs-source-dirs: .
   default-language: Haskell98
   build-depends:

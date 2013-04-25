@@ -30,7 +30,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Traversable hiding (mapM, forM, sequence)
 import           Debug.Trace
 import           Filesystem (removeTree, isDirectory)
-import           Filesystem.Path.CurrentOS hiding (null)
+import           Filesystem.Path.CurrentOS hiding (null, concat)
 import           Git
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
@@ -185,9 +185,30 @@ copyCommit cr mref needed = do
         let x = cref2 `seq` (cref2:prefs)
         return $ x `seq` needed'' `seq` (x,needed'')
 
+-- | Given a list of objects (commit and top-level trees) return by
+--   'missingObjects', expand it to include all subtrees and blobs as well.
+--   Ordering is preserved.
+allMissingObjects :: Repository m => [Object m] -> m [Object m]
+allMissingObjects objs = do
+    objs <- forM objs $ \obj -> case obj of
+        BlobObj ref   -> return [obj]
+        CommitObj ref -> return [obj]
+        TagObj ref    -> return [obj]
+        TreeObj ref   -> do
+            tr       <- resolveTreeRef ref
+            subobjss <- traverseEntries tr $ \fp ent -> do
+                return $ case ent of
+                    Git.BlobEntry oid _ ->
+                        [Git.BlobObj (Git.ByOid oid)]
+                    Git.TreeEntry tr' -> [Git.TreeObj tr']
+                    _ -> []
+            return (obj:concat subobjss)
+    return $ concat objs
+
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works.
-genericPushCommit :: (Repository m, Repository (t m), MonadTrans t, MonadIO (t m))
+genericPushCommit :: (Repository m, Repository (t m),
+                      MonadTrans t, MonadIO (t m))
                   => CommitName m -> Text -> t m (CommitRef (t m))
 genericPushCommit cname remoteRefName = do
     mrref    <- lookupRef remoteRefName
@@ -211,8 +232,9 @@ genericPushCommit cname remoteRefName = do
     case fastForward of
         Nothing -> failure (Git.PushNotFastForward "unexpected")
         Just liftedMrref -> do
-            oids <- lift $ missingObjects liftedMrref cname
-            let shas = map renderOid oids
+            objs <- lift $ allMissingObjects
+                        =<< missingObjects liftedMrref cname
+            shas <- mapM (\obj -> renderOid <$> lift (objectOid obj)) objs
             mref <- lift $ commitNameToRef cname
             case mref of
                 Nothing -> failure (ReferenceLookupFailed (T.pack (show cname)))

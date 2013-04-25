@@ -112,6 +112,10 @@ data BackendCallbacks = BackendCallbacks
       -- "loose", or Just Text identifying the basename of the packfile that
       -- the object is located within.
 
+    , lookupPackFile :: Text -> IO Bool
+      -- 'locatePackFile' indicates whether a pack file with the given sha is
+      -- present on the remote, regardless of which objects it contains.
+
     , headObject :: Monad m => Text -> Text -> ResourceT m (Maybe Bool)
     , getObject  :: Monad m => Text -> Text -> Maybe (Int, Int)
                  -> ResourceT m (Maybe
@@ -152,6 +156,7 @@ instance Default BackendCallbacks where
         { registerObject   = \_ _     -> return ()
         , registerPackFile = \_ _     -> return ()
         , lookupObject     = \_       -> return Nothing
+        , lookupPackFile   = \_       -> return False
         , headObject       = \_ _     -> return Nothing
         , getObject        = \_ _ _   -> return Nothing
         , putObject        = \_ _ _ _ -> return Nothing
@@ -235,11 +240,6 @@ instance Storable OdbS3Backend where
     pokeByteOff p sizev2 v2
     return ()
 
-pathStr :: FilePath -> String
-pathStr (toText -> Left e) =
-    throw . Git.BackendError $ "Could not render path: " <> T.pack (show e)
-pathStr (toText -> Right p) = T.unpack p
-
 awsRetry :: Transaction r a
          => Configuration
          -> ServiceConfiguration r NormalQuery
@@ -318,19 +318,6 @@ instance Y.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
                            <*> (Git.RefObj . Git.ByOid . go <$> o .: "target")
       where
         go = return . Oid . unsafePerformIO . strToOid
-
-strToOid :: String -> IO (ForeignPtr C'git_oid)
-strToOid oidStr = do
-    ptr <- mallocForeignPtr
-    withCString oidStr $ \cstr ->
-      withForeignPtr ptr $ \ptr' -> do
-        r <- c'git_oid_fromstr ptr' cstr
-        when (r < 0) $ throwIO Git.OidCopyFailed
-        return ptr
-
-oidToSha :: Ptr C'git_oid -> IO Text
-oidToSha oidPtr = allocaBytes 42 $ \oidStr ->
-    E.decodeUtf8 <$> (B.packCString =<< c'git_oid_tostr oidStr 41 oidPtr)
 
 coidToJSON :: ForeignPtr C'git_oid -> Y.Value
 coidToJSON coid =
@@ -628,65 +615,29 @@ writePackToCache dets sha packBytes idxBytes = do
         packPath = replaceExtension idxPath "pack"
     B.writeFile (pathStr packPath) packBytes
     B.writeFile (pathStr idxPath) idxBytes
-    withPackFile idxPath $ observePackObjects dets sha idxPath False
+    lgWithPackFile idxPath $ observePackObjects dets sha idxPath False
     return (packPath, idxPath)
 
 checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
 
 getObjectFromPack :: OdbS3Details -> FilePath -> FilePath -> Text -> Bool
                   -> IO (Maybe (C'git_otype, CSize, ByteString))
-getObjectFromPack dets packPath idxPath sha metadataOnly =
-    alloca $ \objectPtrPtr -> withPackFile idxPath $ \odbPtr -> do
-        liftIO $ debug $ "getObjectFromPack "
-            ++ show packPath ++ " " ++ show sha
-        foid <- liftIO $ strToOid (T.unpack sha)
-        mresult <- go odbPtr objectPtrPtr foid
-        case mresult of
-            Just (typ, len, bytes)
-                | B.null bytes -> liftIO $ do
-                    now <- getCurrentTime
-                    let obj = PackedCachedMetaKnown typ len
-                                  (PackedCached packPath idxPath now)
-                    modifyMVar_ (knownObjects dets) $ return . M.insert sha obj
-                | otherwise ->
-                    liftIO $ writeObjectToCache dets sha typ len bytes
-            _ -> return ()
+getObjectFromPack dets packPath idxPath sha metadataOnly = do
+    liftIO $ debug $ "getObjectFromPack "
+        ++ show packPath ++ " " ++ show sha
+    mresult <- lgReadFromPack idxPath sha metadataOnly
+    case mresult of
+        Just (typ, len, bytes)
+            | B.null bytes -> liftIO $ do
+                now <- getCurrentTime
+                let obj = PackedCachedMetaKnown typ len
+                              (PackedCached packPath idxPath now)
+                modifyMVar_ (knownObjects dets) $ return . M.insert sha obj
+            | otherwise ->
+                liftIO $ writeObjectToCache dets sha typ len bytes
+        _ -> return ()
 
-        return mresult
-  where
-    go odbPtr objectPtrPtr foid =
-        if metadataOnly
-        then liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
-            r <- withForeignPtr foid $
-                 c'git_odb_read_header sizePtr typPtr odbPtr
-            if r == 0
-                then Just <$> ((,,) <$> peek typPtr
-                                    <*> peek sizePtr
-                                    <*> pure B.empty)
-                else do
-                    unless (r == c'GIT_ENOTFOUND) $
-                        checkResult r "c'git_odb_read_header failed"
-                    return Nothing
-        else do
-            r <- liftIO $ withForeignPtr foid $
-                 c'git_odb_read objectPtrPtr odbPtr
-            mr <- if r == 0
-                  then do
-                      objectPtr <- liftIO $ peek objectPtrPtr
-                      register $ c'git_odb_object_free objectPtr
-                      return $ Just objectPtr
-                  else do
-                      unless (r == c'GIT_ENOTFOUND) $
-                          checkResult r "c'git_odb_read failed"
-                      return Nothing
-            case mr of
-                Just objectPtr ->
-                    Just <$>
-                    liftIO ((,,) <$> c'git_odb_object_type objectPtr
-                                 <*> c'git_odb_object_size objectPtr
-                                 <*> (B.packCString . castPtr
-                                      =<< c'git_odb_object_data objectPtr))
-                Nothing -> return Nothing
+    return mresult
 
 writeObjMetaDataToCache :: OdbS3Details -> Text -> C'git_otype -> CSize -> IO ()
 writeObjMetaDataToCache dets sha typ len = do
@@ -787,50 +738,6 @@ foreign export ccall "odbS3BackendFreeCallback"
 foreign import ccall "&odbS3BackendFreeCallback"
   odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-loadPackFileInMemory :: FilePath
-                     -> Ptr (Ptr C'git_odb_backend)
-                     -> Ptr (Ptr C'git_odb)
-                     -> ResourceT IO (Ptr C'git_odb)
-loadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
-    liftIO $ debug "loadPackFileInMemory"
-
-    -- Create a temporary, in-memory object database
-    (freeKey,odbPtr) <- flip allocate c'git_odb_free $ do
-        r <- c'git_odb_new odbPtrPtr
-        checkResult r "c'git_odb_new failed"
-        peek odbPtrPtr
-
-    -- Load the pack file's index into a temporary object database, so we can
-    -- iterate the objects within it
-    (_,backendPtr) <- allocate
-        (do r <- withCString (pathStr idxPath) $ \idxPathStr ->
-                c'git_odb_backend_one_pack backendPtrPtr idxPathStr
-            checkResult r "c'git_odb_backend_one_pack failed"
-            peek backendPtrPtr)
-        (\backendPtr -> do
-              backend <- peek backendPtr
-              mK'git_odb_backend_free_callback
-                  (c'git_odb_backend'free backend) backendPtr)
-
-    -- Since freeing the backend will now free the object database, unregister
-    -- the finalizer we had setup for the odbPtr
-    void $ unprotect freeKey
-
-    -- Associate the new backend containing our single index file with the
-    -- in-memory object database
-    r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
-    checkResult r "c'git_odb_add_backend failed"
-
-    return odbPtr
-
-withPackFile :: FilePath -> (Ptr C'git_odb -> ResourceT IO a) -> IO a
-withPackFile idxPath f = do
-    debug $ "withPackFile " ++ show idxPath
-    alloca $ \odbPtrPtr ->
-        alloca $ \backendPtrPtr -> runResourceT $ do
-            odbPtr <- loadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
-            f odbPtr
-
 observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
                    -> ResourceT IO ()
 observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
@@ -839,13 +746,11 @@ observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
     -- Iterate the "database", which gives us a list of all the oids contained
     -- within it
     mshas <- liftIO $ newMVar []
-    (_,foreachCallback) <- flip allocate freeHaskellFunPtr $
-         mk'git_odb_foreach_cb $ \oid _ -> do
-            modifyMVar_ mshas $ \shas ->
-                (:) <$> oidToSha oid <*> pure shas
-            return 0
-    r <- liftIO $ c'git_odb_foreach odbPtr foreachCallback nullPtr
-    checkResult r "c'git_odb_add_foreach failed"
+    r <- liftIO $ flip (lgForEachObject odbPtr) nullPtr $ \oid _ -> do
+        modifyMVar_ mshas $ \shas ->
+            (:) <$> oidToSha oid <*> pure shas
+        return 0
+    checkResult r "lgForEachObject failed"
 
     -- Let whoever is listening know about this pack files and its contained
     -- objects
@@ -865,55 +770,36 @@ odbS3WritePackAddCallback wp bytes len progress = do
     be    <- c'git_odb_writepack'backend <$> peek wp
     odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
     dets  <- deRefStablePtr (details odbS3)
-    receivePack dets (tempDirectory dets)
-  where
-    receivePack dets dir =
-        alloca $ \idxPtrPtr -> runResourceT $ do
+    let dir = tempDirectory dets
 
-        -- Allocate a new indexer stream
-        (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
-            withCString (pathStr dir) $ \dirStr -> do
-                r <- c'git_indexer_stream_new idxPtrPtr dirStr
-                         nullFunPtr nullPtr
-                checkResult r "c'git_indexer_stream_new failed"
-                peek idxPtrPtr
+    -- bs <- BU.unsafePackCString (castPtr bytes)
+    bs <- B.packCString (castPtr bytes)
+    (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
 
-        -- Add the incoming packfile data to the stream
-        (_,statsPtr) <- allocate calloc free
-        r <- liftIO $ c'git_indexer_stream_add idxPtr bytes len statsPtr
-        checkResult r "c'git_indexer_stream_add failed"
+    -- Upload the actual files to S3 if it's not already then, and then register
+    -- the objects within the pack in the global index.
+    packExists <- liftIO $ lookupPackFile (callbacks dets) packSha
+    unless packExists $ runResourceT $
+        uploadPackAndIndex dets packPath idxPath packSha
+    return 0
 
-        -- Finalize the stream, which writes it out to disk
-        r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
-        checkResult r "c'git_indexer_stream_finalize failed"
-
-        -- Discover the hash used to identify the pack file
-        packSha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
-
-        -- Upload the actual files to S3
-        uploadPackAndIndex dets dir packSha
-        return 0
-
-uploadPackAndIndex :: OdbS3Details -> FilePath -> Text -> ResourceT IO ()
-uploadPackAndIndex dets dir packSha = do
-    let basename = "pack-" <> packSha <> ".idx"
-        idxFile  = dir </> fromText basename
-
+uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
+                   -> ResourceT IO ()
+uploadPackAndIndex dets packPath idxPath packSha = do
     -- Load the pack file, and iterate over the objects within it to determine
     -- what it contains.  When 'withPackFile' returns, the pack file will be
     -- closed and any associated resources freed.
-    liftIO $ withPackFile idxFile $
-        observePackObjects dets packSha idxFile True
+    debug $ "uploadPackAndIndex: " ++ show packSha
+    liftIO $ lgWithPackFile idxPath $
+        observePackObjects dets packSha idxPath True
 
-    uploadFile dets dir packSha ".pack"
-    uploadFile dets dir packSha ".idx"
+    uploadFile dets packPath
+    uploadFile dets idxPath
 
-uploadFile :: OdbS3Details -> FilePath -> Text -> Text -> ResourceT IO ()
-uploadFile dets dir sha ext =
-    let base = "pack-" <> sha <> ext
-        path = dir </> fromText base
-    in liftIO (BL.readFile (pathStr path))
-           >>= putFileS3 dets base . sourceLbs
+uploadFile :: OdbS3Details -> FilePath -> ResourceT IO ()
+uploadFile dets path =
+    liftIO (BL.readFile (pathStr path))
+           >>= putFileS3 dets (pathText (basename path)) . sourceLbs
 
 odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
 odbS3WritePackCommitCallback wp progress = return 0 -- do nothing

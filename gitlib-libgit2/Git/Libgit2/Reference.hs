@@ -13,7 +13,6 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.ByteString
 import           Data.IORef
-import           Data.Stringable
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text as T

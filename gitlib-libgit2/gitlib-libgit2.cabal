@@ -17,6 +17,7 @@ Source-repository head
 
 Test-suite smoke
     Default-language: Haskell98
+    ghc-options: -Wall
     Type: exitcode-stdio-1.0
     Main-is: Smoke.hs
     Hs-source-dirs: test
@@ -32,6 +33,7 @@ Test-suite smoke
 Library
     default-language:   Haskell98
     default-extensions: ForeignFunctionInterface
+    ghc-options: -Wall
     build-depends:
           base                 >= 3 && < 5
         , gitlib
@@ -42,19 +44,22 @@ Library
         , conduit              >= 0.5.5
         , containers           >= 0.4.2
         , data-default         >= 0.5.0
+        , directory            >= 1.1.0.2
         , failure              >= 0.2.0.1
         , hex                  >= 0.1.2
         , lifted-base          >= 0.2.0.2
+        , missing-foreign      >= 0.1.1
         , monad-control        >= 0.3.2
         , monad-loops          >= 0.3.3.0
         , parallel-io          >= 0.3.2.1
         , pointless-fun        >= 1.1.0.1
-        , stringable           >= 0.1.1
+        , resourcet            >= 0.4.6
         , system-fileio        >= 0.3.9
         , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1
         , text                 >= 0.11.2
         , text-icu             >= 0.6.3
+        , temporary            >= 1.1.2.4
         , time                 >= 1.4
         , transformers         >= 0.3.0.0
         , transformers-base    >= 0.4.1
