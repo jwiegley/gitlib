@@ -33,7 +33,6 @@ import           Control.Concurrent.MVar
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Resource
 import           Control.Retry
 import           Data.Aeson as A
@@ -58,7 +57,6 @@ import           Data.Tagged
 import           Data.Text as T hiding (foldr)
 import qualified Data.Text.Encoding as E
 import           Data.Time.Clock
-import           Data.Traversable (for)
 import           Filesystem
 import           Filesystem.Path.CurrentOS hiding (encode, decode)
 import           Foreign.C.String
@@ -110,10 +108,10 @@ data BackendCallbacks = BackendCallbacks
       -- 'locatePackFile' indicates whether a pack file with the given sha is
       -- present on the remote, regardless of which objects it contains.
 
-    , headObject :: Monad m => Text -> Text -> ResourceT m (Maybe Bool)
-    , getObject  :: Monad m => Text -> Text -> Maybe (Int64, Int64)
+    , headObject :: MonadIO m => Text -> Text -> ResourceT m (Maybe Bool)
+    , getObject  :: MonadIO m => Text -> Text -> Maybe (Int64, Int64)
                  -> ResourceT m (Maybe (Either Text BL.ByteString))
-    , putObject  :: Monad m => Text -> Text -> Int -> BL.ByteString
+    , putObject  :: MonadIO m => Text -> Text -> Int -> BL.ByteString
                  -> ResourceT m (Maybe (Either Text ()))
       -- These three methods allow mocking of S3.
       --
@@ -377,7 +375,7 @@ mirrorRefsFromS3 be = do
                 Git.refTarget = Git.RefObj x@(Git.ByOid (Tagged coid)) } ->
                 withForeignPtr (getOid coid) $ \coidPtr ->
                     c'git_reference_create ptr repoPtr namePtr coidPtr 1
-            Nothing -> return 0
+            _ -> return 0
         when (r < 0) $ throwIO Git.RepositoryInvalid
 
 mirrorRefsToS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
@@ -612,8 +610,6 @@ writePackToCache dets sha packBytes idxBytes = do
     lgWithPackFile idxPath $ observePackObjects dets sha idxPath False
     return (packPath, idxPath)
 
-checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
-
 getObjectFromPack :: OdbS3Details -> FilePath -> FilePath -> Text -> Bool
                   -> IO (Maybe (C'git_otype, CSize, ByteString))
 getObjectFromPack dets packPath idxPath sha metadataOnly = do
@@ -679,7 +675,7 @@ odbS3BackendExistsCallback be oid = do
             r <- case location of
                 Just (ObjectInPack base) -> return (PackedRemote base)
                 Just ObjectLoose         -> return LooseRemote
-                Nothing -> do
+                _ -> do
                     exists <-
                         wrapException "odbS3BackendExistsCallback failed" $
                             runResourceT $ testFileS3 dets sha
@@ -915,7 +911,7 @@ addS3Backend repo bucket prefix access secret
             , secretAccessKey = E.encodeUtf8 secret }
          (defaultLog level))
         manager bucket prefix dir callbacks
-    liftIO $ odbBackendAdd repo odbS3 100
+    void $ liftIO $ odbBackendAdd repo odbS3 100
     return repo
 
 s3Factory :: Git.MonadGit m
@@ -945,17 +941,18 @@ data S3MockService = S3MockService
     }
 
 s3MockService :: IO S3MockService
-s3MockService = do
-    return undefined
+s3MockService = S3MockService <$> newMVar M.empty
 
-mockHeadObject :: S3MockService -> Text -> Text -> ResourceT IO (Maybe Bool)
+mockHeadObject :: MonadIO m
+               => S3MockService -> Text -> Text -> ResourceT m (Maybe Bool)
 mockHeadObject svc bucket path = do
     objs <- liftIO $ readMVar (objects svc)
     return $ maybe (Just False) (const (Just True)) $
         M.lookup (bucket, path) objs
 
-mockGetObject :: S3MockService -> Text -> Text -> Maybe (Int64, Int64)
-              -> ResourceT IO (Maybe (Either Text BL.ByteString))
+mockGetObject :: MonadIO m
+              => S3MockService -> Text -> Text -> Maybe (Int64, Int64)
+              -> ResourceT m (Maybe (Either Text BL.ByteString))
 mockGetObject svc bucket path range = do
     objs <- liftIO $ readMVar (objects svc)
     let obj = maybe (Left $ T.pack $ "Not found: "
@@ -966,10 +963,12 @@ mockGetObject svc bucket path range = do
         Just (beg,end) -> BL.drop beg <$> BL.take end <$> obj
         Nothing -> obj
 
-mockPutObject :: S3MockService -> Text -> Text -> Int -> BL.ByteString
-              -> ResourceT IO (Maybe (Either Text ()))
+mockPutObject :: MonadIO m
+              => S3MockService -> Text -> Text -> Int -> BL.ByteString
+              -> ResourceT m (Maybe (Either Text ()))
 mockPutObject svc bucket path _ bytes = do
-    lift $ modifyMVar_ (objects svc) $ return . M.insert (bucket, path) bytes
+    liftIO $ modifyMVar_ (objects svc) $
+        return . M.insert (bucket, path) bytes
     return $ Just $ Right ()
 
 -- S3.hs

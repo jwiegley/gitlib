@@ -25,6 +25,7 @@ module Git.Libgit2
        , TreeOid()
        , TreeRef()
        , addTracingBackend
+       , checkResult
        , closeLgRepository
        , defaultLgOptions
        , lgBuildPackIndex
