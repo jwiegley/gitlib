@@ -62,6 +62,7 @@ Library
     , directory            >= 1.1.0.2
     , http-conduit         >= 1.8.5.1
     , lens                 >= 2.8
+    , lifted-base          >= 0.2.0.2
     , resourcet            >= 0.4.6
     , retry                >= 0.2.0.0
     , system-fileio        >= 0.3.9
