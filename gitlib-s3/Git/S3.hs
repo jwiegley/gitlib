@@ -12,6 +12,8 @@
 module Git.S3
        ( s3Factory, odbS3Backend, addS3Backend
        , ObjectStatus(..), BackendCallbacks(..)
+       , S3MockService(), s3MockService
+       , mockHeadObject, mockGetObject, mockPutObject
        -- , readRefs, writeRefs
        -- , mirrorRefsFromS3, mirrorRefsToS3
        ) where
@@ -21,14 +23,12 @@ import           Aws.Core
 import           Aws.S3 hiding (bucketName, headObject, getObject, putObject)
 import qualified Aws.S3 as Aws
 import           Bindings.Libgit2.Errors
-import           Bindings.Libgit2.Indexer
 import           Bindings.Libgit2.Odb
 import           Bindings.Libgit2.OdbBackend
 import           Bindings.Libgit2.Oid
 import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
-import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.MVar
 import           Control.Exception
 import           Control.Monad
@@ -36,13 +36,12 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Resource
 import           Control.Retry
-import           Data.Aeson as A (object, (.=), (.:), ToJSON(..), FromJSON(..))
+import           Data.Aeson as A
 import           Data.Attempt
-import           Data.Binary
+import           Data.Bifunctor
+import           Data.Binary as Bin
 import           Data.ByteString as B hiding (putStrLn, foldr)
-import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Char8 as BLC
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
 import           Data.Conduit.Binary
@@ -58,16 +57,14 @@ import           Data.Monoid
 import           Data.Tagged
 import           Data.Text as T hiding (foldr)
 import qualified Data.Text.Encoding as E
-import qualified Data.Text.Lazy.Encoding as LE
 import           Data.Time.Clock
-import qualified Data.Yaml as Y
+import           Data.Traversable (for)
 import           Filesystem
 import           Filesystem.Path.CurrentOS hiding (encode, decode)
 import           Foreign.C.String
 import           Foreign.C.Types
 import           Foreign.ForeignPtr
 import           Foreign.Marshal.Alloc
-import           Foreign.Marshal.MissingAlloc
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.StablePtr
@@ -80,9 +77,6 @@ import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 import           Network.HTTP.Conduit hiding (Response)
 import           Prelude hiding (FilePath, mapM_, catch)
-import           System.Directory
-import           System.IO hiding (FilePath)
-import           System.IO.Temp
 import           System.IO.Unsafe
 
 debug :: MonadIO m => String -> m ()
@@ -117,10 +111,8 @@ data BackendCallbacks = BackendCallbacks
       -- present on the remote, regardless of which objects it contains.
 
     , headObject :: Monad m => Text -> Text -> ResourceT m (Maybe Bool)
-    , getObject  :: Monad m => Text -> Text -> Maybe (Int, Int)
-                 -> ResourceT m (Maybe
-                                 (Either Text
-                                  (ResumableSource (ResourceT m) ByteString)))
+    , getObject  :: Monad m => Text -> Text -> Maybe (Int64, Int64)
+                 -> ResourceT m (Maybe (Either Text BL.ByteString))
     , putObject  :: Monad m => Text -> Text -> Int -> BL.ByteString
                  -> ResourceT m (Maybe (Either Text ()))
       -- These three methods allow mocking of S3.
@@ -262,7 +254,7 @@ testFileS3 dets filepath = do
                 <$> aws (configuration dets) (s3configuration dets)
                         (httpManager dets) (Aws.headObject bucket path)
 
-getFileS3 :: OdbS3Details -> Text -> Maybe (Int,Int)
+getFileS3 :: OdbS3Details -> Text -> Maybe (Int64,Int64)
           -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFileS3 dets filepath range = do
     debug $ "getFileS3: " ++ show filepath
@@ -270,12 +262,13 @@ getFileS3 dets filepath range = do
         path   = T.append (objectPrefix dets) filepath
     cbResult <- getObject (callbacks dets) bucket path range
     case cbResult of
-        Just (Right r) -> return r
+        Just (Right r) -> fst <$> (sourceLbs r $$+ Data.Conduit.Binary.take 0)
         _ -> do
             debug $ "Aws.getObject: " ++ show filepath ++ " " ++ show range
             res <- awsRetry (configuration dets) (s3configuration dets)
                        (httpManager dets) (Aws.getObject bucket path)
-                           { Aws.goResponseContentRange = range }
+                           { Aws.goResponseContentRange =
+                                  bimap fromIntegral fromIntegral <$> range }
             gor <- readResponseIO res
             return (responseBody (Aws.gorResponse gor))
 
@@ -306,10 +299,10 @@ putFileS3 dets filepath src = do
 type RefMap m =
     M.HashMap Text (Maybe (Git.Reference (LgRepository m) (Commit m)))
 
-instance Y.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
+instance A.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
     parseJSON j = do
-        o <- Y.parseJSON j
-        case L.lookup "symbolic" (M.toList (o :: Y.Object)) of
+        o <- A.parseJSON j
+        case L.lookup "symbolic" (M.toList (o :: A.Object)) of
             Just _ -> Git.Reference
                           <$> o .: "symbolic"
                           <*> (Git.RefSymbolic <$> o .: "target")
@@ -319,12 +312,12 @@ instance Y.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
       where
         go = return . Oid . unsafePerformIO . strToOid
 
-coidToJSON :: ForeignPtr C'git_oid -> Y.Value
+coidToJSON :: ForeignPtr C'git_oid -> A.Value
 coidToJSON coid =
-    unsafePerformIO $ withForeignPtr coid $ fmap Y.toJSON . oidToStr
+    unsafePerformIO $ withForeignPtr coid $ fmap A.toJSON . oidToStr
 
 instance Git.MonadGit m
-         => Y.ToJSON (Git.Reference (LgRepository m) (Commit m)) where
+         => A.ToJSON (Git.Reference (LgRepository m) (Commit m)) where
   toJSON (Git.Reference name (Git.RefSymbolic target)) =
       object [ "symbolic" .= name
              , "target"   .= target ]
@@ -346,15 +339,15 @@ readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
     odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
     dets   <- deRefStablePtr (details odbS3)
-    exists <- wrapException "Failed to check whether 'refs.yml' exists" $
-                  runResourceT $ testFileS3 dets "refs.yml"
+    exists <- wrapException "Failed to check whether 'refs.json' exists" $
+                  runResourceT $ testFileS3 dets "refs.json"
     if exists
         then do
-            bytes <- wrapException "Failed to read 'refs.yml'" $
+            bytes <- wrapException "Failed to read 'refs.json'" $
                          runResourceT $ do
-                             result <- getFileS3 dets "refs.yml" Nothing
+                             result <- getFileS3 dets "refs.json" Nothing
                              result $$+- await
-            return . join $ Y.decode <$> bytes
+            return . join $ A.decode . BL.fromChunks . (:[]) <$> bytes
         else return Nothing
 
 writeRefs :: Git.MonadGit m => Ptr C'git_odb_backend -> RefMap m -> IO ()
@@ -362,7 +355,7 @@ writeRefs be refs = do
     odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
     dets   <- deRefStablePtr (details odbS3)
     void $ runResourceT $
-        putFileS3 dets "refs.yml" $ sourceLbs (BL.fromChunks [Y.encode refs])
+        putFileS3 dets "refs.json" $ sourceLbs (A.encode refs)
 
 mirrorRefsFromS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsFromS3 be = do
@@ -413,7 +406,7 @@ downloadFile dets path = do
         let hdrLen = sizeOf (undefined :: Int64) * 2
             (len,typ) =
                 mapPair fromIntegral
-                    (decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
+                    (Bin.decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
         content <- mallocBytes len
         foldM_ (\offset x -> do
                      let xOffset  = if offset == 0 then hdrLen else 0
@@ -428,19 +421,19 @@ downloadPack :: OdbS3Details -> Text -> IO (FilePath, FilePath)
 downloadPack dets packSha = do
     debug $ "downloadPack: " ++ show packSha
     result <- downloadFile dets $ "pack-" <> packSha <> ".pack"
-    packBytes <- case result of
-        Just (_,_,packBytes) -> return packBytes
+    (packLen,packBytes) <- case result of
+        Just (_,packLen,packBytes) -> return (packLen,packBytes)
         Nothing -> throwIO (Git.BackendError $
                             "Failed to download pack " <> packSha)
 
     result' <- downloadFile dets $ "pack-" <> packSha <> ".idx"
-    idxBytes <- case result' of
-        Just (_,_,idxBytes) -> return idxBytes
+    (idxLen,idxBytes) <- case result' of
+        Just (_,idxLen,idxBytes) -> return (idxLen,idxBytes)
         Nothing -> throwIO (Git.BackendError $
                             "Failed to download index " <> packSha)
 
-    packBS <- BU.unsafePackCString packBytes
-    idxBS  <- BU.unsafePackCString idxBytes
+    packBS <- curry BU.unsafePackCStringLen packBytes packLen
+    idxBS  <- curry BU.unsafePackCStringLen idxBytes idxLen
     writePackToCache dets packSha packBS idxBS
 
 unpackDetails :: Ptr C'git_odb_backend -> Ptr C'git_oid
@@ -522,7 +515,7 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                 poke len_p len'
                 poke type_p typ'
                 poke data_p (castPtr bytes)
-                bs <- BU.unsafePackCString bytes
+                bs <- curry BU.unsafePackCStringLen bytes (fromIntegral len)
                 when (isNothing location) $
                     registerObject (callbacks dets) sha (Just (typ, len))
                 writeObjectToCache dets sha typ' len' bs
@@ -591,11 +584,12 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
     doDownloadHeader dets sha = do
         bytes <- runResourceT $ do
             let hdrLen = sizeOf (undefined :: Int64) * 2
-            result <- getFileS3 dets sha (Just (0,hdrLen - 1))
+            result <- getFileS3 dets sha (Just (0,fromIntegral (hdrLen - 1)))
             result $$+- await
         return $ case bytes of
             Nothing -> Nothing
-            Just bs -> Just $ decode (BL.fromChunks [bs]) :: Maybe (Int64,Int64)
+            Just bs ->
+                Just $ Bin.decode (BL.fromChunks [bs]) :: Maybe (Int64,Int64)
 
 writeObjectToCache :: OdbS3Details
                    -> Text -> C'git_otype -> CSize -> ByteString -> IO ()
@@ -653,8 +647,8 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
     case r of
         0 -> do
             (dets, oidStr, sha) <- unpackDetails be oid
-            let hdr = encode ((fromIntegral len,
-                               fromIntegral obj_type) :: (Int64,Int64))
+            let hdr = A.encode ((fromIntegral len,
+                                 fromIntegral obj_type) :: (Int64,Int64))
             bytes <- curry BU.unsafePackCStringLen
                           (castPtr obj_data) (fromIntegral len)
             let payload = BL.append hdr (BL.fromChunks [bytes])
@@ -772,8 +766,9 @@ odbS3WritePackAddCallback wp bytes len progress = do
     dets  <- deRefStablePtr (details odbS3)
     let dir = tempDirectory dets
 
-    -- bs <- BU.unsafePackCString (castPtr bytes)
-    bs <- B.packCString (castPtr bytes)
+    bs <- curry BU.unsafePackCStringLen (castPtr bytes) (fromIntegral len)
+    debug $ "odbS3WritePackAddCallback: building index for "
+        ++ show (B.length bs) ++ " bytes"
     (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
 
     -- Upload the actual files to S3 if it's not already then, and then register
@@ -797,9 +792,12 @@ uploadPackAndIndex dets packPath idxPath packSha = do
     uploadFile dets idxPath
 
 uploadFile :: OdbS3Details -> FilePath -> ResourceT IO ()
-uploadFile dets path =
-    liftIO (BL.readFile (pathStr path))
-           >>= putFileS3 dets (pathText (basename path)) . sourceLbs
+uploadFile dets path = do
+    lbs <- liftIO $ BL.readFile (pathStr path)
+    let hdr = A.encode ((fromIntegral (BL.length lbs),
+                         fromIntegral 0) :: (Int64,Int64))
+        payload = BL.append hdr lbs
+    putFileS3 dets (pathText (basename path)) (sourceLbs payload)
 
 odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
 odbS3WritePackCommitCallback wp progress = return 0 -- do nothing
@@ -938,8 +936,40 @@ s3Factory bucket accessKey secretKey dir callbacks = lgFactory
             (if isNothing bucket
              then Just "127.0.0.1"
              else Nothing)
-            Error
+            Aws.Error
             dir
             callbacks
+
+data S3MockService = S3MockService
+    { objects :: MVar (HashMap (Text, Text) BL.ByteString)
+    }
+
+s3MockService :: IO S3MockService
+s3MockService = do
+    return undefined
+
+mockHeadObject :: S3MockService -> Text -> Text -> ResourceT IO (Maybe Bool)
+mockHeadObject svc bucket path = do
+    objs <- liftIO $ readMVar (objects svc)
+    return $ maybe (Just False) (const (Just True)) $
+        M.lookup (bucket, path) objs
+
+mockGetObject :: S3MockService -> Text -> Text -> Maybe (Int64, Int64)
+              -> ResourceT IO (Maybe (Either Text BL.ByteString))
+mockGetObject svc bucket path range = do
+    objs <- liftIO $ readMVar (objects svc)
+    let obj = maybe (Left $ T.pack $ "Not found: "
+                     ++ show bucket ++ "/" ++ show path)
+                  Right $
+                  M.lookup (bucket, path) objs
+    return $ Just $ case range of
+        Just (beg,end) -> BL.drop beg <$> BL.take end <$> obj
+        Nothing -> obj
+
+mockPutObject :: S3MockService -> Text -> Text -> Int -> BL.ByteString
+              -> ResourceT IO (Maybe (Either Text ()))
+mockPutObject svc bucket path _ bytes = do
+    lift $ modifyMVar_ (objects svc) $ return . M.insert (bucket, path) bytes
+    return $ Just $ Right ()
 
 -- S3.hs

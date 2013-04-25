@@ -1037,7 +1037,6 @@ lgBuildPackIndex dir bytes = do
   where
     go dir bytes = alloca $ \idxPtrPtr -> runResourceT $ do
         debug "Allocate a new indexer stream"
-        -- Allocate a new indexer stream
         (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
             withCString (pathStr dir) $ \dirStr -> do
                 r <- c'git_indexer_stream_new idxPtrPtr dirStr
@@ -1045,21 +1044,20 @@ lgBuildPackIndex dir bytes = do
                 checkResult r "c'git_indexer_stream_new failed"
                 peek idxPtrPtr
 
-        debug "Add the incoming packfile data to the stream"
-        -- Add the incoming packfile data to the stream
+        debug $ "Add the incoming packfile data to the stream ("
+            ++ show (B.length bytes) ++ " bytes)"
         (_,statsPtr) <- allocate calloc free
-        liftIO $ B.useAsCString bytes $ \dataPtr -> do
-            r <- c'git_indexer_stream_add idxPtr (castPtr dataPtr)
-                     (fromIntegral (B.length bytes)) statsPtr
-            checkResult r "c'git_indexer_stream_add failed"
+        liftIO $ BU.unsafeUseAsCStringLen bytes $
+            uncurry $ \dataPtr dataLen -> do
+                r <- c'git_indexer_stream_add idxPtr (castPtr dataPtr)
+                         (fromIntegral dataLen) statsPtr
+                checkResult r "c'git_indexer_stream_add failed"
 
         debug "Finalize the stream, which writes it out to disk"
-        -- Finalize the stream, which writes it out to disk
         r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
         checkResult r "c'git_indexer_stream_finalize failed"
 
         debug "Discover the hash used to identify the pack file"
-        -- Discover the hash used to identify the pack file
         liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
 
 strToOid :: String -> IO (ForeignPtr C'git_oid)
@@ -1094,16 +1092,19 @@ lgWritePackFile packFile = do
     -- backend is just a black box with no special properties.
     repo <- lgGet
     liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
-        alloca $ \odbPtrPtr -> alloca $ \statsPtr ->
+        alloca $ \odbPtrPtr ->
+        alloca $ \statsPtr ->
         alloca $ \writepackPtrPtr ->
             runResourceT $ go repoPtr odbPtrPtr writepackPtrPtr statsPtr
   where
     go repoPtr odbPtrPtr writepackPtrPtr statsPtr = do
+        debug "Obtaining odb for repository"
         (_,odbPtr) <- flip allocate c'git_odb_free $ do
             r <- c'git_repository_odb odbPtrPtr repoPtr
             checkResult r "c'git_repository_odb failed"
             peek odbPtrPtr
 
+        debug "Opening pack writer into odb"
         (_,writepackPtr) <- allocate
             (do r <- c'git_odb_write_pack writepackPtrPtr odbPtr
                          nullFunPtr nullPtr
@@ -1116,6 +1117,8 @@ lgWritePackFile packFile = do
         writepack <- liftIO $ peek writepackPtr
 
         bs <- liftIO $ B.readFile (pathStr packFile)
+        debug $ "Writing pack file " ++ show packFile ++ " into odb"
+        debug $ "Writing " ++ show (B.length bs) ++ " pack bytes into odb"
         liftIO $ BU.unsafeUseAsCStringLen bs $
             uncurry $ \dataPtr dataLen -> do
                 r <- mK'git_odb_writepack_add_callback
@@ -1124,6 +1127,7 @@ lgWritePackFile packFile = do
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_odb_writepack'add failed"
 
+        debug "Committing pack into odb"
         r <- liftIO $ mK'git_odb_writepack_commit_callback
                  (c'git_odb_writepack'commit writepack) writepackPtr
                  statsPtr
