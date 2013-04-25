@@ -333,6 +333,12 @@ wrapException msg = handle $ \e -> do
     print (e :: SomeException)
     throwIO e
 
+wrap :: String -> IO CInt -> IO CInt
+wrap msg f = catch f $ \e -> do
+    putStrLn msg
+    print (e :: SomeException)
+    return (-1)
+
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
     odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
@@ -461,7 +467,7 @@ odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid = do
     str <- oidToStr oid
     debug $ "odbS3BackendReadCallback: " ++ str
-    wrapException "odbS3BackendReadCallback failed" go
+    wrap "odbS3BackendReadCallback failed" go
   where
     go = do
         (dets, oidStr, sha) <- unpackDetails be oid
@@ -524,16 +530,17 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                                 "Failed to download object " <> sha)
 
 odbS3BackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
-odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
-    str <- oidToStr oid
-    debug $ "odbS3BackendReadPrefixCallback: " ++ str
-    return (-1)                 -- jww (2013-04-22): NYI
+odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len =
+    wrap "odbS3BackendReadPrefixCallback failed" $ do
+        str <- oidToStr oid
+        debug $ "odbS3BackendReadPrefixCallback: " ++ str
+        return (-1)                 -- jww (2013-04-22): NYI
 
 odbS3BackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
 odbS3BackendReadHeaderCallback len_p type_p be oid = do
     str <- oidToStr oid
     debug $ "odbS3BackendReadHeaderCallback: " ++ str
-    wrapException "odbS3BackendReadHeaderCallback failed" go
+    wrap "odbS3BackendReadHeaderCallback failed" go
   where
     go = do
         (dets, oidStr, sha) <- unpackDetails be oid
@@ -638,58 +645,64 @@ writeObjMetaDataToCache dets sha typ len = do
         return . M.insert sha (LooseRemoteMetaKnown typ len)
 
 odbS3BackendWriteCallback :: F'git_odb_backend_write_callback
-odbS3BackendWriteCallback oid be obj_data len obj_type = do
-    str <- oidToStr oid
-    debug $ "odbS3BackendWriteCallback " ++ str
-    r <- c'git_odb_hash oid obj_data len obj_type
-    case r of
-        0 -> do
-            (dets, oidStr, sha) <- unpackDetails be oid
-            let hdr = A.encode ((fromIntegral len,
-                                 fromIntegral obj_type) :: (Int64,Int64))
-            bytes <- curry BU.unsafePackCStringLen
-                          (castPtr obj_data) (fromIntegral len)
-            let payload = BL.append hdr (BL.fromChunks [bytes])
-            wrapException "odbS3BackendWriteCallback failed" $
-                runResourceT $ putFileS3 dets sha (sourceLbs payload)
+odbS3BackendWriteCallback oid be obj_data len obj_type =
+    wrap "odbS3BackendWriteCallback failed" go
+  where
+    go = do
+        str <- oidToStr oid
+        debug $ "odbS3BackendWriteCallback " ++ str
+        r <- c'git_odb_hash oid obj_data len obj_type
+        case r of
+            0 -> do
+                (dets, oidStr, sha) <- unpackDetails be oid
+                let hdr = A.encode ((fromIntegral len,
+                                     fromIntegral obj_type) :: (Int64,Int64))
+                bytes <- curry BU.unsafePackCStringLen
+                              (castPtr obj_data) (fromIntegral len)
+                let payload = BL.append hdr (BL.fromChunks [bytes])
+                wrapException "odbS3BackendWriteCallback failed" $
+                    runResourceT $ putFileS3 dets sha (sourceLbs payload)
 
-            registerObject (callbacks dets) sha
-                (Just (fromIntegral obj_type, fromIntegral len))
+                registerObject (callbacks dets) sha
+                    (Just (fromIntegral obj_type, fromIntegral len))
 
-            -- Write a copy to the local cache
-            writeObjectToCache dets sha obj_type len bytes
-            return 0
-        n -> return n
+                -- Write a copy to the local cache
+                writeObjectToCache dets sha obj_type len bytes
+                return 0
+            n -> return n
 
 odbS3BackendExistsCallback :: F'git_odb_backend_exists_callback
-odbS3BackendExistsCallback be oid = do
-    str <- oidToStr oid
-    debug $ "odbS3BackendExistsCallback " ++ str
-    (dets, oidStr, sha) <- unpackDetails be oid
-    objs <- readMVar (knownObjects dets)
-    let deb = M.lookup sha objs
-    debug $ "odbS3BackendExistsCallback lookup: " ++ show deb
-    case M.lookup sha objs of
-        Just DoesNotExist -> return 0
-        Just _            -> return 1
-        Nothing -> do
-            location <- lookupObject (callbacks dets) sha
-            r <- case location of
-                Just (ObjectInPack base) -> return (PackedRemote base)
-                Just ObjectLoose         -> return LooseRemote
-                _ -> do
-                    exists <-
-                        wrapException "odbS3BackendExistsCallback failed" $
-                            runResourceT $ testFileS3 dets sha
-                    if exists
-                        then do
-                            registerObject (callbacks dets) sha Nothing
-                            return LooseRemote
-                        else return DoesNotExist
+odbS3BackendExistsCallback be oid =
+    wrap "odbS3BackendExistsCallback failed" go
+  where
+    go = do
+        str <- oidToStr oid
+        debug $ "odbS3BackendExistsCallback " ++ str
+        (dets, oidStr, sha) <- unpackDetails be oid
+        objs <- readMVar (knownObjects dets)
+        let deb = M.lookup sha objs
+        debug $ "odbS3BackendExistsCallback lookup: " ++ show deb
+        case M.lookup sha objs of
+            Just DoesNotExist -> return 0
+            Just _            -> return 1
+            Nothing -> do
+                location <- lookupObject (callbacks dets) sha
+                r <- case location of
+                    Just (ObjectInPack base) -> return (PackedRemote base)
+                    Just ObjectLoose         -> return LooseRemote
+                    _ -> do
+                        exists <-
+                            wrapException "odbS3BackendExistsCallback failed" $
+                                runResourceT $ testFileS3 dets sha
+                        if exists
+                            then do
+                                registerObject (callbacks dets) sha Nothing
+                                return LooseRemote
+                            else return DoesNotExist
 
-            putStrLn $ "Updating object status: " ++ show r
-            modifyMVar_ (knownObjects dets) $ return . M.insert sha r
-            return $ if r == DoesNotExist then 0 else 1
+                putStrLn $ "Updating object status: " ++ show r
+                modifyMVar_ (knownObjects dets) $ return . M.insert sha r
+                return $ if r == DoesNotExist then 0 else 1
 
 odbS3BackendRefreshCallback :: F'git_odb_backend_refresh_callback
 odbS3BackendRefreshCallback _ = return 0 -- do nothing
@@ -699,10 +712,13 @@ odbS3BackendForeachCallback be callback payload =
     return (-1)                 -- fallback to the standard method
 
 odbS3WritePackCallback :: F'git_odb_backend_writepack_callback
-odbS3WritePackCallback writePackPtr be callback payload = do
-    odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
-    poke writePackPtr (packWriter odbS3)
-    return 0
+odbS3WritePackCallback writePackPtr be callback payload =
+    wrap "odbS3WritePackCallback failed" go
+  where
+    go = do
+        odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+        poke writePackPtr (packWriter odbS3)
+        return 0
 
 odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
 odbS3BackendFreeCallback be = do
@@ -757,25 +773,28 @@ observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
         return $ foldr (`M.insert` obj) objs shas
 
 odbS3WritePackAddCallback :: F'git_odb_writepack_add_callback
-odbS3WritePackAddCallback wp bytes len progress = do
-    debug "odbS3WritePackAddCallback"
-    be    <- c'git_odb_writepack'backend <$> peek wp
-    odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
-    dets  <- deRefStablePtr (details odbS3)
-    let dir = tempDirectory dets
+odbS3WritePackAddCallback wp bytes len progress =
+    wrap "odbS3WritePackAddCallback failed" go
+  where
+    go = do
+        debug "odbS3WritePackAddCallback"
+        be    <- c'git_odb_writepack'backend <$> peek wp
+        odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+        dets  <- deRefStablePtr (details odbS3)
+        let dir = tempDirectory dets
 
-    bs <- curry BU.unsafePackCStringLen (castPtr bytes) (fromIntegral len)
-    debug $ "odbS3WritePackAddCallback: building index for "
-        ++ show (B.length bs) ++ " bytes"
-    (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
+        bs <- curry BU.unsafePackCStringLen (castPtr bytes) (fromIntegral len)
+        debug $ "odbS3WritePackAddCallback: building index for "
+            ++ show (B.length bs) ++ " bytes"
+        (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
 
-    -- Upload the actual files to S3 if it's not already then, and then register
-    -- the objects within the pack in the global index.
-    packExists <- liftIO $ lookupPackFile (callbacks dets) packSha
-    case packExists of
-        Just True -> return ()
-        _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
-    return 0
+        -- Upload the actual files to S3 if it's not already then, and then
+        -- register the objects within the pack in the global index.
+        packExists <- liftIO $ lookupPackFile (callbacks dets) packSha
+        case packExists of
+            Just True -> return ()
+            _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
+        return 0
 
 uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
                    -> ResourceT IO ()
