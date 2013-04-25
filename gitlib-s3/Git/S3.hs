@@ -794,7 +794,7 @@ uploadFile dets path = do
     let hdr = A.encode ((fromIntegral (BL.length lbs),
                          fromIntegral 0) :: (Int64,Int64))
         payload = BL.append hdr lbs
-    putFileS3 dets (pathText (basename path)) (sourceLbs payload)
+    putFileS3 dets (pathText (filename path)) (sourceLbs payload)
 
 odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
 odbS3WritePackCommitCallback wp progress = return 0 -- do nothing
