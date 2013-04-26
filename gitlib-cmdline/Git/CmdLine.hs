@@ -152,32 +152,28 @@ runGit_ :: Git.MonadGit m
         => [TL.Text] -> CmdLineRepository m ()
 runGit_ = flip (doRunGit run_) (return ())
 
-cliDoesRepoExist :: Text -> IO Bool
+cliDoesRepoExist :: Text -> Sh Bool
 cliDoesRepoExist remoteURI = do
-    shellyNoDir $ silently $ errExit False $ do
-        setenv "SSH_ASKPASS" "echo"
-        setenv "GIT_ASKPASS" "echo"
-        git_ [ "ls-remote", TL.fromStrict remoteURI ]
-        (==0) <$> lastExitCode
-
-cliCheckRemoteRepo :: Git.MonadGit m => Text -> CmdLineRepository m Bool
-cliCheckRemoteRepo = liftIO . cliDoesRepoExist
+    setenv "SSH_ASKPASS" "echo"
+    setenv "GIT_ASKPASS" "echo"
+    git_ [ "ls-remote", TL.fromStrict remoteURI ]
+    (==0) <$> lastExitCode
 
 cliPushCommitDirectly :: Git.MonadGit m
                       => CommitName m -> Text -> Text -> Maybe FilePath
                       -> CmdLineRepository m (CommitRef m)
 cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
-    exists <- cliCheckRemoteRepo remoteNameOrURI
-    unless exists $
-        failure (Git.BackendError $ "Repository does not exist: "
-                         `T.append` T.pack (show remoteNameOrURI))
-
     repo <- cliGet
     merr <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
             Nothing -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
+
+        exists <- cliDoesRepoExist remoteNameOrURI
+        unless exists $
+            throw (Git.BackendError $ "Repository does not exist: "
+                   `T.append` T.pack (show remoteNameOrURI))
 
         git_ $ [ "--git-dir", repoPath repo ]
             <> [ "push", TL.fromStrict remoteNameOrURI
@@ -205,11 +201,6 @@ cliPullCommitDirectly :: Git.MonadGit m
                       -> CmdLineRepository m
                           (Git.MergeResult (CmdLineRepository m))
 cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
-    exists <- cliCheckRemoteRepo remoteNameOrURI
-    unless exists $
-        failure (Git.BackendError $ "Repository does not exist: "
-                         `T.append` T.pack (show remoteNameOrURI))
-
     repo     <- cliGet
     leftHead <- Git.resolveRef "HEAD"
 
@@ -218,6 +209,11 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
             Nothing     -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
+
+        exists <- cliDoesRepoExist remoteNameOrURI
+        unless exists $
+            throw (Git.BackendError $ "Repository does not exist: "
+                   `T.append` T.pack (show remoteNameOrURI))
 
         git_ $ [ "--git-dir", repoPath repo ]
             <> [ "pull", "--quiet"
