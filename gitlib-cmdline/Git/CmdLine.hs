@@ -125,12 +125,12 @@ instance Eq (Git.Oid (CmdLineRepository m)) where
 
 git :: [TL.Text] -> Sh TL.Text
 git args = do
-    liftIO $ putStrLn $ "CmdLine: git " ++ show args
+    -- liftIO $ putStrLn $ "CmdLine: git " ++ show args
     run "git" args
 
 git_ :: [TL.Text] -> Sh ()
 git_ args = do
-    liftIO $ putStrLn $ "CmdLine: git " ++ show args
+    -- liftIO $ putStrLn $ "CmdLine: git " ++ show args
     run_ "git" args
 
 doRunGit :: Git.MonadGit m
@@ -140,8 +140,8 @@ doRunGit f args act = do
     repo <- cliGet
     shellyNoDir $ silently $ do
         act
-        liftIO $ putStrLn $ "CmdLine: git "
-            ++ show (["--git-dir", repoPath repo] <> args)
+        -- liftIO $ putStrLn $ "CmdLine: git "
+        --     ++ show (["--git-dir", repoPath repo] <> args)
         f "git" $ ["--git-dir", repoPath repo] <> args
 
 runGit :: Git.MonadGit m
