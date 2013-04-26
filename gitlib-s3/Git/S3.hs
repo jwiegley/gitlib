@@ -181,9 +181,11 @@ wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Maybe (ObjectLength, ObjectType)
                    -> IO ()
 wrapRegisterObject f name metadata =
-    wrapException
-        ("Calling registerObject " ++ show name ++ " " ++ show metadata)
-        $ f name metadata
+    -- jww (2013-04-25): This is causing a hang during cloning, see Bug #995.
+    return ()
+    -- wrapException
+    --     ("Calling registerObject " ++ show name ++ " " ++ show metadata)
+    --     $ f name metadata
 
 wrapRegisterPackFile :: (Text -> [Text] -> IO ()) -> Text -> [Text] -> IO ()
 wrapRegisterPackFile f name shas =
