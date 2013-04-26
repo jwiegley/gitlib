@@ -160,15 +160,16 @@ data BackendCallbacks = BackendCallbacks
       -- on behalf of this backend should be released.
     }
 
-wrap :: (MonadIO m, MonadBaseControl IO m) => String -> m a -> m a -> m a
+wrap :: (Show a, MonadIO m, MonadBaseControl IO m)
+     => String -> m a -> m a -> m a
 wrap msg f g = Exc.catch
-        (do debug $ msg ++ "..."
-            r <- f
-            debug $ msg ++ "...done"
-            return r)
-        $ \e -> do liftIO $ putStrLn $ msg ++ "...FAILED"
-                   liftIO $ print (e :: SomeException)
-                   g
+    (do debug $ msg ++ "..."
+        r <- f
+        debug $ msg ++ "...done, result = " ++ show r
+        return r)
+    $ \e -> do liftIO $ putStrLn $ msg ++ "...FAILED"
+               liftIO $ print (e :: SomeException)
+               g
 
 wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Text
