@@ -58,7 +58,8 @@ s3Factory = Lg.lgFactory
                     , S3.getObject  = \bucket path range ->
                        S3.mockGetObject svc bucket path range
                     , S3.putObject  = \bucket path len bytes ->
-                       S3.mockPutObject svc bucket path len bytes
+                       S3.mockPutObject svc bucket path
+                           (fromIntegral (S3.getObjectLength len)) bytes
                     }
 
 main :: IO ()
