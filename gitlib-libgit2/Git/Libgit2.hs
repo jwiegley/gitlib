@@ -1223,11 +1223,13 @@ lgReadFromPack idxPath sha metadataOnly =
                           return Nothing
                 debug "lgReadFromPack..14"
                 case mr of
-                    Just objectPtr -> Just <$>
-                        liftIO ((,,) <$> c'git_odb_object_type objectPtr
-                                     <*> c'git_odb_object_size objectPtr
-                                     <*> (B.packCString . castPtr
-                                          =<< c'git_odb_object_data objectPtr))
+                    Just objectPtr -> liftIO $ do
+                        typ <- c'git_odb_object_type objectPtr
+                        len <- c'git_odb_object_size objectPtr
+                        ptr <- c'git_odb_object_data objectPtr
+                        bytes <- curry B.packCStringLen (castPtr ptr)
+                                     (fromIntegral len)
+                        return $ Just (typ,len,bytes)
                     Nothing -> return Nothing
 
 lgRemoteFetch :: Git.MonadGit m => Text -> Text -> LgRepository m ()
