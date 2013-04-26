@@ -531,8 +531,16 @@ uploadPackAndIndex dets packPath idxPath packSha = do
 
     -- Let whoever is listening know about this pack files and its contained
     -- objects
-    liftIO $ wrapRegisterPackFile (registerPackFile (callbacks dets))
-        packSha shas `orElse` return ()
+    liftIO $ do
+        -- jww (2013-04-25): calling registerPackFile without first checking
+        -- whether it's already known to the database causes a deadlock in
+        -- PostgreSQL trying to insert into the git_object table.
+        packKnown <- wrapLookupPackFile (lookupPackFile (callbacks dets))
+                         packSha `orElse` return Nothing
+        case packKnown of
+            Just True -> return ()
+            _ -> wrapRegisterPackFile (registerPackFile (callbacks dets))
+                     packSha shas `orElse` return ()
 
     uploadFile dets packPath
     uploadFile dets idxPath
@@ -667,6 +675,18 @@ loadFromRemote dets sha loader action = do
             loader dets packPath idxPath sha
         _ -> action location
 
+registerObjectIfNotKnown :: OdbS3Details
+                         -> Text
+                         -> Maybe (ObjectLength, ObjectType)
+                         -> IO ()
+registerObjectIfNotKnown dets sha metadata = do
+    known <- wrapLookupObject (lookupObject (callbacks dets))
+                 sha  `orElse` return Nothing
+    case known of
+        Just _ -> return ()
+        _ -> wrapRegisterObject (registerObject (callbacks dets))
+                 sha metadata `orElse` return ()
+
 odbS3BackendReadCallback :: F'git_odb_backend_read_callback
 odbS3BackendReadCallback data_p len_p type_p be oid = do
     str <- oidToStr oid
@@ -732,8 +752,8 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                 bs <- curry BU.unsafePackCStringLen bytes
                           (fromIntegral (getObjectLength len))
                 when (isNothing location) $
-                    wrapRegisterObject (registerObject (callbacks dets))
-                        sha (Just (len, typ)) `orElse` return ()
+                    registerObjectIfNotKnown dets sha (Just (len, typ))
+                        `orElse` return ()
                 writeObjectToCache dets sha len typ bs
                 return 0
             Nothing -> throwIO (Git.BackendError $
@@ -796,8 +816,8 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
                 poke len_p (toLength len)
                 poke type_p (toType typ)
                 when (isNothing location) $
-                    wrapRegisterObject (registerObject (callbacks dets))
-                        sha (Just (len, typ)) `orElse` return ()
+                    registerObjectIfNotKnown dets sha (Just (len, typ))
+                        `orElse` return ()
                 writeObjMetaDataToCache dets sha len typ
                 return 0
             Nothing -> return c'GIT_ENOTFOUND
@@ -840,8 +860,8 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
         let payload = BL.append hdr (BL.fromChunks [bytes])
         runResourceT $ putFileS3 dets sha (sourceLbs payload)
 
-        wrapRegisterObject (registerObject (callbacks dets))
-            sha (Just (fromLength len, fromType obj_type))
+        registerObjectIfNotKnown dets sha
+            (Just (fromLength len, fromType obj_type))
                 `orElse` return ()
 
         -- Write a copy to the local cache
@@ -873,9 +893,8 @@ odbS3BackendExistsCallback be oid = do
                                       (return False)
                         if exists
                             then do
-                                wrapRegisterObject
-                                    (registerObject (callbacks dets))
-                                    sha Nothing `orElse` return ()
+                                registerObjectIfNotKnown dets sha Nothing
+                                    `orElse` return ()
                                 return LooseRemote
                             else return DoesNotExist
 
