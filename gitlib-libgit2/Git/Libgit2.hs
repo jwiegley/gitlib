@@ -1183,45 +1183,31 @@ lgReadFromPack :: FilePath -> Text -> Bool
 lgReadFromPack idxPath sha metadataOnly =
     alloca $ \objectPtrPtr ->
     lgWithPackFile idxPath $ \odbPtr -> do
-        debug "lgReadFromPack..1"
         foid <- liftIO $ strToOid (T.unpack sha)
-        debug "lgReadFromPack..2"
         if metadataOnly
             then liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
-                debug "lgReadFromPack..3"
                 r <- withForeignPtr foid $
                      c'git_odb_read_header sizePtr typPtr odbPtr
-                debug "lgReadFromPack..4"
                 if r == 0
                     then Just <$> ((,,) <$> peek typPtr
                                         <*> peek sizePtr
                                         <*> pure B.empty)
                     else do
-                        debug "lgReadFromPack..5"
                         unless (r == c'GIT_ENOTFOUND) $
                             checkResult r "c'git_odb_read_header failed"
-                        debug "lgReadFromPack..6"
                         return Nothing
             else do
-                debug "lgReadFromPack..7"
                 r <- liftIO $ withForeignPtr foid $
                      c'git_odb_read objectPtrPtr odbPtr
-                debug "lgReadFromPack..8"
                 mr <- if r == 0
                       then do
-                          debug "lgReadFromPack..9"
                           objectPtr <- liftIO $ peek objectPtrPtr
-                          debug "lgReadFromPack..10"
                           void $ register $ c'git_odb_object_free objectPtr
-                          debug "lgReadFromPack..11"
                           return $ Just objectPtr
                       else do
-                          debug "lgReadFromPack..12"
                           unless (r == c'GIT_ENOTFOUND) $
                               checkResult r "c'git_odb_read failed"
-                          debug "lgReadFromPack..13"
                           return Nothing
-                debug "lgReadFromPack..14"
                 case mr of
                     Just objectPtr -> liftIO $ do
                         typ <- c'git_odb_object_type objectPtr
