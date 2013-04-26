@@ -68,6 +68,5 @@ Library
         Git.Libgit2
         Git.Libgit2.Backend
         Git.Libgit2.Internal
-        Git.Libgit2.Reference
         Git.Libgit2.Trace
         Git.Libgit2.Types
