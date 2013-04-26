@@ -1141,14 +1141,13 @@ lgLoadPackFileInMemory :: FilePath
                        -> Ptr (Ptr C'git_odb)
                        -> ResourceT IO (Ptr C'git_odb)
 lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
-    -- Create a temporary, in-memory object database
+    debug "Creating temporary, in-memory object database"
     (freeKey,odbPtr) <- flip allocate c'git_odb_free $ do
         r <- c'git_odb_new odbPtrPtr
         checkResult r "c'git_odb_new failed"
         peek odbPtrPtr
 
-    -- Load the pack file's index into a temporary object database, so we can
-    -- iterate the objects within it
+    debug $ "Load pack index " ++ show idxPath ++ " into temporary odb"
     (_,backendPtr) <- allocate
         (do r <- withCString (pathStr idxPath) $ \idxPathStr ->
                 c'git_odb_backend_one_pack backendPtrPtr idxPathStr
@@ -1165,6 +1164,7 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 
     -- Associate the new backend containing our single index file with the
     -- in-memory object database
+    debug "Associate odb with backend"
     r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
     checkResult r "c'git_odb_add_backend failed"
 
@@ -1173,7 +1173,9 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 lgWithPackFile :: FilePath -> (Ptr C'git_odb -> ResourceT IO a) -> IO a
 lgWithPackFile idxPath f = alloca $ \odbPtrPtr ->
     alloca $ \backendPtrPtr -> runResourceT $ do
+        debug "Load pack file into an in-memory object database"
         odbPtr <- lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
+        debug "Calling function using in-memory odb"
         f odbPtr
 
 lgReadFromPack :: FilePath -> Text -> Bool
@@ -1219,9 +1221,9 @@ lgReadFromPack idxPath sha metadataOnly =
                               checkResult r "c'git_odb_read failed"
                           debug "lgReadFromPack..13"
                           return Nothing
+                debug "lgReadFromPack..14"
                 case mr of
-                    Just objectPtr ->
-                        Just <$>
+                    Just objectPtr -> Just <$>
                         liftIO ((,,) <$> c'git_odb_object_type objectPtr
                                      <*> c'git_odb_object_size objectPtr
                                      <*> (B.packCString . castPtr
