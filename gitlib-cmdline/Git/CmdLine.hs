@@ -123,6 +123,16 @@ instance Ord (Git.Oid (CmdLineRepository m)) where
 instance Eq (Git.Oid (CmdLineRepository m)) where
     Oid l == Oid r = l == r
 
+git :: [TL.Text] -> Sh TL.Text
+git args = do
+    liftIO $ putStrLn $ "CmdLine: git " ++ show args
+    run "git" args
+
+git_ :: [TL.Text] -> Sh ()
+git_ args = do
+    liftIO $ putStrLn $ "CmdLine: git " ++ show args
+    run_ "git" args
+
 doRunGit :: Git.MonadGit m
          => (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
          -> CmdLineRepository m a
@@ -130,6 +140,8 @@ doRunGit f args act = do
     repo <- cliGet
     shellyNoDir $ silently $ do
         act
+        liftIO $ putStrLn $ "CmdLine: git "
+            ++ show (["--git-dir", repoPath repo] <> args)
         f "git" $ ["--git-dir", repoPath repo] <> args
 
 runGit :: Git.MonadGit m
@@ -145,7 +157,7 @@ cliDoesRepoExist remoteURI = do
     shellyNoDir $ silently $ errExit False $ do
         setenv "SSH_ASKPASS" "echo"
         setenv "GIT_ASKPASS" "echo"
-        run_ "git" [ "ls-remote", TL.fromStrict remoteURI ]
+        git_ [ "ls-remote", TL.fromStrict remoteURI ]
         (==0) <$> lastExitCode
 
 cliCheckRemoteRepo :: Git.MonadGit m => Text -> CmdLineRepository m Bool
@@ -167,10 +179,10 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
 
-        run_ "git" $ [ "--git-dir", repoPath repo ]
-                  <> [ "push", TL.fromStrict remoteNameOrURI
-                     , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
-                                 , ":", TL.fromStrict remoteRefName ] ]
+        git_ $ [ "--git-dir", repoPath repo ]
+            <> [ "push", TL.fromStrict remoteNameOrURI
+               , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
+                           , ":", TL.fromStrict remoteRefName ] ]
         r <- lastExitCode
         if r == 0
             then return Nothing
@@ -207,9 +219,10 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
 
-        run_ "git" $ [ "--git-dir", repoPath repo ]
-                  <> [ "pull", TL.fromStrict remoteNameOrURI
-                     , TL.fromStrict remoteRefName ]
+        git_ $ [ "--git-dir", repoPath repo ]
+            <> [ "pull", "--quiet"
+               , TL.fromStrict remoteNameOrURI
+               , TL.fromStrict remoteRefName ]
         lastExitCode
     if r == 0
         then Git.MergeSuccess <$> getOid "HEAD"
@@ -223,13 +236,13 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
         rightHead <- getOid "MERGE_HEAD"
         xs <- shellyNoDir $ silently $ errExit False $ do
             xs <- returnConflict . TL.init
-                  <$> run "git" [ "--git-dir", repoPath repo
-                                , "status", "-z", "--porcelain" ]
+                  <$> git [ "--git-dir", repoPath repo
+                          , "status", "-z", "--porcelain" ]
             forM_ (Map.keys xs) $ \fp ->
-                run_ "git" [ "--git-dir", repoPath repo
-                           , "add", toTextIgnore fp ]
-            run_ "git" [ "--git-dir", repoPath repo
-                       , "commit", "-F", ".git/MERGE_MSG" ]
+                git_ [ "--git-dir", repoPath repo
+                     , "add", toTextIgnore fp ]
+            git_ [ "--git-dir", repoPath repo
+                 , "commit", "-F", ".git/MERGE_MSG" ]
             return xs
         Git.MergeConflicted <$> pure leftHead
                             <*> pure rightHead
@@ -299,8 +312,7 @@ cliExistsObject :: Git.MonadGit m => Oid m -> CmdLineRepository m Bool
 cliExistsObject (Oid sha) = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
-        run_ "git" $ [ "--git-dir", repoPath repo
-                     , "cat-file", "-e", sha ]
+        git_ [ "--git-dir", repoPath repo, "cat-file", "-e", sha ]
         ec <- lastExitCode
         return (ec == 0)
 
@@ -623,10 +635,8 @@ cliShowRef :: Git.MonadGit m
 cliShowRef mrefName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
-        rev <- run "git" $ [ "--git-dir", repoPath repo
-                           , "show-ref" ]
-                       <> [ TL.fromStrict (fromJust mrefName)
-                          | isJust mrefName ]
+        rev <- git $ [ "--git-dir", repoPath repo, "show-ref" ]
+                 <> [ TL.fromStrict (fromJust mrefName) | isJust mrefName ]
         ec  <- lastExitCode
         return $ if ec == 0
                  then Just $ map ((\(x:y:[]) -> (y,x)) . TL.words)
@@ -675,8 +685,9 @@ cliResolveRef :: Git.MonadGit m
 cliResolveRef refName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
-        rev <- run "git" $ [ "--git-dir", repoPath repo
-                           , "rev-parse", TL.fromStrict refName ]
+        rev <- git [ "--git-dir", repoPath repo
+                   , "rev-parse", "--quiet", "--verify"
+                   , TL.fromStrict refName ]
         ec  <- lastExitCode
         return $ if ec == 0
             then Just (Git.ByOid (Tagged (Oid (TL.init rev))))
@@ -778,9 +789,9 @@ openCliRepository opts = do
         Right p -> do
             when (not exists && Git.repoAutoCreate opts) $
                 shellyNoDir $ silently $
-                    run_ "git" $ ["--git-dir", TL.fromStrict p]
-                              <> ["--bare" | Git.repoIsBare opts]
-                              <> ["init"]
+                    git_ $ ["--git-dir", TL.fromStrict p]
+                        <> ["--bare" | Git.repoIsBare opts]
+                        <> ["init"]
             return Repository { repoOptions = opts }
 
 runCliRepository :: Git.MonadGit m => Repository -> CmdLineRepository m a -> m a
