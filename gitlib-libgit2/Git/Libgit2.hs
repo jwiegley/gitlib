@@ -1054,12 +1054,14 @@ lgBuildPackIndex dir bytes = do
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_indexer_stream_add failed"
 
-        debug "Finalize the stream"
+        debug "Finalizing the stream"
         r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
         checkResult r "c'git_indexer_stream_finalize failed"
 
-        debug "Discover the hash used to identify the pack file"
-        liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
+        debug "Discovering the hash used to identify the pack file"
+        sha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
+        debug $ "The hash used is: " ++ show sha
+        return sha
 
 strToOid :: String -> IO (ForeignPtr C'git_oid)
 strToOid oidStr = do

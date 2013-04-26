@@ -160,6 +160,109 @@ data BackendCallbacks = BackendCallbacks
       -- on behalf of this backend should be released.
     }
 
+wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
+                   -> Text
+                   -> Maybe (ObjectLength, ObjectType)
+                   -> IO ()
+wrapRegisterObject f name metadata = do
+    debug $ "Calling registerObject: " ++ show name ++ " " ++ show metadata
+    f name metadata
+    debug "Calling registerObject...done"
+
+wrapRegisterPackFile :: (Text -> [Text] -> IO ()) -> Text -> [Text] -> IO ()
+wrapRegisterPackFile f name shas = do
+    debug $ "Calling registerPackFile: " ++ show name
+    f name shas
+    debug "Calling registerPackFile...done"
+
+wrapLookupObject :: (Text -> IO (Maybe ObjectStatus))
+                 -> Text
+                 -> IO (Maybe ObjectStatus)
+wrapLookupObject f name = do
+    debug $ "Calling lookupObject: " ++ show name
+    r <- f name
+    debug "Calling lookupObject...done"
+    return r
+
+wrapLookupPackFile :: (Text -> IO (Maybe Bool)) -> Text -> IO (Maybe Bool)
+wrapLookupPackFile f name = do
+    debug $ "Calling lookupPackFile: " ++ show name
+    r <- f name
+    debug "Calling lookupPackFile...done"
+    return r
+
+wrapHeadObject :: MonadIO m
+               => (Text -> Text -> ResourceT m (Maybe Bool))
+               -> Text
+               -> Text
+               -> ResourceT m (Maybe Bool)
+wrapHeadObject f bucket path = do
+    debug $ "Calling headObject: " ++ show bucket ++ "/" ++ show path
+    r <- f bucket path
+    debug "Calling headObject...done"
+    return r
+
+wrapGetObject :: MonadIO m
+              => (Text -> Text -> Maybe (Int64, Int64)
+                  -> ResourceT m (Maybe (Either Text BL.ByteString)))
+              -> Text
+              -> Text
+              -> Maybe (Int64, Int64)
+              -> ResourceT m (Maybe (Either Text BL.ByteString))
+wrapGetObject f bucket path range = do
+    debug $ "Calling getObject: " ++ show bucket ++ "/" ++ show path
+        ++ " " ++ show range
+    r <- f bucket path range
+    debug "Calling getObject...done"
+    return r
+
+wrapPutObject :: MonadIO m
+              => (Text -> Text -> ObjectLength -> BL.ByteString
+                  -> ResourceT m (Maybe (Either Text ())))
+              -> Text
+              -> Text
+              -> ObjectLength
+              -> BL.ByteString
+              -> ResourceT m (Maybe (Either Text ()))
+wrapPutObject f bucket path len bytes = do
+    debug $ "Calling putObject: " ++ show bucket ++ "/" ++ show path
+        ++ " length " ++ show len
+    r <- f bucket path len bytes
+    debug "Calling putObject...done"
+    return r
+
+wrapUpdateRef :: (Text -> Text -> IO ()) -> Text -> Text -> IO ()
+wrapUpdateRef f name sha = do
+    debug $ "Calling updateRef: " ++ show name ++ " " ++ show sha
+    f name sha
+    debug "Calling updateRef...done"
+
+wrapResolveRef :: (Text -> IO (Maybe Text)) -> Text -> IO (Maybe Text)
+wrapResolveRef f name = do
+    debug $ "Calling resolveRef: " ++ show name
+    r <- f name
+    debug "Calling resolveRef...done"
+    return r
+
+wrapAcquireLock :: (Text -> IO Text) -> Text -> IO Text
+wrapAcquireLock f name = do
+    debug $ "Calling acquireLock: " ++ show name
+    r <- f name
+    debug "Calling acquireLock...done"
+    return r
+
+wrapReleaseLock :: (Text -> IO ()) -> Text -> IO ()
+wrapReleaseLock f name = do
+    debug $ "Calling releaseLock: " ++ show name
+    f name
+    debug "Calling releaseLock...done"
+
+wrapShuttingDown :: IO () -> IO ()
+wrapShuttingDown f = do
+    debug "Calling shuttingDown..."
+    f
+    debug "Calling shuttingDown...done"
+
 instance Default BackendCallbacks where
     def = BackendCallbacks
         { registerObject   = \_ _     -> return ()
@@ -268,8 +371,8 @@ testFileS3 dets filepath = do
     debug $ "testFileS3: " ++ show filepath
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
-    cbResult <- headObject (callbacks dets) bucket path
-                    `orElse` return Nothing
+    cbResult <- wrapHeadObject (headObject (callbacks dets))
+                    bucket path `orElse` return Nothing
     case cbResult of
         Just r  -> return r
         Nothing -> do
@@ -284,8 +387,8 @@ getFileS3 dets filepath range = do
     debug $ "getFileS3: " ++ show filepath
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
-    cbResult <- getObject (callbacks dets) bucket path range
-                    `orElse` return Nothing
+    cbResult <- wrapGetObject (getObject (callbacks dets))
+                    bucket path range `orElse` return Nothing
     case cbResult of
         Just (Right r) -> fst <$> (sourceLbs r $$+ Data.Conduit.Binary.take 0)
         _ -> do
@@ -305,7 +408,7 @@ putFileS3 dets filepath src = do
     debug $ "putFileS3: " ++ show filepath
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
-    cbResult <- putObject (callbacks dets) bucket path
+    cbResult <- wrapPutObject (putObject (callbacks dets)) bucket path
                     (ObjectLength (BL.length lbs)) lbs
                     `orElse` return Nothing
     case cbResult of
@@ -364,13 +467,13 @@ wrapException msg = handle $ \e -> do
 wrap :: String -> IO CInt -> IO CInt
 wrap msg f =
     catch
-        (do debug $ msg ++ " started"
+        (do debug $ msg ++ "..."
             r <- f
-            debug $ msg ++ " ended"
+            debug $ msg ++ "...done"
             return r)
-    $ \e -> do putStrLn $ msg ++ " failed"
-               print (e :: SomeException)
-               return (-1)
+        $ \e -> do putStrLn $ msg ++ "...FAILED"
+                   print (e :: SomeException)
+                   return (-1)
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
@@ -514,7 +617,7 @@ loadFromRemote :: OdbS3Details
                -> (Maybe ObjectStatus -> IO a)
                -> IO a
 loadFromRemote dets sha loader action = do
-    location <- lookupObject (callbacks dets) sha
+    location <- wrapLookupObject (lookupObject (callbacks dets)) sha
                     `orElse` return Nothing
     case location of
         Just (ObjectInPack packBase) -> do
@@ -562,8 +665,15 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                 poke len_p (toLength len)
                 poke type_p (toType typ)
                 return 0
-            Nothing -> throwIO (Git.BackendError
-                                "Could not find object in pack file")
+            Nothing -> do
+                -- jww (2013-04-25): If we reach this point, first check
+                -- whether it's actually a loose object. If not, list the
+                -- bucket and see if there are unregistered pack files in
+                -- which it might live.  This would close Bug #965.  The same
+                -- must be done for ReadPrefix and ReadHeader, so factor this
+                -- code out into a common function.
+                throwIO (Git.BackendError
+                         "Could not find object in pack file")
 
     pokeByteString bytes (fromIntegral . getObjectLength -> len) = do
         content <- mallocBytes len
@@ -580,8 +690,8 @@ odbS3BackendReadCallback data_p len_p type_p be oid = do
                 bs <- curry BU.unsafePackCStringLen bytes
                           (fromIntegral (getObjectLength len))
                 when (isNothing location) $
-                    registerObject (callbacks dets) sha (Just (len, typ))
-                        `orElse` return ()
+                    wrapRegisterObject (registerObject (callbacks dets))
+                        sha (Just (len, typ)) `orElse` return ()
                 writeObjectToCache dets sha len typ bs
                 return 0
             Nothing -> throwIO (Git.BackendError $
@@ -644,8 +754,8 @@ odbS3BackendReadHeaderCallback len_p type_p be oid = do
                 poke len_p (toLength len)
                 poke type_p (toType typ)
                 when (isNothing location) $
-                    registerObject (callbacks dets) sha (Just (len, typ))
-                        `orElse` return ()
+                    wrapRegisterObject (registerObject (callbacks dets))
+                        sha (Just (len, typ)) `orElse` return ()
                 writeObjMetaDataToCache dets sha len typ
                 return 0
             Nothing -> return c'GIT_ENOTFOUND
@@ -728,8 +838,8 @@ odbS3BackendWriteCallback oid be obj_data len obj_type = do
                 let payload = BL.append hdr (BL.fromChunks [bytes])
                 runResourceT $ putFileS3 dets sha (sourceLbs payload)
 
-                registerObject (callbacks dets) sha
-                    (Just (fromLength len, fromType obj_type))
+                wrapRegisterObject (registerObject (callbacks dets))
+                    sha (Just (fromLength len, fromType obj_type))
                     `orElse` return ()
 
                 -- Write a copy to the local cache
@@ -752,8 +862,8 @@ odbS3BackendExistsCallback be oid = do
             Just DoesNotExist -> return 0
             Just _            -> return 1
             Nothing -> do
-                location <- lookupObject (callbacks dets) sha
-                                `orElse` return Nothing
+                location <- wrapLookupObject (lookupObject (callbacks dets))
+                                sha `orElse` return Nothing
                 r <- case location of
                     Just (ObjectInPack base) -> return (PackedRemote base)
                     Just ObjectLoose         -> return LooseRemote
@@ -763,8 +873,9 @@ odbS3BackendExistsCallback be oid = do
                                 runResourceT $ testFileS3 dets sha
                         if exists
                             then do
-                                registerObject (callbacks dets) sha Nothing
-                                    `orElse` return ()
+                                wrapRegisterObject
+                                    (registerObject (callbacks dets))
+                                    sha Nothing `orElse` return ()
                                 return LooseRemote
                             else return DoesNotExist
 
@@ -794,7 +905,7 @@ odbS3BackendFreeCallback be = do
     odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
     dets  <- liftIO $ deRefStablePtr (details odbS3)
 
-    shuttingDown (callbacks dets) `orElse` return ()
+    wrapShuttingDown (shuttingDown (callbacks dets)) `orElse` return ()
 
     exists <- isDirectory (tempDirectory dets)
     when exists $ removeTree (tempDirectory dets)
@@ -831,15 +942,18 @@ observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
     -- Let whoever is listening know about this pack files and its contained
     -- objects
     shas <- liftIO $ readMVar mshas
-    liftIO $ registerPackFile (callbacks dets) packSha shas
-        `orElse` return ()
+    liftIO $ wrapRegisterPackFile (registerPackFile (callbacks dets))
+        packSha shas `orElse` return ()
 
     -- Update the known objects map with the fact that we've got a local cache
     -- of the pack file.
+    liftIO $ debug $ "observePackObjects: update known objects map"
     now <- liftIO getCurrentTime
     let obj = PackedCached (replaceExtension idxFile "pack") idxFile now
     liftIO $ modifyMVar_ (knownObjects dets) $ \objs ->
         return $ foldr (`M.insert` obj) objs shas
+
+    liftIO $ debug $ "observePackObjects: pack file has been observed"
 
 odbS3WritePackAddCallback :: F'git_odb_writepack_add_callback
 odbS3WritePackAddCallback wp bytes len progress =
@@ -858,8 +972,9 @@ odbS3WritePackAddCallback wp bytes len progress =
 
         -- Upload the actual files to S3 if it's not already then, and then
         -- register the objects within the pack in the global index.
-        packExists <- liftIO $ lookupPackFile (callbacks dets) packSha
-                          `orElse` return Nothing
+        packExists <- liftIO $ wrapLookupPackFile
+                          (lookupPackFile (callbacks dets))
+                          packSha `orElse` return Nothing
         case packExists of
             Just True -> return ()
             _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
