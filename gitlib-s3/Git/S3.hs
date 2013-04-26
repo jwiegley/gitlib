@@ -520,9 +520,8 @@ mirrorRefsToS3 be = do
 mapPair :: (a -> b) -> (a,a) -> (b,b)
 mapPair f (x,y) = (f x, f y)
 
-uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
-                   -> ResourceT IO ()
-uploadPackAndIndex dets packPath idxPath packSha = do
+indexPackFile :: OdbS3Details -> Text -> FilePath -> ResourceT IO ()
+indexPackFile dets packSha idxPath = do
     -- Load the pack file, and iterate over the objects within it to determine
     -- what it contains.  When 'withPackFile' returns, the pack file will be
     -- closed and any associated resources freed.
@@ -535,6 +534,10 @@ uploadPackAndIndex dets packPath idxPath packSha = do
     liftIO $ wrapRegisterPackFile (registerPackFile (callbacks dets))
         packSha shas `orElse` return ()
 
+uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
+                   -> ResourceT IO ()
+uploadPackAndIndex dets packPath idxPath packSha = do
+    indexPackFile dets packSha idxPath
     uploadFile dets packPath
     uploadFile dets idxPath
 
