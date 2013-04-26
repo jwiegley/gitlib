@@ -160,63 +160,69 @@ data BackendCallbacks = BackendCallbacks
       -- on behalf of this backend should be released.
     }
 
+wrap :: String -> IO CInt -> IO CInt
+wrap msg f = catch
+        (do debug $ msg ++ "..."
+            r <- f
+            debug $ msg ++ "...done"
+            return r)
+        $ \e -> do putStrLn $ msg ++ "...FAILED"
+                   print (e :: SomeException)
+                   return (-1)
+
+wrapException :: (MonadIO m, MonadBaseControl IO m) => String -> m a -> m a
+wrapException msg = Exc.handle $ \e -> do
+    liftIO $ putStrLn msg
+    liftIO $ print (e :: SomeException)
+    throw e
+
 wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Text
                    -> Maybe (ObjectLength, ObjectType)
                    -> IO ()
-wrapRegisterObject f name metadata = do
-    debug $ "Calling registerObject: " ++ show name ++ " " ++ show metadata
-    f name metadata
-    debug "Calling registerObject...done"
+wrapRegisterObject f name metadata =
+    wrapException
+        ("Calling registerObject " ++ show name ++ " " ++ show metadata)
+        $ f name metadata
 
 wrapRegisterPackFile :: (Text -> [Text] -> IO ()) -> Text -> [Text] -> IO ()
-wrapRegisterPackFile f name shas = do
-    debug $ "Calling registerPackFile: " ++ show name
-    f name shas
-    debug "Calling registerPackFile...done"
+wrapRegisterPackFile f name shas =
+    wrapException ("Calling registerPackFile: " ++ show name) $ f name shas
 
 wrapLookupObject :: (Text -> IO (Maybe ObjectStatus))
                  -> Text
                  -> IO (Maybe ObjectStatus)
-wrapLookupObject f name = do
-    debug $ "Calling lookupObject: " ++ show name
-    r <- f name
-    debug "Calling lookupObject...done"
-    return r
+wrapLookupObject f name =
+    wrapException ("Calling lookupObject: " ++ show name) $ f name
 
 wrapLookupPackFile :: (Text -> IO (Maybe Bool)) -> Text -> IO (Maybe Bool)
-wrapLookupPackFile f name = do
-    debug $ "Calling lookupPackFile: " ++ show name
-    r <- f name
-    debug "Calling lookupPackFile...done"
-    return r
+wrapLookupPackFile f name =
+    wrapException ("Calling lookupPackFile: " ++ show name) $ f name
 
-wrapHeadObject :: MonadIO m
+wrapHeadObject :: (MonadIO m, MonadBaseControl IO m)
                => (Text -> Text -> ResourceT m (Maybe Bool))
                -> Text
                -> Text
                -> ResourceT m (Maybe Bool)
-wrapHeadObject f bucket path = do
-    debug $ "Calling headObject: " ++ show bucket ++ "/" ++ show path
-    r <- f bucket path
-    debug "Calling headObject...done"
-    return r
+wrapHeadObject f bucket path =
+    wrapException
+        ("Calling headObject: " ++ show bucket ++ "/" ++ show path)
+        $ f bucket path
 
-wrapGetObject :: MonadIO m
+wrapGetObject :: (MonadIO m, MonadBaseControl IO m)
               => (Text -> Text -> Maybe (Int64, Int64)
                   -> ResourceT m (Maybe (Either Text BL.ByteString)))
               -> Text
               -> Text
               -> Maybe (Int64, Int64)
               -> ResourceT m (Maybe (Either Text BL.ByteString))
-wrapGetObject f bucket path range = do
-    debug $ "Calling getObject: " ++ show bucket ++ "/" ++ show path
-        ++ " " ++ show range
-    r <- f bucket path range
-    debug "Calling getObject...done"
-    return r
+wrapGetObject f bucket path range =
+    wrapException
+        ("Calling getObject: " ++ show bucket ++ "/" ++ show path
+             ++ " " ++ show range)
+        $ f bucket path range
 
-wrapPutObject :: MonadIO m
+wrapPutObject :: (MonadIO m, MonadBaseControl IO m)
               => (Text -> Text -> ObjectLength -> BL.ByteString
                   -> ResourceT m (Maybe (Either Text ())))
               -> Text
@@ -224,44 +230,31 @@ wrapPutObject :: MonadIO m
               -> ObjectLength
               -> BL.ByteString
               -> ResourceT m (Maybe (Either Text ()))
-wrapPutObject f bucket path len bytes = do
-    debug $ "Calling putObject: " ++ show bucket ++ "/" ++ show path
-        ++ " length " ++ show len
-    r <- f bucket path len bytes
-    debug "Calling putObject...done"
-    return r
+wrapPutObject f bucket path len bytes =
+    wrapException
+        ("Calling putObject: " ++ show bucket ++ "/" ++ show path
+             ++ " length " ++ show len)
+        $ f bucket path len bytes
 
 wrapUpdateRef :: (Text -> Text -> IO ()) -> Text -> Text -> IO ()
-wrapUpdateRef f name sha = do
-    debug $ "Calling updateRef: " ++ show name ++ " " ++ show sha
-    f name sha
-    debug "Calling updateRef...done"
+wrapUpdateRef f name sha =
+    wrapException ("Calling updateRef: " ++ show name ++ " " ++ show sha)
+        $ f name sha
 
 wrapResolveRef :: (Text -> IO (Maybe Text)) -> Text -> IO (Maybe Text)
-wrapResolveRef f name = do
-    debug $ "Calling resolveRef: " ++ show name
-    r <- f name
-    debug "Calling resolveRef...done"
-    return r
+wrapResolveRef f name =
+    wrapException ("Calling resolveRef: " ++ show name) $ f name
 
 wrapAcquireLock :: (Text -> IO Text) -> Text -> IO Text
-wrapAcquireLock f name = do
-    debug $ "Calling acquireLock: " ++ show name
-    r <- f name
-    debug "Calling acquireLock...done"
-    return r
+wrapAcquireLock f name =
+    wrapException ("Calling acquireLock: " ++ show name) $ f name
 
 wrapReleaseLock :: (Text -> IO ()) -> Text -> IO ()
-wrapReleaseLock f name = do
-    debug $ "Calling releaseLock: " ++ show name
-    f name
-    debug "Calling releaseLock...done"
+wrapReleaseLock f name =
+    wrapException ("Calling releaseLock: " ++ show name) $ f name
 
 wrapShuttingDown :: IO () -> IO ()
-wrapShuttingDown f = do
-    debug "Calling shuttingDown..."
-    f
-    debug "Calling shuttingDown...done"
+wrapShuttingDown = wrapException "Calling shuttingDown..."
 
 instance Default BackendCallbacks where
     def = BackendCallbacks
@@ -457,23 +450,6 @@ instance Git.MonadGit m
       object [ "name"   .= name
              , "target" .=
                coidToJSON (getOid (unTagged (Git.commitOid commit))) ]
-
-wrapException :: String -> IO a -> IO a
-wrapException msg = handle $ \e -> do
-    putStrLn msg
-    print (e :: SomeException)
-    throwIO e
-
-wrap :: String -> IO CInt -> IO CInt
-wrap msg f =
-    catch
-        (do debug $ msg ++ "..."
-            r <- f
-            debug $ msg ++ "...done"
-            return r)
-        $ \e -> do putStrLn $ msg ++ "...FAILED"
-                   print (e :: SomeException)
-                   return (-1)
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
