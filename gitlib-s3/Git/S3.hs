@@ -175,9 +175,10 @@ wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Maybe (ObjectLength, ObjectType)
                    -> IO ()
 wrapRegisterObject f name metadata =
-    wrap ("Calling registerObject " ++ show name ++ " " ++ show metadata)
-        (f name metadata)
-        (return ())
+    return ()
+    -- wrap ("Calling registerObject " ++ show name ++ " " ++ show metadata)
+    --     (f name metadata)
+    --     (return ())
 
 wrapRegisterPackFile :: (Text -> [Text] -> IO ()) -> Text -> [Text] -> IO ()
 wrapRegisterPackFile f name shas =
