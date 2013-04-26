@@ -799,30 +799,30 @@ writeObjMetaDataToCache dets sha len typ = do
 
 odbS3BackendWriteCallback :: F'git_odb_backend_write_callback
 odbS3BackendWriteCallback oid be obj_data len obj_type = do
-    str <- oidToStr oid
-    wrap ("odbS3BackendWriteCallback " ++ str) go
+    r <- c'git_odb_hash oid obj_data len obj_type
+    case r of
+        0 -> do
+             str <- oidToStr oid
+             wrap ("odbS3BackendWriteCallback " ++ str) $
+                 go >> return 0
+        n -> return n
   where
     go = do
-        r <- c'git_odb_hash oid obj_data len obj_type
-        case r of
-            0 -> do
-                (dets, oidStr, sha) <- unpackDetails be oid
-                let hdr = Bin.encode ((fromIntegral len,
-                                       fromIntegral obj_type) :: (Int64,Int64))
-                bytes <- curry BU.unsafePackCStringLen
-                              (castPtr obj_data) (fromIntegral len)
-                let payload = BL.append hdr (BL.fromChunks [bytes])
-                runResourceT $ putFileS3 dets sha (sourceLbs payload)
+        (dets, oidStr, sha) <- unpackDetails be oid
+        let hdr = Bin.encode ((fromIntegral len,
+                               fromIntegral obj_type) :: (Int64,Int64))
+        bytes <- curry BU.unsafePackCStringLen
+                      (castPtr obj_data) (fromIntegral len)
+        let payload = BL.append hdr (BL.fromChunks [bytes])
+        runResourceT $ putFileS3 dets sha (sourceLbs payload)
 
-                wrapRegisterObject (registerObject (callbacks dets))
-                    sha (Just (fromLength len, fromType obj_type))
-                    `orElse` return ()
+        wrapRegisterObject (registerObject (callbacks dets))
+            sha (Just (fromLength len, fromType obj_type))
+                `orElse` return ()
 
-                -- Write a copy to the local cache
-                writeObjectToCache dets sha (fromLength len)
-                    (fromType obj_type) bytes
-                return 0
-            n -> return n
+        -- Write a copy to the local cache
+        writeObjectToCache dets sha (fromLength len)
+            (fromType obj_type) bytes
 
 odbS3BackendExistsCallback :: F'git_odb_backend_exists_callback
 odbS3BackendExistsCallback be oid = do
@@ -904,7 +904,7 @@ foreign import ccall "&odbS3BackendFreeCallback"
 observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
                    -> ResourceT IO ()
 observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
-    liftIO $ debug $ "observePackObjects " ++ show packSha
+    liftIO $ debug $ "observePackObjects for " ++ show packSha
 
     -- Iterate the "database", which gives us a list of all the oids contained
     -- within it
