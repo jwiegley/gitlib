@@ -532,13 +532,8 @@ uploadPackAndIndex dets packPath idxPath packSha = do
 
     -- Let whoever is listening know about this pack files and its contained
     -- objects
-    liftIO $ do
-        packKnown <- wrapLookupPackFile (lookupPackFile (callbacks dets))
-                         packSha `orElse` return Nothing
-        case packKnown of
-            Just True -> return ()
-            _ -> wrapRegisterPackFile (registerPackFile (callbacks dets))
-                     packSha shas `orElse` return ()
+    liftIO $ wrapRegisterPackFile (registerPackFile (callbacks dets))
+        packSha shas `orElse` return ()
 
     uploadFile dets packPath
     uploadFile dets idxPath
