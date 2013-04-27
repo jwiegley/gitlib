@@ -448,7 +448,7 @@ listBucketS3 dets = do
     makeRequest _ _ _ False = return []
     makeRequest bucket prefix mmarker True =  do
         debug "Aws.getBucket"
-        res <- aws (configuration dets) (s3configuration dets)
+        res <- awsRetry (configuration dets) (s3configuration dets)
                    (httpManager dets)
                    ((Aws.getBucket bucket)
                         { gbPrefix = Just prefix
@@ -517,9 +517,7 @@ putFileS3 dets filepath src = do
         _ -> do
             debug $ "Aws.putObject: " ++ show filepath
                  ++ " len " ++ show (BL.length lbs)
-            res <- awsRetry
-                       (configuration dets)
-                       (s3configuration dets)
+            res <- awsRetry (configuration dets) (s3configuration dets)
                        (httpManager dets)
                        (Aws.putObject (bucketName dets)
                                   (T.append (objectPrefix dets) filepath)
