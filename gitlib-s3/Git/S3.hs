@@ -959,7 +959,9 @@ accessObject f dets sha = fmap (fmap snd) . runHardlyT $ do
                 return x
         else further
 
-    lift $ runResourceT $ remoteCatalogContents dets
+    -- jww (2013-04-27): This is disabled, pending further discussion with
+    -- Snoyman about Bug #965.
+    -- lift $ runResourceT $ remoteCatalogContents dets
 
     mentry <- lift $ do cacheLookupEntry dets sha
     for_ mentry $ \entry ->
