@@ -16,7 +16,7 @@ module Git.S3
        , ObjectStatus(..), BackendCallbacks(..)
        , ObjectType(..), ObjectLength(..)
        , S3MockService(), s3MockService
-       , mockHeadObject, mockGetObject, mockPutObject
+       , mockGetBucket, mockHeadObject, mockGetObject, mockPutObject
        -- , readRefs, writeRefs
        -- , mirrorRefsFromS3, mirrorRefsToS3
        ) where
@@ -24,7 +24,7 @@ module Git.S3
 import           Aws
 import           Aws.Core
 import           Aws.S3 hiding (ObjectInfo, bucketName,
-                                headObject, getObject, putObject)
+                                getBucket, headObject, getObject, putObject)
 import qualified Aws.S3 as Aws
 import           Bindings.Libgit2.Errors
 import           Bindings.Libgit2.Odb
@@ -50,7 +50,7 @@ import           Data.Aeson as A
 import           Data.Attempt
 import           Data.Bifunctor
 import           Data.Binary as Bin
-import           Data.ByteString as B hiding (putStrLn, foldr)
+import           Data.ByteString as B hiding (putStrLn, foldr, map)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
@@ -66,7 +66,7 @@ import qualified Data.List as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text as T hiding (foldr)
+import           Data.Text as T hiding (foldr, map)
 import qualified Data.Text.Encoding as E
 import           Data.Time.Clock
 import           Data.Traversable (for)
@@ -134,6 +134,8 @@ data BackendCallbacks = BackendCallbacks
       -- 'locatePackFile' indicates whether a pack file with the given sha is
       -- present on the remote, regardless of which objects it contains.
 
+    , getBucket  :: (MonadIO m, MonadBaseControl IO m)
+                 => Text -> Text -> ResourceT m (Maybe [Text])
     , headObject :: (MonadIO m, MonadBaseControl IO m)
                  => Text -> Text -> ResourceT m (Maybe Bool)
     , getObject  :: (MonadIO m, MonadBaseControl IO m)
@@ -143,6 +145,10 @@ data BackendCallbacks = BackendCallbacks
                  => Text -> Text -> ObjectLength -> BL.ByteString
                  -> ResourceT m (Maybe (Either Text ()))
       -- These three methods allow mocking of S3.
+      --
+      -- - 'getBucket' takes the bucket and a prefix, and returns Just [xs] to
+      --   indicate the list of files in the bucket, or else Nothing if the
+      --   method is not mocked.
       --
       -- - 'headObject' takes the bucket and path, and returns Just True if an
       --   object exists at that path, Just False if not, and Nothing if the
@@ -176,6 +182,7 @@ instance Default BackendCallbacks where
         , registerPackFile = \_ _     -> return ()
         , lookupObject     = \_       -> return Nothing
         , lookupPackFile   = \_       -> return Nothing
+        , getBucket        = \_ _     -> return Nothing
         , headObject       = \_ _     -> return Nothing
         , getObject        = \_ _ _   -> return Nothing
         , putObject        = \_ _ _ _ -> return Nothing
@@ -347,6 +354,14 @@ wrapLookupPackFile f name =
         (f name)
         (return Nothing)
 
+wrapGetBucket :: (MonadIO m, MonadBaseControl IO m)
+              => (Text -> Text -> ResourceT m (Maybe [Text])) -> Text -> Text
+              -> ResourceT m (Maybe [Text])
+wrapGetBucket f bucket prefix =
+    wrap ("getBucket: " ++ show bucket ++ " " ++ show prefix)
+        (f bucket prefix)
+        (return Nothing)
+
 wrapHeadObject :: (MonadIO m, MonadBaseControl IO m)
                => (Text -> Text -> ResourceT m (Maybe Bool))
                -> Text
@@ -418,6 +433,23 @@ awsRetry :: Transaction r a
          -> r
          -> ResourceT IO (Response (ResponseMetadata a) a)
 awsRetry = ((((retrying def (isFailure . responseResult) .) .) .) .) aws
+
+listBucketS3 :: OdbS3Details -> ResourceT IO [Text]
+listBucketS3 dets = do
+    debug "listBucketS3"
+    let bucket = bucketName dets
+        prefix = objectPrefix dets
+    cbResult <- wrapGetBucket (getBucket (callbacks dets))
+                    bucket prefix `orElse` return Nothing
+    case cbResult of
+        Just r  -> return r
+        Nothing -> do
+            debug "Aws.getBucket"
+            res <- aws (configuration dets) (s3configuration dets)
+                       (httpManager dets)
+                       ((Aws.getBucket bucket) { gbPrefix = Just prefix })
+            -- jww (2013-04-27): Need to deal with 'gbrIsTruncated'.
+            map objectKey . gbrContents <$> readResponseIO res
 
 testFileS3 :: OdbS3Details -> Text -> ResourceT IO Bool
 testFileS3 dets filepath = do
@@ -830,6 +862,15 @@ remoteStoreObject _ _ _ =
 remoteCatalogContents :: OdbS3Details -> ResourceT IO ()
 remoteCatalogContents dets = do
     debug $ "remoteCatalogContents"
+    items <- listBucketS3 dets
+    for_ items $ \item ->
+        when (".idx" `T.isSuffixOf` item) $ do
+            let packName = fromText (T.drop 5 item)
+                packSha  = pathText (basename packName)
+            debug $ "remoteCatalogContents: found pack file " ++ show packSha
+            mpaths <- remoteReadPackFile dets packSha
+            for_ mpaths $ \(pathPath,idxPath) ->
+                liftIO $ catalogPackFile dets packSha idxPath
 
 -- | 'HardlyT' uses 'EitherT' to implement a semantic inverse of the 'MaybeT'
 --    transformer: rather than 'Nothing' values short-circuiting computation
@@ -1241,6 +1282,17 @@ data S3MockService = S3MockService
 
 s3MockService :: IO S3MockService
 s3MockService = S3MockService <$> newMVar M.empty
+
+mockGetBucket :: (MonadIO m, MonadBaseControl IO m)
+              => S3MockService -> Text -> Text -> ResourceT m (Maybe [Text])
+mockGetBucket svc bucket prefix = do
+    wrap "mockGetBucket" (Just <$> go) (return Nothing)
+  where
+    go = do
+        objs <- liftIO $ readMVar (objects svc)
+        return $ Prelude.filter (prefix `T.isPrefixOf`)
+               $ map snd
+               $ M.keys objs
 
 mockHeadObject :: (MonadIO m, MonadBaseControl IO m)
                => S3MockService -> Text -> Text -> ResourceT m (Maybe Bool)
