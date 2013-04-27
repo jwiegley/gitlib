@@ -1,10 +1,10 @@
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -926,67 +926,25 @@ mirrorRefsToS3 be = do
 --                 return x
 --         x -> return x
 
--- All of these caching function follow the same general outline:
---
---  1. Check whether the local cache can answer the request.
---
---  2. If the local cache does not know, ask the callback interface, which is
---     usually much cheaper than querying Amazon S3.
---
---  3. If the callback interface does not know, ask Amazon directly if the
---     object exists.
---
---  4. If Amazon does not know about that object per se, catalog the S3 bucket
---     and re-index its contents.  This operation is slow, but is preferable
---     to a failure.
---
---  5. If the object legitimately does not exist, register this fact in the
---     cache and with the callback interface.  This is to avoid recataloging
---     in the future.
-
 indexPackFile = undefined
 
 packLoadObject = undefined
+
+cacheLookupEntry :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
+cacheLookupEntry dets sha = do
+    debug $ "cacheLookupEntry " ++ show sha
+    objs <- readMVar (knownObjects dets)
+    return $ M.lookup sha objs
 
 cacheUpdateEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
 cacheUpdateEntry dets sha ce = do
     debug $ "cacheUpdateEntry " ++ show sha
     modifyMVar_ (knownObjects dets) $ return . M.insert sha ce
 
-cacheStoreObject :: OdbS3Details
-                 -> Text
-                 -> Maybe ObjectInfo
-                 -> IO ()
-cacheStoreObject dets sha minfo = do
-    debug $ "cacheStoreObject " ++ show sha ++ " " ++ show minfo
-    cacheUpdateEntry dets sha =<< go
-  where
-    go = case minfo of
-        Nothing -> return LooseRemote
-        Just ObjectInfo {..}
-            | Nothing <- infoData ->
-                return $ LooseRemoteMetaKnown infoLength infoType
-
-            | Just path <- infoPath -> do
-                now <- getCurrentTime
-                return (LooseCached infoLength infoType now path)
-
-            | Just bytes <- infoData -> do
-                let path = tempDirectory dets </> fromText sha
-                B.writeFile (pathStr path) bytes
-                now <- getCurrentTime
-                return (LooseCached infoLength infoType now path)
-
-cacheObjectEntry :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
-cacheObjectEntry dets sha = do
-    debug $ "cacheObjectEntry " ++ show sha
-    objs <- readMVar (knownObjects dets)
-    return $ M.lookup sha objs
-
 cacheLoadObject :: OdbS3Details -> Text -> Bool -> IO (Maybe ObjectInfo)
 cacheLoadObject dets sha metadataOnly = do
     debug $ "cacheLoadObject " ++ show sha ++ " " ++ show metadataOnly
-    minfo  <- cacheObjectEntry dets sha
+    minfo  <- cacheLookupEntry dets sha
     minfo' <- case minfo of
         Nothing           -> return Nothing
         Just DoesNotExist -> return Nothing
@@ -1022,6 +980,37 @@ cacheLoadObject dets sha metadataOnly = do
     cacheStoreObject dets sha minfo' -- refresh the cache's knowledge
     return minfo'
 
+cacheStoreObject :: OdbS3Details -> Text -> Maybe ObjectInfo -> IO ()
+cacheStoreObject dets sha minfo = do
+    debug $ "cacheStoreObject " ++ show sha ++ " " ++ show minfo
+    cacheUpdateEntry dets sha =<< go
+  where
+    go = case minfo of
+        Nothing -> return LooseRemote
+        Just ObjectInfo {..}
+            | Nothing <- infoData ->
+                return $ LooseRemoteMetaKnown infoLength infoType
+
+            | Just path <- infoPath -> do
+                now <- getCurrentTime
+                return (LooseCached infoLength infoType now path)
+
+            | Just bytes <- infoData -> do
+                let path = tempDirectory dets </> fromText sha
+                B.writeFile (pathStr path) bytes
+                now <- getCurrentTime
+                return (LooseCached infoLength infoType now path)
+
+callbackLocateObject :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
+callbackLocateObject dets sha = do
+    location <- wrapLookupObject (lookupObject (callbacks dets))
+                    sha `orElse` return Nothing
+    debug $ "callbackObjectInfo lookup: " ++ show location
+    return $ case location of
+        Just (ObjectInPack base) -> Just (PackedRemote base)
+        Just ObjectLoose         -> Just LooseRemote
+        _                        -> Nothing
+
 callbackRegisterCacheEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
 callbackRegisterCacheEntry dets sha ce = do
     debug $ "callbackReflectCacheEntry " ++ show sha ++ " " ++ show ce
@@ -1043,23 +1032,7 @@ callbackRegisterCacheEntry dets sha ce = do
   where
     err = throwIO (Git.BackendError $
                    "callbackRecordInfo called with " <> T.pack (show ce))
-
-callbackLocateObject :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
-callbackLocateObject dets sha = do
-    location <- wrapLookupObject (lookupObject (callbacks dets))
-                    sha `orElse` return Nothing
-    debug $ "callbackObjectInfo lookup: " ++ show location
-    return $ case location of
-        Just (ObjectInPack base) -> Just (PackedRemote base)
-        Just ObjectLoose         -> Just LooseRemote
-        _                        -> Nothing
-
-remoteStoreObject :: OdbS3Details
-                  -> Text
-                  -> (ObjectLength,ObjectType,ByteString)
-                  -> IO ()
-remoteStoreObject dets sha info = undefined
-
+
 remoteObjectExists :: OdbS3Details -> Text -> IO Bool
 remoteObjectExists dets sha = do
     wrap "remoteObjectInfo failed"
@@ -1076,76 +1049,106 @@ remoteReadPackFile dets packSha = do
     (,) <$> remoteReadFile dets packPath
         <*> remoteReadFile dets idxPath
 
+remoteWriteFile :: OdbS3Details -> Text -> ByteString -> IO ()
+remoteWriteFile dets path bytes = undefined
+
 remoteLoadObject :: OdbS3Details -> Text -> IO (Maybe ObjectInfo)
 remoteLoadObject dets sha = undefined
 
+remoteStoreObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
+remoteStoreObject dets sha info = undefined
+
 remoteCatalogContents :: OdbS3Details -> IO ()
 remoteCatalogContents dets = undefined
-
+
 type HardlyT m a = EitherT a m ()
 
 found :: Monad m => a -> HardlyT m a
 found = left
 
-continue :: Monad m => HardlyT m a
-continue = right ()
+further :: Monad m => HardlyT m a
+further = right ()
 
 hardlyT :: Monad m => a -> HardlyT m a -> m a
 hardlyT = eitherT return . const . return
 
+finallyE :: Monad m => EitherT e m a -> (e -> m e) -> EitherT e m a
+finallyE action cleanup = EitherT $ do
+    result <- runEitherT action
+    case result of
+        Left e  -> Left `liftM` cleanup e
+        Right _ -> return result
+
 accessObject :: (OdbS3Details -> Text -> CacheEntry -> a
-                 -> HardlyT IO b)
+                 -> HardlyT IO (CacheEntry,b))
              -> a
              -> b
              -> OdbS3Details
              -> Text
              -> IO b
-accessObject f arg dflt dets sha = hardlyT dflt $ do
-    mentry <- lift $ cacheObjectEntry dets sha
+accessObject f arg dflt dets sha = fmap snd . hardlyT (DoesNotExist,dflt) $ do
+    mentry <- lift $ cacheLookupEntry dets sha
     for mentry go
 
     mentry <- lift $ callbackLocateObject dets sha
-    for mentry $ \entry -> do
-        lift $ cacheUpdateEntry dets sha entry
-        go entry
+    for mentry $ \entry ->
+        go entry `finallyE` \x@(entry',_) -> do
+            cacheUpdateEntry dets sha entry'
+            return x
 
     exists <- lift $ remoteObjectExists dets sha
     if exists
-        then do
-            let entry = LooseRemote
-            lift $ cacheUpdateEntry dets sha entry
-            lift $ callbackRegisterCacheEntry dets sha entry
-            go entry
-        else continue
+        then go LooseRemote `finallyE` \x@(entry',_) -> do
+                cacheUpdateEntry dets sha entry'
+                callbackRegisterCacheEntry dets sha entry'
+                return x
+        else further
 
     lift $ remoteCatalogContents dets
 
-    mentry <- lift $ do cacheObjectEntry dets sha
-    for mentry $ \entry -> do
-        lift $ callbackRegisterCacheEntry dets sha entry
-        go entry
-
-    left dflt
+    mentry <- lift $ do cacheLookupEntry dets sha
+    for_ mentry $ \entry ->
+        go entry `finallyE` \x@(entry',_) -> do
+            callbackRegisterCacheEntry dets sha entry
+            return x
   where
     go = f dets sha ?? arg
 
+-- All of these functions follow the same general outline:
+--
+--  1. Check whether the local cache can answer the request.
+--
+--  2. If the local cache does not know, ask the callback interface, which is
+--     usually much cheaper than querying Amazon S3.
+--
+--  3. If the callback interface does not know, ask Amazon directly if the
+--     object exists.
+--
+--  4. If Amazon does not know about that object per se, catalog the S3 bucket
+--     and re-index its contents.  This operation is slow, but is preferable
+--     to a failure.
+--
+--  5. If the object legitimately does not exist, register this fact in the
+--     cache and with the callback interface.  This is to avoid recataloging
+--     in the future.
+
 objectExists :: OdbS3Details -> Text -> IO Bool
-objectExists = accessObject
-                   (\_ _ info _ -> left (info /= DoesNotExist))
-                   () False
+objectExists =
+    accessObject
+        (\_ _ info () -> left (info, info /= DoesNotExist))
+        () False
 
-readObject :: OdbS3Details -> Text -> Bool
-           -> IO (ObjectLength, ObjectType, ByteString)
-readObject dets sha metadataOnly = undefined -- do
-    -- case minfo' of
-    --     Just (ObjectInfo len typ (Just path) _) -> do
-    --         now <- getCurrentTime
-    --         cacheRecordInfo dets sha (LooseCached len typ now path)
-    --     _ -> Nothing
+readObject :: OdbS3Details -> Text -> Bool -> IO ObjectInfo
+readObject dets sha metadataOnly =
+    accessObject
+        (\_ _ info () -> left (info, undefined))
+        ()
+        (throw (Git.BackendError $ "Could not read object " <> sha))
+        dets
+        sha
 
-readObjectMetadata :: OdbS3Details -> Text
-                   -> IO (ObjectLength, ObjectType)
-readObjectMetadata dets sha = (\(x,y,_) -> (x,y)) <$> readObject dets sha True
+readObjectMetadata :: OdbS3Details -> Text -> IO ObjectInfo
+readObjectMetadata dets sha = readObject dets sha True
 
 writeObject :: OdbS3Details
             -> Text
@@ -1164,7 +1167,7 @@ readCallback data_p len_p type_p be oid = do
         (return (-1))
   where
     go dets sha = do
-        (len,typ,bytes) <- readObject dets sha False
+        ObjectInfo len typ _ (Just bytes) <- readObject dets sha False
         pokeByteString bytes data_p len
         poke len_p (toLength len)
         poke type_p (toType typ)
@@ -1185,7 +1188,7 @@ readHeaderCallback len_p type_p be oid = do
         (return (-1))
   where
     go dets sha = do
-        (len,typ) <- readObjectMetadata dets sha
+        ObjectInfo len typ _ _ <- readObjectMetadata dets sha
         poke len_p (toLength len)
         poke type_p (toType typ)
 
