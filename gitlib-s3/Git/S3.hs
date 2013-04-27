@@ -799,54 +799,6 @@ mirrorRefsToS3 be = do
 --         loadFromPack dets restart seen sha packPath idxPath
 --             len_p type_p Nothing
 
--- writeObjMetaDataToCache :: OdbS3Details -> Text -> ObjectLength -> ObjectType
---                         -> IO ()
--- writeObjMetaDataToCache dets sha len typ = do
---     debug $ "writeObjMetaDataToCache " ++ show sha
---     modifyMVar_ (knownObjects dets) $
---         return . M.insert sha (LooseRemoteMetaKnown len typ)
-
--- cachePackFile dets bytes = do
---         let dir = tempDirectory dets
-
---         debug $ "odbS3WritePackAddCallback: building index for "
---             ++ show (B.length bs) ++ " bytes"
---         (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
-
---         -- Upload the actual files to S3 if it's not already then, and then
---         -- register the objects within the pack in the global index.
---         packExists <- liftIO $ wrapLookupPackFile
---                           (lookupPackFile (callbacks dets))
---                           packSha `orElse` return Nothing
---         case packExists of
---             Just True -> return ()
---             _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
---         return 0
-
--- writeObjectToCache :: OdbS3Details
---                    -> Text -> ObjectLength -> ObjectType -> ByteString -> IO ()
--- writeObjectToCache dets sha len typ bytes = do
---     debug $ "writeObjectToCache: " ++ show sha
---     let path = tempDirectory dets </> fromText sha
---     B.writeFile (pathStr path) bytes
---     now <- getCurrentTime
---     modifyMVar_ (knownObjects dets) $
---         return . M.insert sha (LooseCached path len typ now)
-
--- writePackToCache :: OdbS3Details -> Text -> ByteString -> ByteString
---                  -> IO (FilePath, FilePath)
--- writePackToCache dets sha packBytes idxBytes = do
---     debug $ "writePackToCache: " ++ show sha
---     let idxPath  = tempDirectory dets </> fromText ("pack-" <> sha <> ".idx")
---         packPath = replaceExtension idxPath "pack"
---     debug $ "writeFile: " ++ show packPath
---     B.writeFile (pathStr packPath) packBytes
---     debug $ "writeFile: " ++ show idxPath
---     B.writeFile (pathStr idxPath) idxBytes
---     void $ lgWithPackFile idxPath $
---         liftIO . observePackObjects dets sha idxPath False
---     return (packPath, idxPath)
-
 -- getObjectFromPack :: OdbS3Details -> FilePath -> FilePath -> Text -> Bool
 --                   -> IO (Maybe (ObjectLength, ObjectType, ByteString))
 -- getObjectFromPack dets packPath idxPath sha metadataOnly = do
@@ -878,7 +830,7 @@ observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
     r <- flip (lgForEachObject odbPtr) nullPtr $ \oid _ -> do
         modifyMVar_ mshas $ \shas ->
             (:) <$> oidToSha oid <*> pure shas
-        return 0
+        return c'GIT_OK
     checkResult r "lgForEachObject failed"
 
     -- Update the known objects map with the fact that we've got a local cache
@@ -1212,13 +1164,12 @@ objectExists dets sha = do
     mce <- accessObject (left . join (,)) dets sha
     return $ fromMaybe DoesNotExist mce
 
-readObject :: OdbS3Details -> Text -> Bool -> IO ObjectInfo
+readObject :: OdbS3Details -> Text -> Bool -> IO (Maybe ObjectInfo)
 readObject dets sha metadataOnly = do
     ce <- objectExists dets sha
-    expectingJust ("readObject: could not find " <> sha) =<<
-        cacheLoadObject dets sha ce metadataOnly
+    cacheLoadObject dets sha ce metadataOnly
 
-readObjectMetadata :: OdbS3Details -> Text -> IO ObjectInfo
+readObjectMetadata :: OdbS3Details -> Text -> IO (Maybe ObjectInfo)
 readObjectMetadata dets sha = readObject dets sha True
 
 writeObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
@@ -1250,34 +1201,37 @@ readCallback :: F'git_odb_backend_read_callback
 readCallback data_p len_p type_p be oid = do
     (dets, _, sha) <- unpackDetails be oid
     wrap (T.unpack $ "S3.readCallback " <> sha)
-        (go dets sha >> return 0)
-        (return (-1))
+        (maybe c'GIT_ENOTFOUND (const c'GIT_OK) <$> go dets sha)
+        (return c'GIT_ERROR)
   where
     go dets sha = do
-        ObjectInfo len typ _ (Just bytes) <- readObject dets sha False
-        pokeByteString bytes data_p len
-        poke len_p (toLength len)
-        poke type_p (toType typ)
+        minfo <- readObject dets sha False
+        for minfo $ \(ObjectInfo len typ _ (Just bytes)) -> do
+            pokeByteString bytes data_p len
+            poke len_p (toLength len)
+            poke type_p (toType typ)
+            return (Just ())
 
 readPrefixCallback :: F'git_odb_backend_read_prefix_callback
 readPrefixCallback out_oid oid_p len_p type_p be oid len =
     wrap "S3.readPrefixCallback"
         -- jww (2013-04-22): Not yet implemented.
         (throwIO (Git.BackendError
-                  "S3.readPrefixCallback not has not been implemented"))
-        (return (-1))
+                  "S3.readPrefixCallback has not been implemented yet"))
+        (return c'GIT_ERROR)
 
 readHeaderCallback :: F'git_odb_backend_read_header_callback
 readHeaderCallback len_p type_p be oid = do
     (dets, _, sha) <- unpackDetails be oid
     wrap (T.unpack $ "S3.readHeaderCallback " <> sha)
-        (go dets sha >> return 0)
-        (return (-1))
+        (maybe c'GIT_ENOTFOUND (const c'GIT_OK) <$> go dets sha)
+        (return c'GIT_ERROR)
   where
     go dets sha = do
-        ObjectInfo len typ _ _ <- readObjectMetadata dets sha
-        poke len_p (toLength len)
-        poke type_p (toType typ)
+        minfo <- readObjectMetadata dets sha
+        for minfo $ \(ObjectInfo len typ _ _) -> do
+            poke len_p (toLength len)
+            poke type_p (toType typ)
 
 writeCallback :: F'git_odb_backend_write_callback
 writeCallback oid be obj_data len obj_type = do
@@ -1286,8 +1240,8 @@ writeCallback oid be obj_data len obj_type = do
         0 -> do
             (dets, _, sha) <- unpackDetails be oid
             wrap (T.unpack $ "S3.writeCallback " <> sha)
-                (go dets sha >> return 0)
-                (return (-1))
+                (go dets sha >> return c'GIT_OK)
+                (return c'GIT_ERROR)
         n -> do
             debug "S3.writeCallback failed to hash data"
             return n
@@ -1305,24 +1259,24 @@ existsCallback be oid = do
     wrap (T.unpack $ "S3.existsCallback " <> sha)
         (do ce <- objectExists dets sha
             return $ if ce == DoesNotExist then 0 else 1)
-        (return (-1))
+        (return c'GIT_ERROR)
 
 refreshCallback :: F'git_odb_backend_refresh_callback
 refreshCallback _ =
-    return 0                    -- do nothing
+    return c'GIT_OK             -- do nothing
 
 foreachCallback :: F'git_odb_backend_foreach_callback
 foreachCallback be callback payload =
-    return (-1)                 -- fallback to standard method
+    return c'GIT_ERROR          -- fallback to standard method
 
 writePackCallback :: F'git_odb_backend_writepack_callback
 writePackCallback writePackPtr be callback payload =
-    wrap "S3.writePackCallback" go (return (-1))
+    wrap "S3.writePackCallback" go (return c'GIT_ERROR)
   where
     go = do
         poke writePackPtr . packWriter
             =<< peek (castPtr be :: Ptr OdbS3Backend)
-        return 0
+        return c'GIT_OK
 
 freeCallback :: F'git_odb_backend_free_callback
 freeCallback be = do
@@ -1353,8 +1307,8 @@ foreign import ccall "&freeCallback"
 packAddCallback :: F'git_odb_writepack_add_callback
 packAddCallback wp dataPtr len progress =
     wrap "S3.packAddCallback"
-        (go >> return 0)
-        (return (-1))
+        (go >> return c'GIT_OK)
+        (return c'GIT_ERROR)
   where
     go = do
         be    <- c'git_odb_writepack'backend <$> peek wp
@@ -1366,7 +1320,7 @@ packAddCallback wp dataPtr len progress =
 
 packCommitCallback :: F'git_odb_writepack_commit_callback
 packCommitCallback wp progress =
-    return 0                    -- do nothing
+    return c'GIT_OK             -- do nothing
 
 packFreeCallback :: F'git_odb_writepack_free_callback
 packFreeCallback wp = do
