@@ -1069,8 +1069,11 @@ found = left
 further :: Monad m => HardlyT m a
 further = right ()
 
-hardlyT :: Monad m => a -> HardlyT m a -> m a
-hardlyT = eitherT return . const . return
+fromMaybeH :: Monad m => Maybe a -> HardlyT m a
+fromMaybeH = maybe further found
+
+runHardlyT :: Monad m => HardlyT m a -> m (Maybe a)
+runHardlyT = eitherT (return . Just) (const (return Nothing))
 
 finallyE :: Monad m => EitherT e m a -> (e -> m e) -> EitherT e m a
 finallyE action cleanup = EitherT $ do
@@ -1079,26 +1082,23 @@ finallyE action cleanup = EitherT $ do
         Left e  -> Left `liftM` cleanup e
         Right _ -> return result
 
-accessObject :: (OdbS3Details -> Text -> CacheEntry -> a
-                 -> HardlyT IO (CacheEntry,b))
-             -> a
-             -> b
+accessObject :: (CacheEntry -> HardlyT IO (CacheEntry,b))
              -> OdbS3Details
              -> Text
-             -> IO b
-accessObject f arg dflt dets sha = fmap snd . hardlyT (DoesNotExist,dflt) $ do
+             -> IO (Maybe b)
+accessObject f dets sha = fmap (fmap snd) . runHardlyT $ do
     mentry <- lift $ cacheLookupEntry dets sha
-    for mentry go
+    for_ mentry f
 
     mentry <- lift $ callbackLocateObject dets sha
-    for mentry $ \entry ->
-        go entry `finallyE` \x@(entry',_) -> do
+    for_ mentry $ \entry ->
+        f entry `finallyE` \x@(entry',_) -> do
             cacheUpdateEntry dets sha entry'
             return x
 
     exists <- lift $ remoteObjectExists dets sha
     if exists
-        then go LooseRemote `finallyE` \x@(entry',_) -> do
+        then f LooseRemote `finallyE` \x@(entry',_) -> do
                 cacheUpdateEntry dets sha entry'
                 callbackRegisterCacheEntry dets sha entry'
                 return x
@@ -1108,11 +1108,9 @@ accessObject f arg dflt dets sha = fmap snd . hardlyT (DoesNotExist,dflt) $ do
 
     mentry <- lift $ do cacheLookupEntry dets sha
     for_ mentry $ \entry ->
-        go entry `finallyE` \x@(entry',_) -> do
+        f entry `finallyE` \x@(entry',_) -> do
             callbackRegisterCacheEntry dets sha entry
             return x
-  where
-    go = f dets sha ?? arg
 
 -- All of these functions follow the same general outline:
 --
@@ -1132,20 +1130,27 @@ accessObject f arg dflt dets sha = fmap snd . hardlyT (DoesNotExist,dflt) $ do
 --     cache and with the callback interface.  This is to avoid recataloging
 --     in the future.
 
+expectJust :: Text -> Maybe a -> IO a
+expectJust msg Nothing  = throwIO (Git.BackendError msg)
+expectJust msg (Just x) = return x
+
 objectExists :: OdbS3Details -> Text -> IO Bool
-objectExists =
-    accessObject
-        (\_ _ info () -> left (info, info /= DoesNotExist))
-        () False
+objectExists dets sha =
+    expectJust ("Could not find object " <> sha)
+        =<< accessObject
+                (\info -> left (info, info /= DoesNotExist))
+                dets
+                sha
 
 readObject :: OdbS3Details -> Text -> Bool -> IO ObjectInfo
 readObject dets sha metadataOnly =
-    accessObject
-        (\_ _ info () -> left (info, undefined))
-        ()
-        (throw (Git.BackendError $ "Could not read object " <> sha))
-        dets
-        sha
+    expectJust ("Could not read object " <> sha)
+        =<< accessObject
+                go
+                dets
+                sha
+  where
+    go info = left (info, undefined)
 
 readObjectMetadata :: OdbS3Details -> Text -> IO ObjectInfo
 readObjectMetadata dets sha = readObject dets sha True
