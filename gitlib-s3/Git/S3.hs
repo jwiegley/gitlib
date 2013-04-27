@@ -1066,10 +1066,16 @@ readHeaderCallback len_p type_p be oid = do
 
 writeCallback :: F'git_odb_backend_write_callback
 writeCallback oid be obj_data len obj_type = do
-    (dets, _, sha) <- unpackDetails be oid
-    wrap (T.unpack $ "S3.writeCallback " <> sha)
-        (go dets sha >> return c'GIT_OK)
-        (return c'GIT_ERROR)
+    r <- c'git_odb_hash oid obj_data len obj_type
+    case r of
+        0 -> do
+            (dets, _, sha) <- unpackDetails be oid
+            wrap (T.unpack $ "S3.writeCallback " <> sha)
+                (go dets sha >> return c'GIT_OK)
+                (return c'GIT_ERROR)
+        n -> do
+            debug "S3.writeCallback failed to hash data"
+            return n
   where
     go dets sha = do
         bytes <- curry BU.unsafePackCStringLen
