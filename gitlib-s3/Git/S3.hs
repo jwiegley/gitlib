@@ -23,7 +23,8 @@ module Git.S3
 
 import           Aws
 import           Aws.Core
-import           Aws.S3 hiding (bucketName, headObject, getObject, putObject)
+import           Aws.S3 hiding (ObjectInfo, bucketName,
+                                headObject, getObject, putObject)
 import qualified Aws.S3 as Aws
 import           Bindings.Libgit2.Errors
 import           Bindings.Libgit2.Odb
@@ -93,6 +94,14 @@ data ObjectLength = ObjectLength { getObjectLength :: Int64 }
                   deriving (Eq, Show, Generic)
 data ObjectType   = ObjectType { getObjectType :: Int }
                   deriving (Eq, Show, Generic)
+
+data ObjectInfo = ObjectInfo
+      { infoLength :: ObjectLength
+      , infoType   :: ObjectType
+      , infoPath   :: Maybe FilePath
+      , infoData   :: Maybe ByteString
+      } deriving (Eq, Show)
+
 data ObjectStatus = ObjectLoose
                   | ObjectLooseMetaKnown ObjectLength ObjectType
                   | ObjectInPack Text
@@ -187,12 +196,13 @@ data CacheInfo
       }
 
     | PackedRemote Text
-    | PackedCached FilePath FilePath UTCTime
+    | PackedCached Text FilePath FilePath UTCTime
     | PackedCachedMetaKnown
       { objectLength    :: ObjectLength
       , objectType      :: ObjectType
       , objectCached    :: UTCTime
         -- Must always be a PackedCached value
+      , objectPackSha   :: Text
       , objectPackPath  :: FilePath
       , objectIndexPath :: FilePath
       }
@@ -934,6 +944,10 @@ mirrorRefsToS3 be = do
 --     cache and with the callback interface.  This is to avoid recataloging
 --     in the future.
 
+indexPackFile = undefined
+
+packLoadObject = undefined
+
 cacheRecordInfo :: OdbS3Details -> Text -> CacheInfo -> IO ()
 cacheRecordInfo dets sha info = do
     debug $ "cacheRecordInfo " ++ show sha
@@ -941,72 +955,91 @@ cacheRecordInfo dets sha info = do
 
 cacheStoreObject :: OdbS3Details
                  -> Text
-                 -> Maybe (ObjectLength,ObjectType,ByteString)
+                 -> Maybe ObjectInfo
                  -> IO ()
 cacheStoreObject dets sha minfo = do
     debug $ "cacheStoreObject " ++ show sha ++ " " ++ show minfo
     cacheRecordInfo dets sha
         =<< case minfo of
             Nothing -> return LooseRemote
-            Just (len,typ,bytes)
-                | B.null bytes -> return $ LooseRemoteMetaKnown len typ
-                | otherwise    -> do
+            Just ObjectInfo {..}
+                | Nothing <- infoData ->
+                    return $ LooseRemoteMetaKnown infoLength infoType
+                | Just bytes <- infoData -> do
                     let path = tempDirectory dets </> fromText sha
                     B.writeFile (pathStr path) bytes
                     now <- getCurrentTime
-                    return (LooseCached len typ now path)
+                    return (LooseCached infoLength infoType now path)
 
 cacheObjectInfo :: OdbS3Details -> Text -> IO (Maybe CacheInfo)
 cacheObjectInfo dets sha = do
+    debug $ "cacheObjectInfo " ++ show sha
     objs <- readMVar (knownObjects dets)
     return $ M.lookup sha objs
 
 cacheLoadObject :: OdbS3Details -> Text -> Bool
-                -> IO (Maybe (ObjectLength,ObjectType,ByteString))
+                -> IO (Maybe ObjectInfo)
 cacheLoadObject dets sha metadataOnly = do
+    debug $ "cacheLoadObject " ++ show sha ++ " " ++ show metadataOnly
     minfo <- cacheObjectInfo dets sha
     case minfo of
-        Nothing -> return Nothing
+        Nothing           -> return Nothing
         Just DoesNotExist -> return Nothing
+
         Just LooseRemote -> remoteLoadObject dets sha
         Just (LooseRemoteMetaKnown len typ) ->
             if metadataOnly
-            then return $ Just (len, typ, B.empty)
+            then return . Just $ ObjectInfo len typ Nothing Nothing
             else remoteLoadObject dets sha
+
         Just (LooseCached len typ _ path) ->
             if metadataOnly
-            then return $ Just (len, typ, B.empty)
-            else Just <$> ((,,) <$> pure len
-                                <*> pure typ
-                                <*> B.readFile (pathStr path))
+            then return . Just $ ObjectInfo len typ (Just path) Nothing
+            else Just <$> (ObjectInfo
+                           <$> pure len
+                           <*> pure typ
+                           <*> pure (Just path)
+                           <*> (Just <$> B.readFile (pathStr path)))
+
         Just (PackedRemote packSha) -> do
             (pathPath,idxPath) <- remoteReadPackFile dets sha
             indexPackFile idxPath
             packLoadObject dets sha pathPath idxPath
-        Just (PackedCached packPath idxPath _) ->
+
+        Just (PackedCached _ packPath idxPath _) ->
             packLoadObject dets sha packPath idxPath
-        Just (PackedCachedMetaKnown len typ _ packPath idxPath) ->
+
+        Just (PackedCachedMetaKnown len typ _ _ packPath idxPath) ->
             if metadataOnly
-            then return $ Just (len, typ, B.empty)
+            then return . Just $ ObjectInfo len typ Nothing Nothing
             else packLoadObject dets sha packPath idxPath
 
-remoteReadFile :: OdbS3Details -> Text -> IO FilePath
-remoteReadFile dets path = undefined
-
-remoteReadPackFile :: OdbS3Details -> Text -> IO (FilePath, FilePath)
-remoteReadPackFile dets packSha = do
-    let packPath = "pack-" <> packSha <> ".pack"
-        idxPath  = "pack-" <> packSha <> ".idx"
-    (,) <$> remoteReadFile dets packPath
-        <*> remoteReadFile dets idxPath
-
-indexPackFile = undefined
-
-packLoadObject = undefined
-
 callbackRecordInfo :: OdbS3Details -> Text -> CacheInfo -> IO ()
-callbackRecordInfo dets sha info = undefined
-    cacheStoreObject dets sha info Nothing
+callbackRecordInfo dets sha info = do
+    debug $ "callbackRecordInfo " ++ show sha ++ " " ++ show info
+    let regObj  = wrapRegisterObject (registerObject (callbacks dets)) sha
+        regPack = wrapRegisterPackFile (registerPackFile (callbacks dets)) sha
+    let f = case info of
+            DoesNotExist -> return ()
+            LooseRemote  -> regObj Nothing
+
+            LooseRemoteMetaKnown {..} ->
+                regObj (Just (objectLength, objectType))
+            LooseCached {..} ->
+                regObj (Just (objectLength, objectType))
+
+            PackedRemote {..}          -> err
+            PackedCached {..}          -> err
+            PackedCachedMetaKnown {..} -> err
+    f `orElse` return ()
+  where
+    err = throwIO (Git.BackendError $
+                   "callbackRecordInfo called with " <> T.pack (show info))
+
+callbackRegisterObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
+callbackRegisterObject dets sha ObjectInfo {..} =
+    wrapRegisterObject (registerObject (callbacks dets))
+        sha (Just (infoLength, infoType)) `orElse` return ()
 
 callbackObjectInfo :: OdbS3Details -> Text -> IO (Maybe CacheInfo)
 callbackObjectInfo dets sha = do
@@ -1037,8 +1070,17 @@ remoteObjectInfo dets sha = do
             return (Just LooseRemote)
         else return (Just DoesNotExist)
 
-remoteLoadObject :: OdbS3Details -> Text
-                -> IO (Maybe (ObjectLength,ObjectType,ByteString))
+remoteReadFile :: OdbS3Details -> Text -> IO FilePath
+remoteReadFile dets path = undefined
+
+remoteReadPackFile :: OdbS3Details -> Text -> IO (FilePath, FilePath)
+remoteReadPackFile dets packSha = do
+    let packPath = "pack-" <> packSha <> ".pack"
+        idxPath  = "pack-" <> packSha <> ".idx"
+    (,) <$> remoteReadFile dets packPath
+        <*> remoteReadFile dets idxPath
+
+remoteLoadObject :: OdbS3Details -> Text -> IO (Maybe ObjectInfo)
 remoteLoadObject dets sha = undefined
 
 remoteCatalogContents :: OdbS3Details -> IO ()
@@ -1095,7 +1137,12 @@ objectExists = accessObject
 
 readObject :: OdbS3Details -> Text -> Bool
            -> IO (ObjectLength, ObjectType, ByteString)
-readObject dets sha metadataOnly = undefined
+readObject dets sha metadataOnly = undefined -- do
+    -- case minfo' of
+    --     Just (ObjectInfo len typ (Just path) _) -> do
+    --         now <- getCurrentTime
+    --         cacheRecordInfo dets sha (LooseCached len typ now path)
+    --     _ -> Nothing
 
 readObjectMetadata :: OdbS3Details -> Text
                    -> IO (ObjectLength, ObjectType)
