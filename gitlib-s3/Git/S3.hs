@@ -1006,12 +1006,9 @@ readObjectMetadata dets sha = readObject dets sha True
 
 writeObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
 writeObject dets sha info = do
-    debug "writeObject: storing object in remote"
     runResourceT $ remoteStoreObject dets sha info
-    debug "writeObject: storing object in local cache"
-    cacheStoreObject dets sha info
-    debug "writeObject: registering object with callback"
     callbackRegisterObject dets sha info
+    cacheStoreObject dets sha info
 
 writePackFile :: OdbS3Details -> ByteString -> IO ()
 writePackFile dets bytes = do
