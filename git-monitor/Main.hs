@@ -27,7 +27,7 @@ import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git hiding (Options)
-import           Git.Libgit2 (lgFactory)
+import           Git.Libgit2 (lgFactory, withLibGitDo)
 import           Git.Utils (treeBlobEntries)
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
@@ -65,7 +65,7 @@ options = Options
                 <> help "Resumes using last set of snapshots")
 
 main :: IO ()
-main = execParser opts >>= doMain
+main = withLibGitDo $ execParser opts >>= doMain
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
