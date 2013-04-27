@@ -443,13 +443,24 @@ listBucketS3 dets = do
                     bucket prefix `orElse` return Nothing
     case cbResult of
         Just r  -> return r
-        Nothing -> do
-            debug "Aws.getBucket"
-            res <- aws (configuration dets) (s3configuration dets)
-                       (httpManager dets)
-                       ((Aws.getBucket bucket) { gbPrefix = Just prefix })
-            -- jww (2013-04-27): Need to deal with 'gbrIsTruncated'.
-            map objectKey . gbrContents <$> readResponseIO res
+        Nothing -> makeRequest bucket prefix Nothing True
+  where
+    makeRequest _ _ _ False = return []
+    makeRequest bucket prefix mmarker True =  do
+        debug "Aws.getBucket"
+        res <- aws (configuration dets) (s3configuration dets)
+                   (httpManager dets)
+                   ((Aws.getBucket bucket)
+                        { gbPrefix = Just prefix
+                        , gbMarker = mmarker })
+        gbr <- readResponseIO res
+        let contents = map objectKey (gbrContents gbr)
+        case contents of
+            [] -> return []
+            _  -> (++) <$> pure contents
+                      <*> makeRequest bucket prefix
+                              (Just (Prelude.last contents))
+                              (gbrIsTruncated gbr)
 
 testFileS3 :: OdbS3Details -> Text -> ResourceT IO Bool
 testFileS3 dets filepath = do
@@ -625,7 +636,8 @@ observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
     modifyMVar_ (knownObjects dets) $ \objs ->
         return $ foldr (`M.insert` obj) objs shas
 
-    debug $ "observePackObjects: pack file has been observed"
+    debug $ "observePackObjects: observed "
+        ++ show (Prelude.length shas) ++ " objects"
     return shas
 
 catalogPackFile :: OdbS3Details -> Text -> FilePath -> IO [Text]
@@ -688,9 +700,9 @@ cacheLoadObject dets sha ce metadataOnly = do
 
     go (PackedRemote packSha) = do
         mpaths <- runResourceT $ remoteReadPackFile dets packSha
-        join <$> (for mpaths $ \(pathPath,idxPath) -> do
+        join <$> (for mpaths $ \(packPath,idxPath) -> do
             void $ catalogPackFile dets packSha idxPath
-            packLoadObject dets sha pathPath idxPath metadataOnly)
+            packLoadObject dets sha packPath idxPath metadataOnly)
 
     go (PackedCached _ _ packPath idxPath) =
         packLoadObject dets sha packPath idxPath metadataOnly
@@ -865,11 +877,11 @@ remoteCatalogContents dets = do
     items <- listBucketS3 dets
     for_ items $ \item ->
         when (".idx" `T.isSuffixOf` item) $ do
-            let packName = fromText (T.drop 5 item)
-                packSha  = pathText (basename packName)
+            let packName = fromText item
+                packSha  = T.drop 5 (pathText (basename packName))
             debug $ "remoteCatalogContents: found pack file " ++ show packSha
             mpaths <- remoteReadPackFile dets packSha
-            for_ mpaths $ \(pathPath,idxPath) ->
+            for_ mpaths $ \(_,idxPath) ->
                 liftIO $ catalogPackFile dets packSha idxPath
 
 -- | 'HardlyT' uses 'EitherT' to implement a semantic inverse of the 'MaybeT'
@@ -1106,8 +1118,11 @@ freeCallback be = do
 
     wrapShuttingDown (shuttingDown (callbacks dets)) `orElse` return ()
 
-    exists <- isDirectory (tempDirectory dets)
-    when exists $ removeTree (tempDirectory dets)
+    let tmpDir = tempDirectory dets
+    exists <- isDirectory tmpDir
+    when exists $ do
+        debug $ "S3.freeCallback: removing tree " ++ show tmpDir
+        removeTree tmpDir `orElse` return ()
 
     backend <- peek be
     freeHaskellFunPtr (c'git_odb_backend'read backend)
