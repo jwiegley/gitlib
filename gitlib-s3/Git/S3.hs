@@ -5,6 +5,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -31,10 +33,16 @@ import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
 import           Control.Concurrent.MVar
+import           Control.Error.Util
 import           Control.Exception
 import qualified Control.Exception.Lifted as Exc
+import           Control.Lens ((??))
 import           Control.Monad
+import           Control.Monad.Instances
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Either
+import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Resource
 import           Control.Retry
 import           Data.Aeson as A
@@ -48,6 +56,7 @@ import           Data.Conduit
 import           Data.Conduit.Binary
 import qualified Data.Conduit.List as CList
 import           Data.Default
+import           Data.Function (fix)
 import           Data.Foldable (for_)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as M
@@ -59,6 +68,7 @@ import           Data.Tagged
 import           Data.Text as T hiding (foldr)
 import qualified Data.Text.Encoding as E
 import           Data.Time.Clock
+import           Data.Traversable (for)
 import           Filesystem
 import           Filesystem.Path.CurrentOS hiding (encode, decode)
 import           Foreign.C.String
@@ -78,10 +88,7 @@ import           Git.Libgit2.Types
 import           Network.HTTP.Conduit hiding (Response)
 import           Prelude hiding (FilePath, mapM_, catch)
 import           System.IO.Unsafe
-
-debug :: MonadIO m => String -> m ()
-debug = liftIO . putStrLn
-
+
 data ObjectLength = ObjectLength { getObjectLength :: Int64 }
                   deriving (Eq, Show, Generic)
 data ObjectType   = ObjectType { getObjectType :: Int }
@@ -90,18 +97,6 @@ data ObjectStatus = ObjectLoose
                   | ObjectLooseMetaKnown ObjectLength ObjectType
                   | ObjectInPack Text
                   deriving (Eq, Show, Generic)
-
-toType :: ObjectType -> C'git_otype
-toType (ObjectType t) = fromIntegral t
-
-toLength :: ObjectLength -> CSize
-toLength (ObjectLength l) = fromIntegral l
-
-fromType :: C'git_otype -> ObjectType
-fromType = ObjectType . fromIntegral
-
-fromLength :: CSize -> ObjectLength
-fromLength = ObjectLength . fromIntegral
 
 instance A.ToJSON ObjectLength; instance A.FromJSON ObjectLength
 instance A.ToJSON ObjectType;   instance A.FromJSON ObjectType
@@ -160,6 +155,112 @@ data BackendCallbacks = BackendCallbacks
       -- on behalf of this backend should be released.
     }
 
+instance Default BackendCallbacks where
+    def = BackendCallbacks
+        { registerObject   = \_ _     -> return ()
+        , registerPackFile = \_ _     -> return ()
+        , lookupObject     = \_       -> return Nothing
+        , lookupPackFile   = \_       -> return Nothing
+        , headObject       = \_ _     -> return Nothing
+        , getObject        = \_ _ _   -> return Nothing
+        , putObject        = \_ _ _ _ -> return Nothing
+        , updateRef        = \_ _     -> return ()
+        , resolveRef       = \_       -> return Nothing
+        , acquireLock      = \_       -> return ""
+        , releaseLock      = \_       -> return ()
+        , shuttingDown     = return ()
+        }
+
+data CacheInfo
+    = DoesNotExist
+
+    | LooseRemote
+    | LooseRemoteMetaKnown
+      { objectLength :: ObjectLength
+      , objectType   :: ObjectType
+      }
+    | LooseCached
+      { objectLength :: ObjectLength
+      , objectType   :: ObjectType
+      , objectCached :: UTCTime
+      , objectPath   :: FilePath
+      }
+
+    | PackedRemote Text
+    | PackedCached FilePath FilePath UTCTime
+    | PackedCachedMetaKnown
+      { objectLength    :: ObjectLength
+      , objectType      :: ObjectType
+      , objectCached    :: UTCTime
+        -- Must always be a PackedCached value
+      , objectPackPath  :: FilePath
+      , objectIndexPath :: FilePath
+      }
+    deriving (Eq, Show)
+
+data OdbS3Details = OdbS3Details
+    { httpManager     :: Manager
+    , bucketName      :: Text
+    , objectPrefix    :: Text
+    , configuration   :: Configuration
+    , s3configuration :: S3Configuration NormalQuery
+    , callbacks       :: BackendCallbacks
+      -- In the 'knownObjects' map, if the object is not present, we must query
+      -- via the 'lookupObject' callback above.  If it is present, it can be
+      -- one of the CacheInfo's possible states.
+    , knownObjects    :: MVar (HashMap Text CacheInfo)
+    , tempDirectory   :: FilePath
+    }
+
+data OdbS3Backend = OdbS3Backend
+    { odbS3Parent :: C'git_odb_backend
+    , packWriter  :: Ptr C'git_odb_writepack
+    , details     :: StablePtr OdbS3Details
+    }
+
+instance Storable OdbS3Backend where
+  alignment _ = alignment (undefined :: Ptr C'git_odb_backend)
+  sizeOf _ =
+        sizeOf (undefined :: C'git_odb_backend)
+      + sizeOf (undefined :: Ptr C'git_odb_writepack)
+      + sizeOf (undefined :: StablePtr Manager)
+      + sizeOf (undefined :: StablePtr Text)
+      + sizeOf (undefined :: StablePtr Text)
+      + sizeOf (undefined :: StablePtr Configuration)
+      + sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
+      + sizeOf (undefined :: StablePtr BackendCallbacks)
+
+  peek p = do
+    v0 <- peekByteOff p 0
+    let sizev1 = sizeOf (undefined :: C'git_odb_backend)
+    v1 <- peekByteOff p sizev1
+    let sizev2 = sizev1 + sizeOf (undefined :: Ptr C'git_odb_writepack)
+    v2 <- peekByteOff p sizev2
+    return (OdbS3Backend v0 v1 v2)
+
+  poke p (OdbS3Backend v0 v1 v2) = do
+    pokeByteOff p 0 v0
+    let sizev1 = sizeOf (undefined :: C'git_odb_backend)
+    pokeByteOff p sizev1 v1
+    let sizev2 = sizev1 + sizeOf (undefined :: Ptr C'git_odb_writepack)
+    pokeByteOff p sizev2 v2
+    return ()
+
+debug :: MonadIO m => String -> m ()
+debug = liftIO . putStrLn
+
+toType :: ObjectType -> C'git_otype
+toType (ObjectType t) = fromIntegral t
+
+toLength :: ObjectLength -> CSize
+toLength (ObjectLength l) = fromIntegral l
+
+fromType :: C'git_otype -> ObjectType
+fromType = ObjectType . fromIntegral
+
+fromLength :: CSize -> ObjectLength
+fromLength = ObjectLength . fromIntegral
+
 wrap :: (Show a, MonadIO m, MonadBaseControl IO m)
      => String -> m a -> m a -> m a
 wrap msg f g = Exc.catch
@@ -171,6 +272,29 @@ wrap msg f g = Exc.catch
                liftIO $ print (e :: SomeException)
                g
 
+orElse :: (MonadIO m, MonadBaseControl IO m) => m a -> m a -> m a
+orElse f g = Exc.catch f $ \e -> do
+    liftIO $ putStrLn "A callback operation failed"
+    liftIO $ print (e :: SomeException)
+    g
+
+coidToJSON :: ForeignPtr C'git_oid -> A.Value
+coidToJSON coid = unsafePerformIO $ withForeignPtr coid $
+                      fmap A.toJSON . oidToStr
+
+pokeByteString bytes data_p (fromIntegral . getObjectLength -> len) = do
+    content <- mallocBytes len
+    BU.unsafeUseAsCString bytes $ copyBytes content ?? len
+    poke data_p (castPtr content)
+
+unpackDetails :: Ptr C'git_odb_backend -> Ptr C'git_oid
+              -> IO (OdbS3Details, String, Text)
+unpackDetails be oid = do
+    odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
+    dets   <- deRefStablePtr (details odbS3)
+    oidStr <- oidToStr oid
+    return (dets, oidStr, T.pack oidStr)
+
 wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Text
                    -> Maybe (ObjectLength, ObjectType)
@@ -263,102 +387,7 @@ wrapReleaseLock f name =
 
 wrapShuttingDown :: IO () -> IO ()
 wrapShuttingDown f = wrap "Calling shuttingDown..." f (return ())
-
-instance Default BackendCallbacks where
-    def = BackendCallbacks
-        { registerObject   = \_ _     -> return ()
-        , registerPackFile = \_ _     -> return ()
-        , lookupObject     = \_       -> return Nothing
-        , lookupPackFile   = \_       -> return Nothing
-        , headObject       = \_ _     -> return Nothing
-        , getObject        = \_ _ _   -> return Nothing
-        , putObject        = \_ _ _ _ -> return Nothing
-        , updateRef        = \_ _     -> return ()
-        , resolveRef       = \_       -> return Nothing
-        , acquireLock      = \_       -> return ""
-        , releaseLock      = \_       -> return ()
-        , shuttingDown     = return ()
-        }
-
-data OdbS3Object
-    = DoesNotExist
-
-    | LooseRemote
-    | LooseRemoteMetaKnown
-      { objectLength :: ObjectLength
-      , objectType   :: ObjectType
-      }
-    | LooseCached
-      { objectPath   :: FilePath
-      , objectLength :: ObjectLength
-      , objectType   :: ObjectType
-      , objectCached :: UTCTime
-      }
-
-    | PackedRemote Text
-    | PackedCached FilePath FilePath UTCTime
-    | PackedCachedMetaKnown
-      { objectLength   :: ObjectLength
-      , objectType     :: ObjectType
-        -- Must always be a PackedCached value
-      , objectPackInfo :: OdbS3Object
-      }
-    deriving (Eq, Show)
-
-data OdbS3Details = OdbS3Details
-    { httpManager     :: Manager
-    , bucketName      :: Text
-    , objectPrefix    :: Text
-    , configuration   :: Configuration
-    , s3configuration :: S3Configuration NormalQuery
-    , callbacks       :: BackendCallbacks
-      -- In the 'knownObjects' map, if the object is not present, we must query
-      -- via the 'lookupObject' callback above.  If it is present, it can be
-      -- one of the OdbS3Object's possible states.
-    , knownObjects    :: MVar (HashMap Text OdbS3Object)
-    , tempDirectory   :: FilePath
-    }
-
-data OdbS3Backend = OdbS3Backend
-    { odbS3Parent :: C'git_odb_backend
-    , packWriter  :: Ptr C'git_odb_writepack
-    , details     :: StablePtr OdbS3Details
-    }
-
-instance Storable OdbS3Backend where
-  alignment _ = alignment (undefined :: Ptr C'git_odb_backend)
-  sizeOf _ =
-        sizeOf (undefined :: C'git_odb_backend)
-      + sizeOf (undefined :: Ptr C'git_odb_writepack)
-      + sizeOf (undefined :: StablePtr Manager)
-      + sizeOf (undefined :: StablePtr Text)
-      + sizeOf (undefined :: StablePtr Text)
-      + sizeOf (undefined :: StablePtr Configuration)
-      + sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
-      + sizeOf (undefined :: StablePtr BackendCallbacks)
-
-  peek p = do
-    v0 <- peekByteOff p 0
-    let sizev1 = sizeOf (undefined :: C'git_odb_backend)
-    v1 <- peekByteOff p sizev1
-    let sizev2 = sizev1 + sizeOf (undefined :: Ptr C'git_odb_writepack)
-    v2 <- peekByteOff p sizev2
-    return (OdbS3Backend v0 v1 v2)
-
-  poke p (OdbS3Backend v0 v1 v2) = do
-    pokeByteOff p 0 v0
-    let sizev1 = sizeOf (undefined :: C'git_odb_backend)
-    pokeByteOff p sizev1 v1
-    let sizev2 = sizev1 + sizeOf (undefined :: Ptr C'git_odb_writepack)
-    pokeByteOff p sizev2 v2
-    return ()
-
-orElse :: (MonadIO m, MonadBaseControl IO m) => m a -> m a -> m a
-orElse f g = Exc.catch f $ \e -> do
-    liftIO $ putStrLn "A callback operation failed"
-    liftIO $ print (e :: SomeException)
-    g
-
+
 awsRetry :: Transaction r a
          => Configuration
          -> ServiceConfiguration r NormalQuery
@@ -370,8 +399,10 @@ awsRetry = ((((retrying def (isFailure . responseResult) .) .) .) .) aws
 testFileS3 :: OdbS3Details -> Text -> ResourceT IO Bool
 testFileS3 dets filepath = do
     debug $ "testFileS3: " ++ show filepath
+
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
+
     cbResult <- wrapHeadObject (headObject (callbacks dets))
                     bucket path `orElse` return Nothing
     case cbResult of
@@ -386,8 +417,10 @@ getFileS3 :: OdbS3Details -> Text -> Maybe (Int64,Int64)
           -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFileS3 dets filepath range = do
     debug $ "getFileS3: " ++ show filepath
+
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
+
     cbResult <- wrapGetObject (getObject (callbacks dets))
                     bucket path range `orElse` return Nothing
     case cbResult of
@@ -404,11 +437,12 @@ getFileS3 dets filepath range = do
 putFileS3 :: OdbS3Details -> Text -> Source (ResourceT IO) ByteString
           -> ResourceT IO ()
 putFileS3 dets filepath src = do
-    -- jww (2013-04-24): Reading everything in memory here is not a good idea.
-    lbs <- BL.fromChunks <$> (src $$ CList.consume)
     debug $ "putFileS3: " ++ show filepath
+
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
+    lbs <- BL.fromChunks <$> (src $$ CList.consume)
+
     cbResult <- wrapPutObject (putObject (callbacks dets)) bucket path
                     (ObjectLength (BL.length lbs)) lbs
                     `orElse` return Nothing
@@ -425,11 +459,12 @@ putFileS3 dets filepath src = do
                                   (T.append (objectPrefix dets) filepath)
                             (RequestBodyLBS lbs))
             void $ readResponseIO res
-
+
 type RefMap m =
     M.HashMap Text (Maybe (Git.Reference (LgRepository m) (Commit m)))
 
-instance A.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
+-- jww (2013-04-26): Split these off into a gitlib-aeson library.
+instance A.FromJSON (Reference m) where
     parseJSON j = do
         o <- A.parseJSON j
         case L.lookup "symbolic" (M.toList (o :: A.Object)) of
@@ -442,12 +477,7 @@ instance A.FromJSON (Git.Reference (LgRepository m) (Commit m)) where
       where
         go = return . Oid . unsafePerformIO . strToOid
 
-coidToJSON :: ForeignPtr C'git_oid -> A.Value
-coidToJSON coid =
-    unsafePerformIO $ withForeignPtr coid $ fmap A.toJSON . oidToStr
-
-instance Git.MonadGit m
-         => A.ToJSON (Git.Reference (LgRepository m) (Commit m)) where
+instance Git.MonadGit m => A.ToJSON (Reference m) where
   toJSON (Git.Reference name (Git.RefSymbolic target)) =
       object [ "symbolic" .= name
              , "target"   .= target ]
@@ -517,395 +547,648 @@ mirrorRefsToS3 be = do
         Git.RefSymbolic target     -> (name, Left target)
         Git.RefObj (Git.ByOid oid) -> (name, Right oid)
 
-mapPair :: (a -> b) -> (a,a) -> (b,b)
-mapPair f (x,y) = (f x, f y)
+-- downloadFile :: OdbS3Details -> Text
+--              -> IO (Maybe (ObjectLength, ObjectType, CString))
+-- downloadFile dets path = do
+--     debug $ "downloadFile: " ++ show path
+--     blocks <- runResourceT $ do
+--         result <- getFileS3 dets path Nothing
+--         result $$+- CList.consume
+--     debug $ "downloadFile: downloaded " ++ show path
+--     case blocks of
+--       [] -> return Nothing
+--       bs -> do
+--         let hdrLen = sizeOf (undefined :: Int64) * 2
+--             (len,typ) =
+--                 mapPair fromIntegral
+--                     (Bin.decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
+--         debug $ "downloadFile: length from header is " ++ show len
+--         content <- mallocBytes len
+--         foldM_ (\offset x -> do
+--                      let xOffset  = if offset == 0 then hdrLen else 0
+--                          innerLen = B.length x - xOffset
+--                      BU.unsafeUseAsCString x $ \cstr ->
+--                          copyBytes (content `plusPtr` offset)
+--                              (cstr `plusPtr` xOffset) innerLen
+--                      return (offset + innerLen)) 0 bs
+--         return $ Just (ObjectLength (fromIntegral len),
+--                        ObjectType (fromIntegral typ), content)
+--   where
+--     mapPair f (x,y) = (f x, f y)
 
-indexPackFile :: OdbS3Details -> Text -> FilePath -> ResourceT IO ()
-indexPackFile dets packSha idxPath = do
-    -- Load the pack file, and iterate over the objects within it to determine
-    -- what it contains.  When 'withPackFile' returns, the pack file will be
-    -- closed and any associated resources freed.
-    debug $ "uploadPackAndIndex: " ++ show packSha
-    shas <- liftIO $ lgWithPackFile idxPath $
-        liftIO . observePackObjects dets packSha idxPath True
+-- downloadPack :: OdbS3Details -> Text -> IO (FilePath, FilePath)
+-- downloadPack dets packSha = do
+--     let idxPath  = tempDirectory dets
+--                        </> fromText ("pack-" <> packSha <> ".idx")
+--         packPath = replaceExtension idxPath "pack"
 
-    -- Let whoever is listening know about this pack files and its contained
-    -- objects
-    liftIO $ wrapRegisterPackFile (registerPackFile (callbacks dets))
-        packSha shas `orElse` return ()
+--     exists <- isFile packPath
+--     if exists
+--         then return (packPath, idxPath)
+--         else do
+--             debug $ "downloadPack: " ++ show packSha
+--             result <- downloadFile dets $ pathText (filename packPath)
+--             (packLen,packBytes) <- case result of
+--                 Just (packLen,_,packBytes) -> return (packLen,packBytes)
+--                 Nothing -> throwIO (Git.BackendError $
+--                                     "Failed to download pack " <> packSha)
 
-uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
-                   -> ResourceT IO ()
-uploadPackAndIndex dets packPath idxPath packSha = do
-    indexPackFile dets packSha idxPath
-    uploadFile dets packPath
-    uploadFile dets idxPath
+--             result' <- downloadFile dets $ pathText (filename idxPath)
+--             (idxLen,idxBytes) <- case result' of
+--                 Just (idxLen,_,idxBytes) -> return (idxLen,idxBytes)
+--                 Nothing -> throwIO (Git.BackendError $
+--                                     "Failed to download index " <> packSha)
 
-uploadFile :: OdbS3Details -> FilePath -> ResourceT IO ()
-uploadFile dets path = do
-    lbs <- liftIO $ BL.readFile (pathStr path)
-    let hdr = Bin.encode ((fromIntegral (BL.length lbs),
-                           fromIntegral 0) :: (Int64,Int64))
-        payload = BL.append hdr lbs
-    putFileS3 dets (pathText (filename path)) (sourceLbs payload)
+--             packBS <- curry BU.unsafePackCStringLen packBytes
+--                           (fromIntegral (getObjectLength packLen))
+--             idxBS  <- curry BU.unsafePackCStringLen idxBytes
+--                           (fromIntegral (getObjectLength idxLen))
+--             writePackToCache dets packSha packBS idxBS
 
-downloadFile :: OdbS3Details -> Text
-             -> IO (Maybe (ObjectLength, ObjectType, CString))
-downloadFile dets path = do
-    debug $ "downloadFile: " ++ show path
-    blocks <- runResourceT $ do
-        result <- getFileS3 dets path Nothing
-        result $$+- CList.consume
-    debug $ "downloadFile: downloaded " ++ show path
-    case blocks of
-      [] -> return Nothing
-      bs -> do
-        let hdrLen = sizeOf (undefined :: Int64) * 2
-            (len,typ) =
-                mapPair fromIntegral
-                    (Bin.decode (BL.fromChunks [L.head bs]) :: (Int64,Int64))
-        debug $ "downloadFile: length from header is " ++ show len
-        content <- mallocBytes len
-        foldM_ (\offset x -> do
-                     let xOffset  = if offset == 0 then hdrLen else 0
-                         innerLen = B.length x - xOffset
-                     BU.unsafeUseAsCString x $ \cstr ->
-                         copyBytes (content `plusPtr` offset)
-                             (cstr `plusPtr` xOffset) innerLen
-                     return (offset + innerLen)) 0 bs
-        return $ Just (ObjectLength (fromIntegral len),
-                       ObjectType (fromIntegral typ), content)
+-- downloadObject dets sha location = do
+--     result <- downloadFile dets sha
+--     case result of
+--         Just (len,typ,bytes) -> do
+--             poke len_p (toLength len)
+--             poke type_p (toType typ)
+--             poke data_p (castPtr bytes)
+--             bs <- curry BU.unsafePackCStringLen bytes
+--                       (fromIntegral (getObjectLength len))
+--             when (isNothing location) $
+--                 wrapRegisterObject (registerObject (callbacks dets))
+--                     sha (Just (len, typ)) `orElse` return ()
+--             writeObjectToCache dets sha len typ bs
+--             return 0
+--         Nothing -> throwIO (Git.BackendError $
+--                             "Failed to download object " <> sha)
 
-downloadPack :: OdbS3Details -> Text -> IO (FilePath, FilePath)
-downloadPack dets packSha = do
-    let idxPath  = tempDirectory dets
-                       </> fromText ("pack-" <> packSha <> ".idx")
-        packPath = replaceExtension idxPath "pack"
+-- downloadObjectHeader dets sha location = do
+--     result <- go dets sha
+--     case result of
+--         Just (len,typ) -> do
+--             poke len_p (toLength len)
+--             poke type_p (toType typ)
+--             when (isNothing location) $
+--                 wrapRegisterObject (registerObject (callbacks dets))
+--                     sha (Just (len, typ)) `orElse` return ()
+--             writeObjMetaDataToCache dets sha len typ
+--             return 0
+--         Nothing -> return c'GIT_ENOTFOUND
+--   where
+--     go dets sha = do
+--         bytes <- runResourceT $ do
+--             let hdrLen = sizeOf (undefined :: Int64) * 2
+--             result <- getFileS3 dets sha (Just (0,fromIntegral (hdrLen - 1)))
+--             result $$+- await
+--         return $ case bytes of
+--             Nothing -> Nothing
+--             Just bs ->
+--                 bimap ObjectLength (ObjectType . fromIntegral)
+--                     <$> (Bin.decode (BL.fromChunks [bs]) :: Maybe (Int64,Int64))
+
+-- uploadPackAndIndex :: OdbS3Details -> FilePath -> FilePath -> Text
+--                    -> ResourceT IO ()
+-- uploadPackAndIndex dets packPath idxPath packSha = do
+--     catalogPackFile dets packSha idxPath
+--     uploadFile dets packPath
+--     uploadFile dets idxPath
 
-    exists <- isFile packPath
+-- uploadFile :: OdbS3Details -> FilePath -> ResourceT IO ()
+-- uploadFile dets path = do
+--     lbs <- liftIO $ BL.readFile (pathStr path)
+--     let hdr = Bin.encode ((fromIntegral (BL.length lbs),
+--                            fromIntegral 0) :: (Int64,Int64))
+--         payload = BL.append hdr lbs
+--     putFileS3 dets (pathText (filename path)) (sourceLbs payload)
+
+-- loadFromRemote :: OdbS3Details
+--                -> Text
+--                -> (FilePath -> FilePath -> IO a)
+--                -> (Maybe ObjectStatus -> IO a)
+--                -> IO a
+-- loadFromRemote dets sha loader action = do
+--     location <- wrapLookupObject (lookupObject (callbacks dets)) sha
+--                     `orElse` return Nothing
+--     case location of
+--         Just (ObjectInPack packBase) -> do
+--             (packPath, idxPath) <- downloadPack dets packBase
+--             loader packPath idxPath
+--         _ -> action location
+
+-- loadFromPack :: OdbS3Details
+--              -> (Bool -> IO CInt)
+--              -> Bool
+--              -> Text
+--              -> FilePath
+--              -> FilePath
+--              -> Ptr CSize
+--              -> Ptr C'git_otype
+--              -> Maybe (Ptr (Ptr ()))
+--              -> IO CInt
+-- loadFromPack dets restart seen sha pack idx len typ mdata = do
+--     result <- attempts
+--     case result of
+--         Left r  -> return r
+--         Right e -> throwIO (e :: Git.GitException)
+--   where
+--     attempts = runEitherT $ do
+--         htry $ getObjectFromPack dets pack idx sha (isNothing mdata)
+--         htry $ translateResult =<< downloadFile dets sha
+
+--         htry $  mapM catalogPackFile
+--             =<< mapM downloadIndex
+--             =<< findAllIndices dets sha)
+
+--         -- Try the original operation again, now that the lookup tables in the
+--         -- database have been primed with the contents of the bucket.
+--         -- However, by passing True to restart we prevent this code from
+--         -- running the second time.
+--         left =<< liftIO (restart True)
+
+--     htry action = handleData =<< liftIO (try action)
+
+--     handleData mresult = case mresult of
+--         Left e -> right e
+--         Right (Just (l,t,b)) -> do
+--             liftIO $ do
+--                 for mdata $ pokeByteString b ?? l
+--                 poke len (toLength l)
+--                 poke typ (toType t)
+--             left 0
+--         _ -> right (Git.BackendError "Could not find object in loadFromPack")
+
+--     translateResult x = case x of
+--         Just (x,y,b) ->
+--             Just <$> ((,,) <$> pure x
+--                            <*> pure y
+--                            <*> getData b x)
+--         _ -> return Nothing
+
+--     getData b l = case mdata of
+--         Just _ -> B.packCStringLen (b, fromIntegral (getObjectLength l))
+--         _      -> return B.empty
+
+-- cacheObject dets sha = do
+--         objs <- readMVar (knownObjects dets)
+--         let deb = M.lookup sha objs
+--         debug $ "odbS3BackendReadCallback lookup: " ++ show deb
+--         case M.lookup sha objs of
+--             Just DoesNotExist -> return c'GIT_ENOTFOUND
+
+--             Just (LooseCached path len typ _) -> do
+--                 bytes <- B.readFile (pathStr path)
+--                 pokeByteString bytes data_p len
+--                 poke len_p (toLength len)
+--                 poke type_p (toType typ)
+--                 return 0
+
+--             Just (PackedRemote base) -> do
+--                 (packPath, idxPath) <- downloadPack dets base
+--                 doLoad dets restart seen sha packPath idxPath
+
+--             Just (PackedCached pack idx _) ->
+--                 doLoad dets restart seen sha pack idx
+--             Just (PackedCachedMetaKnown _ _ (PackedCached pack idx _)) ->
+--                 doLoad dets restart seen sha pack idx
+
+--             _ -> loadFromRemote dets sha
+--                      (doLoad dets restart seen sha)
+--                      (downloadObject dets sha)
+
+--     doLoad = loadFromPack len_p type_p (Just data_p)
+
+-- cacheObjectContents = do
+--         let hdr = Bin.encode ((fromIntegral len,
+--                                fromIntegral obj_type) :: (Int64,Int64))
+--         bytes <- curry BU.unsafePackCStringLen
+--                       (castPtr obj_data) (fromIntegral len)
+--         let payload = BL.append hdr (BL.fromChunks [bytes])
+
+--         runResourceT $ putFileS3 dets sha (sourceLbs payload)
+
+--         wrapRegisterObject (registerObject (callbacks dets))
+--             sha (Just (fromLength len, fromType obj_type))
+--                 `orElse` return ()
+
+--         -- Write a copy to the local cache
+--         writeObjectToCache dets sha (fromLength len)
+--             (fromType obj_type) bytes
+
+-- cacheObjectMetadata = do
+--         objs <- readMVar (knownObjects dets)
+--         let deb = M.lookup sha objs
+--         debug $ "odbS3BackendReadHeaderCallback lookup: " ++ show deb
+--         case M.lookup sha objs of
+--             Just DoesNotExist -> return c'GIT_ENOTFOUND
+
+--             Just (LooseCached _ len typ _) -> do
+--                 poke len_p (toLength len)
+--                 poke type_p (toType typ)
+--                 return 0
+--             Just (LooseRemoteMetaKnown len typ) -> do
+--                 poke len_p (toLength len)
+--                 poke type_p (toType typ)
+--                 return 0
+
+--             Just (PackedCached pack idx _) ->
+--                 doLoad dets restart seen sha pack idx
+--             Just (PackedCachedMetaKnown len typ _) -> do
+--                 poke len_p (toLength len)
+--                 poke type_p (toType typ)
+--                 return 0
+--             Just (PackedRemote base) -> do
+--                 (packPath, idxPath) <- downloadPack dets base
+--                 doLoad dets restart seen sha packPath idxPath
+
+--             _ -> loadFromRemote dets sha
+--                      (doLoad dets restart seen sha)
+--                      (downloadHeader dets sha)
+
+--     doLoad dets restart seen sha packPath idxPath =
+--         loadFromPack dets restart seen sha packPath idxPath
+--             len_p type_p Nothing
+
+-- writeObjMetaDataToCache :: OdbS3Details -> Text -> ObjectLength -> ObjectType
+--                         -> IO ()
+-- writeObjMetaDataToCache dets sha len typ = do
+--     debug $ "writeObjMetaDataToCache " ++ show sha
+--     modifyMVar_ (knownObjects dets) $
+--         return . M.insert sha (LooseRemoteMetaKnown len typ)
+
+-- cachePackFile dets bytes = do
+--         let dir = tempDirectory dets
+
+--         debug $ "odbS3WritePackAddCallback: building index for "
+--             ++ show (B.length bs) ++ " bytes"
+--         (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
+
+--         -- Upload the actual files to S3 if it's not already then, and then
+--         -- register the objects within the pack in the global index.
+--         packExists <- liftIO $ wrapLookupPackFile
+--                           (lookupPackFile (callbacks dets))
+--                           packSha `orElse` return Nothing
+--         case packExists of
+--             Just True -> return ()
+--             _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
+--         return 0
+
+-- observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
+--                    -> IO [Text]
+-- observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
+--     debug $ "observePackObjects for " ++ show packSha
+
+--     -- Iterate the "database", which gives us a list of all the oids contained
+--     -- within it
+--     mshas <- newMVar []
+--     r <- flip (lgForEachObject odbPtr) nullPtr $ \oid _ -> do
+--         modifyMVar_ mshas $ \shas ->
+--             (:) <$> oidToSha oid <*> pure shas
+--         return 0
+--     checkResult r "lgForEachObject failed"
+
+--     -- Update the known objects map with the fact that we've got a local cache
+--     -- of the pack file.
+--     debug $ "observePackObjects: update known objects map"
+--     now  <- getCurrentTime
+--     shas <- readMVar mshas
+--     let obj = PackedCached (replaceExtension idxFile "pack") idxFile now
+--     modifyMVar_ (knownObjects dets) $ \objs ->
+--         return $ foldr (`M.insert` obj) objs shas
+
+--     debug $ "observePackObjects: pack file has been observed"
+--     return shas
+
+-- catalogPackFile :: OdbS3Details -> Text -> FilePath -> ResourceT IO ()
+-- catalogPackFile dets packSha idxPath = do
+--     -- Load the pack file, and iterate over the objects within it to determine
+--     -- what it contains.  When 'withPackFile' returns, the pack file will be
+--     -- closed and any associated resources freed.
+--     debug $ "uploadPackAndIndex: " ++ show packSha
+--     shas <- liftIO $ lgWithPackFile idxPath $
+--         liftIO . observePackObjects dets packSha idxPath True
+
+--     -- Let whoever is listening know about this pack files and its contained
+--     -- objects
+--     liftIO $ wrapRegisterPackFile (registerPackFile (callbacks dets))
+--         packSha shas `orElse` return ()
+
+-- writeObjectToCache :: OdbS3Details
+--                    -> Text -> ObjectLength -> ObjectType -> ByteString -> IO ()
+-- writeObjectToCache dets sha len typ bytes = do
+--     debug $ "writeObjectToCache: " ++ show sha
+--     let path = tempDirectory dets </> fromText sha
+--     B.writeFile (pathStr path) bytes
+--     now <- getCurrentTime
+--     modifyMVar_ (knownObjects dets) $
+--         return . M.insert sha (LooseCached path len typ now)
+
+-- writePackToCache :: OdbS3Details -> Text -> ByteString -> ByteString
+--                  -> IO (FilePath, FilePath)
+-- writePackToCache dets sha packBytes idxBytes = do
+--     debug $ "writePackToCache: " ++ show sha
+--     let idxPath  = tempDirectory dets </> fromText ("pack-" <> sha <> ".idx")
+--         packPath = replaceExtension idxPath "pack"
+--     debug $ "writeFile: " ++ show packPath
+--     B.writeFile (pathStr packPath) packBytes
+--     debug $ "writeFile: " ++ show idxPath
+--     B.writeFile (pathStr idxPath) idxBytes
+--     void $ lgWithPackFile idxPath $
+--         liftIO . observePackObjects dets sha idxPath False
+--     return (packPath, idxPath)
+
+-- getObjectFromPack :: OdbS3Details -> FilePath -> FilePath -> Text -> Bool
+--                   -> IO (Maybe (ObjectLength, ObjectType, ByteString))
+-- getObjectFromPack dets packPath idxPath sha metadataOnly = do
+--     liftIO $ debug $ "getObjectFromPack "
+--         ++ show packPath ++ " " ++ show sha
+--     mresult <- lgReadFromPack idxPath sha metadataOnly
+--     case (\(typ, len, bytes) -> (fromLength len, fromType typ, bytes))
+--              <$> mresult of
+--         x@(Just (len, typ, bytes))
+--             | B.null bytes -> liftIO $ do
+--                 now <- getCurrentTime
+--                 let obj = PackedCachedMetaKnown len typ
+--                               (PackedCached packPath idxPath now)
+--                 modifyMVar_ (knownObjects dets) $ return . M.insert sha obj
+--                 return x
+--             | otherwise -> do
+--                 liftIO $ writeObjectToCache dets sha len typ bytes
+--                 return x
+--         x -> return x
+
+-- All of these caching function follow the same general outline:
+--
+--  1. Check whether the local cache can answer the request.
+--
+--  2. If the local cache does not know, ask the callback interface, which is
+--     usually much cheaper than querying Amazon S3.
+--
+--  3. If the callback interface does not know, ask Amazon directly if the
+--     object exists.
+--
+--  4. If Amazon does not know about that object per se, catalog the S3 bucket
+--     and re-index its contents.  This operation is slow, but is preferable
+--     to a failure.
+--
+--  5. If the object legitimately does not exist, register this fact in the
+--     cache and with the callback interface.  This is to avoid recataloging
+--     in the future.
+
+cacheRecordInfo :: OdbS3Details -> Text -> CacheInfo -> IO ()
+cacheRecordInfo dets sha info = do
+    debug $ "cacheRecordInfo " ++ show sha
+    modifyMVar_ (knownObjects dets) $ return . M.insert sha info
+
+cacheStoreObject :: OdbS3Details
+                 -> Text
+                 -> Maybe (ObjectLength,ObjectType,ByteString)
+                 -> IO ()
+cacheStoreObject dets sha minfo = do
+    debug $ "cacheStoreObject " ++ show sha ++ " " ++ show minfo
+    cacheRecordInfo dets sha
+        =<< case minfo of
+            Nothing -> return LooseRemote
+            Just (len,typ,bytes)
+                | B.null bytes -> return $ LooseRemoteMetaKnown len typ
+                | otherwise    -> do
+                    let path = tempDirectory dets </> fromText sha
+                    B.writeFile (pathStr path) bytes
+                    now <- getCurrentTime
+                    return (LooseCached len typ now path)
+
+cacheObjectInfo :: OdbS3Details -> Text -> IO (Maybe CacheInfo)
+cacheObjectInfo dets sha = do
+    objs <- readMVar (knownObjects dets)
+    return $ M.lookup sha objs
+
+cacheLoadObject :: OdbS3Details -> Text -> Bool
+                -> IO (Maybe (ObjectLength,ObjectType,ByteString))
+cacheLoadObject dets sha metadataOnly = do
+    minfo <- cacheObjectInfo dets sha
+    case minfo of
+        Nothing -> return Nothing
+        Just DoesNotExist -> return Nothing
+        Just LooseRemote -> remoteLoadObject dets sha
+        Just (LooseRemoteMetaKnown len typ) ->
+            if metadataOnly
+            then return $ Just (len, typ, B.empty)
+            else remoteLoadObject dets sha
+        Just (LooseCached len typ _ path) ->
+            if metadataOnly
+            then return $ Just (len, typ, B.empty)
+            else Just <$> ((,,) <$> pure len
+                                <*> pure typ
+                                <*> B.readFile (pathStr path))
+        Just (PackedRemote packSha) -> do
+            (pathPath,idxPath) <- remoteReadPackFile dets sha
+            indexPackFile idxPath
+            packLoadObject dets sha pathPath idxPath
+        Just (PackedCached packPath idxPath _) ->
+            packLoadObject dets sha packPath idxPath
+        Just (PackedCachedMetaKnown len typ _ packPath idxPath) ->
+            if metadataOnly
+            then return $ Just (len, typ, B.empty)
+            else packLoadObject dets sha packPath idxPath
+
+remoteReadFile :: OdbS3Details -> Text -> IO FilePath
+remoteReadFile dets path = undefined
+
+remoteReadPackFile :: OdbS3Details -> Text -> IO (FilePath, FilePath)
+remoteReadPackFile dets packSha = do
+    let packPath = "pack-" <> packSha <> ".pack"
+        idxPath  = "pack-" <> packSha <> ".idx"
+    (,) <$> remoteReadFile dets packPath
+        <*> remoteReadFile dets idxPath
+
+indexPackFile = undefined
+
+packLoadObject = undefined
+
+callbackRecordInfo :: OdbS3Details -> Text -> CacheInfo -> IO ()
+callbackRecordInfo dets sha info = undefined
+    cacheStoreObject dets sha info Nothing
+
+callbackObjectInfo :: OdbS3Details -> Text -> IO (Maybe CacheInfo)
+callbackObjectInfo dets sha = do
+    location <- wrapLookupObject (lookupObject (callbacks dets))
+                    sha `orElse` return Nothing
+    debug $ "callbackObjectInfo lookup: " ++ show location
+    return $ case location of
+        Just (ObjectInPack base) -> Just (PackedRemote base)
+        Just ObjectLoose         -> Just LooseRemote
+        _                        -> Nothing
+
+remoteStoreObject :: OdbS3Details
+                  -> Text
+                  -> (ObjectLength,ObjectType,ByteString)
+                  -> IO ()
+remoteStoreObject dets sha info = undefined
+
+remoteObjectInfo :: OdbS3Details -> Text -> IO (Maybe CacheInfo)
+remoteObjectInfo dets sha = do
+    exists <- wrap "remoteObjectInfo failed"
+                  (runResourceT $ testFileS3 dets sha)
+                  (return False)
+    debug $ "remoteObjectinfo lookup: " ++ show exists
     if exists
-        then return (packPath, idxPath)
-        else do
-            debug $ "downloadPack: " ++ show packSha
-            result <- downloadFile dets $ pathText (filename packPath)
-            (packLen,packBytes) <- case result of
-                Just (packLen,_,packBytes) -> return (packLen,packBytes)
-                Nothing -> throwIO (Git.BackendError $
-                                    "Failed to download pack " <> packSha)
+        then do
+            wrapRegisterObject (registerObject (callbacks dets))
+                sha Nothing `orElse` return ()
+            return (Just LooseRemote)
+        else return (Just DoesNotExist)
 
-            result' <- downloadFile dets $ pathText (filename idxPath)
-            (idxLen,idxBytes) <- case result' of
-                Just (idxLen,_,idxBytes) -> return (idxLen,idxBytes)
-                Nothing -> throwIO (Git.BackendError $
-                                    "Failed to download index " <> packSha)
+remoteLoadObject :: OdbS3Details -> Text
+                -> IO (Maybe (ObjectLength,ObjectType,ByteString))
+remoteLoadObject dets sha = undefined
 
-            packBS <- curry BU.unsafePackCStringLen packBytes
-                          (fromIntegral (getObjectLength packLen))
-            idxBS  <- curry BU.unsafePackCStringLen idxBytes
-                          (fromIntegral (getObjectLength idxLen))
-            writePackToCache dets packSha packBS idxBS
+remoteCatalogContents :: OdbS3Details -> IO ()
+remoteCatalogContents dets = undefined
 
-writeObjectToCache :: OdbS3Details
-                   -> Text -> ObjectLength -> ObjectType -> ByteString -> IO ()
-writeObjectToCache dets sha len typ bytes = do
-    debug $ "writeObjectToCache: " ++ show sha
-    let path = tempDirectory dets </> fromText sha
-    B.writeFile (pathStr path) bytes
-    now <- getCurrentTime
-    modifyMVar_ (knownObjects dets) $
-        return . M.insert sha (LooseCached path len typ now)
+type HardlyT m a = EitherT a m ()
 
-writePackToCache :: OdbS3Details -> Text -> ByteString -> ByteString
-                 -> IO (FilePath, FilePath)
-writePackToCache dets sha packBytes idxBytes = do
-    debug $ "writePackToCache: " ++ show sha
-    let idxPath  = tempDirectory dets </> fromText ("pack-" <> sha <> ".idx")
-        packPath = replaceExtension idxPath "pack"
-    debug $ "writeFile: " ++ show packPath
-    B.writeFile (pathStr packPath) packBytes
-    debug $ "writeFile: " ++ show idxPath
-    B.writeFile (pathStr idxPath) idxBytes
-    void $ lgWithPackFile idxPath $
-        liftIO . observePackObjects dets sha idxPath False
-    return (packPath, idxPath)
+found :: Monad m => a -> HardlyT m a
+found = left
 
-getObjectFromPack :: OdbS3Details -> FilePath -> FilePath -> Text -> Bool
-                  -> IO (Maybe (ObjectLength, ObjectType, ByteString))
-getObjectFromPack dets packPath idxPath sha metadataOnly = do
-    liftIO $ debug $ "getObjectFromPack "
-        ++ show packPath ++ " " ++ show sha
-    mresult <- lgReadFromPack idxPath sha metadataOnly
-    case (\(typ, len, bytes) -> (fromLength len, fromType typ, bytes))
-             <$> mresult of
-        x@(Just (len, typ, bytes))
-            | B.null bytes -> liftIO $ do
-                now <- getCurrentTime
-                let obj = PackedCachedMetaKnown len typ
-                              (PackedCached packPath idxPath now)
-                modifyMVar_ (knownObjects dets) $ return . M.insert sha obj
-                return x
-            | otherwise -> do
-                liftIO $ writeObjectToCache dets sha len typ bytes
-                return x
-        x -> return x
+continue :: Monad m => HardlyT m a
+continue = right ()
 
-unpackDetails :: Ptr C'git_odb_backend -> Ptr C'git_oid
-              -> IO (OdbS3Details, String, Text)
-unpackDetails be oid = do
-    odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
-    dets   <- deRefStablePtr (details odbS3)
-    oidStr <- oidToStr oid
-    return (dets, oidStr, T.pack oidStr)
+hardlyT :: Monad m => a -> HardlyT m a -> m a
+hardlyT = eitherT return . const . return
 
-loadFromRemote :: OdbS3Details
-               -> Text
-               -> (OdbS3Details -> FilePath -> FilePath -> Text -> IO a)
-               -> (Maybe ObjectStatus -> IO a)
-               -> IO a
-loadFromRemote dets sha loader action = do
-    location <- wrapLookupObject (lookupObject (callbacks dets)) sha
-                    `orElse` return Nothing
-    case location of
-        Just (ObjectInPack packBase) -> do
-            (packPath, idxPath) <- downloadPack dets packBase
-            loader dets packPath idxPath sha
-        _ -> action location
+accessObject :: (OdbS3Details -> Text -> CacheInfo -> a
+                 -> HardlyT IO b)
+             -> a
+             -> b
+             -> OdbS3Details
+             -> Text
+             -> IO b
+accessObject f arg dflt dets sha = hardlyT dflt $ do
+    minfo <- lift $ cacheObjectInfo dets sha
+    for minfo go
 
-odbS3BackendReadCallback :: F'git_odb_backend_read_callback
-odbS3BackendReadCallback data_p len_p type_p be oid = do
-    str <- oidToStr oid
-    wrap ("odbS3BackendReadCallback " ++ str) go (return (-1))
+    minfo <- lift $ callbackObjectInfo dets sha
+    for minfo $ \info -> do
+        lift $ cacheRecordInfo dets sha info
+        go info
+
+    minfo <- lift $ remoteObjectInfo dets sha
+    for minfo $ \info -> do
+        lift $ cacheRecordInfo dets sha info
+        lift $ callbackRecordInfo dets sha info
+        go info
+
+    lift $ remoteCatalogContents dets
+
+    minfo <- lift $ do cacheObjectInfo dets sha
+    for minfo $ \info -> do
+        lift $ callbackRecordInfo dets sha info
+        go info
+
+    left dflt
   where
-    go = do
-        (dets, oidStr, sha) <- unpackDetails be oid
-        objs <- readMVar (knownObjects dets)
-        let deb = M.lookup sha objs
-        debug $ "odbS3BackendReadCallback lookup: " ++ show deb
-        case M.lookup sha objs of
-            Just DoesNotExist -> return c'GIT_ENOTFOUND
+    go = f dets sha ?? arg
+
+objectExists :: OdbS3Details -> Text -> IO Bool
+objectExists = accessObject
+                   (\_ _ info _ -> left (info /= DoesNotExist))
+                   () False
 
-            Just (LooseCached path len typ _) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                bytes <- B.readFile (pathStr path)
-                pokeByteString bytes len
-                return 0
+readObject :: OdbS3Details -> Text -> Bool
+           -> IO (ObjectLength, ObjectType, ByteString)
+readObject dets sha metadataOnly = undefined
 
-            Just (PackedRemote base) -> do
-                (packPath, idxPath) <- downloadPack dets base
-                loadFromPack dets packPath idxPath sha
+readObjectMetadata :: OdbS3Details -> Text
+                   -> IO (ObjectLength, ObjectType)
+readObjectMetadata dets sha = (\(x,y,_) -> (x,y)) <$> readObject dets sha True
 
-            Just (PackedCached pack idx _) ->
-                loadFromPack dets pack idx sha
-            Just (PackedCachedMetaKnown _ _ (PackedCached pack idx _)) ->
-                loadFromPack dets pack idx sha
+writeObject :: OdbS3Details
+            -> Text
+            -> Maybe (ObjectLength, ObjectType, ByteString)
+            -> IO ()
+writeObject dets sha info = undefined
 
-            _ -> loadFromRemote dets sha loadFromPack $
-                    downloadLoose dets sha
-
-    loadFromPack dets pack idx sha = do
-        result <- getObjectFromPack dets pack idx sha False
-        case result of
-            Just (len,typ,bytes) -> do
-                pokeByteString bytes len
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                return 0
-            Nothing -> do
-                -- jww (2013-04-25): If we reach this point, first check
-                -- whether it's actually a loose object. If not, list the
-                -- bucket and see if there are unregistered pack files in
-                -- which it might live.  This would close Bug #965.  The same
-                -- must be done for ReadPrefix and ReadHeader, so factor this
-                -- code out into a common function.
-                throwIO (Git.BackendError
-                         "Could not find object in pack file")
-
-    pokeByteString bytes (fromIntegral . getObjectLength -> len) = do
-        content <- mallocBytes len
-        BU.unsafeUseAsCString bytes $ flip (copyBytes content) len
-        poke data_p (castPtr content)
-
-    downloadLoose dets sha location = do
-        result <- downloadFile dets sha
-        case result of
-            Just (len,typ,bytes) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                poke data_p (castPtr bytes)
-                bs <- curry BU.unsafePackCStringLen bytes
-                          (fromIntegral (getObjectLength len))
-                when (isNothing location) $
-                    wrapRegisterObject (registerObject (callbacks dets))
-                        sha (Just (len, typ)) `orElse` return ()
-                writeObjectToCache dets sha len typ bs
-                return 0
-            Nothing -> throwIO (Git.BackendError $
-                                "Failed to download object " <> sha)
-
-odbS3BackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
-odbS3BackendReadPrefixCallback out_oid oid_p len_p type_p be oid len =
-    -- jww (2013-04-22): Not yet implemented.
-    wrap "odbS3BackendReadPrefixCallback" (return (-1)) (return (-1))
-
-odbS3BackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
-odbS3BackendReadHeaderCallback len_p type_p be oid = do
-    str <- oidToStr oid
-    wrap ("odbS3BackendReadHeaderCallback " ++ str) go (return (-1))
+writePackFile :: OdbS3Details -> ByteString -> IO ()
+writePackFile dets bytes = undefined
+
+readCallback :: F'git_odb_backend_read_callback
+readCallback data_p len_p type_p be oid = do
+    (dets, _, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.readCallback " <> sha)
+        (go dets sha >> return 0)
+        (return (-1))
   where
-    go = do
-        (dets, oidStr, sha) <- unpackDetails be oid
-        objs <- readMVar (knownObjects dets)
-        let deb = M.lookup sha objs
-        debug $ "odbS3BackendReadHeaderCallback lookup: " ++ show deb
-        case M.lookup sha objs of
-            Just DoesNotExist -> return c'GIT_ENOTFOUND
+    go dets sha = do
+        (len,typ,bytes) <- readObject dets sha False
+        pokeByteString bytes data_p len
+        poke len_p (toLength len)
+        poke type_p (toType typ)
 
-            Just (LooseCached _ len typ _) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                return 0
-            Just (LooseRemoteMetaKnown len typ) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                return 0
+readPrefixCallback :: F'git_odb_backend_read_prefix_callback
+readPrefixCallback out_oid oid_p len_p type_p be oid len =
+    wrap "S3.readPrefixCallback"
+        -- jww (2013-04-22): Not yet implemented.
+        (throwIO (Git.BackendError
+                  "S3.readPrefixCallback not has not been implemented"))
+        (return (-1))
 
-            Just (PackedCached pack idx _) ->
-                loadFromPack dets pack idx sha
-            Just (PackedCachedMetaKnown len typ _) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                return 0
-            Just (PackedRemote base) -> do
-                (packPath, idxPath) <- downloadPack dets base
-                loadFromPack dets packPath idxPath sha
+readHeaderCallback :: F'git_odb_backend_read_header_callback
+readHeaderCallback len_p type_p be oid = do
+    (dets, _, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.readHeaderCallback " <> sha)
+        (go dets sha >> return 0)
+        (return (-1))
+  where
+    go dets sha = do
+        (len,typ) <- readObjectMetadata dets sha
+        poke len_p (toLength len)
+        poke type_p (toType typ)
 
-            _ -> loadFromRemote dets sha loadFromPack $
-                    downloadHeader dets sha
-
-    loadFromPack dets pack idx sha = do
-        result <- getObjectFromPack dets pack idx sha True
-        case result of
-            Just (len,typ,_) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                return 0
-            Nothing -> throwIO (Git.BackendError
-                                "Could not find object in pack file")
-
-    downloadHeader dets sha location = do
-        result <- doDownloadHeader dets sha
-        case result of
-            Just (len,typ) -> do
-                poke len_p (toLength len)
-                poke type_p (toType typ)
-                when (isNothing location) $
-                    wrapRegisterObject (registerObject (callbacks dets))
-                        sha (Just (len, typ)) `orElse` return ()
-                writeObjMetaDataToCache dets sha len typ
-                return 0
-            Nothing -> return c'GIT_ENOTFOUND
-
-    doDownloadHeader dets sha = do
-        bytes <- runResourceT $ do
-            let hdrLen = sizeOf (undefined :: Int64) * 2
-            result <- getFileS3 dets sha (Just (0,fromIntegral (hdrLen - 1)))
-            result $$+- await
-        return $ case bytes of
-            Nothing -> Nothing
-            Just bs ->
-                bimap ObjectLength (ObjectType . fromIntegral)
-                    <$> (Bin.decode (BL.fromChunks [bs]) :: Maybe (Int64,Int64))
-
-writeObjMetaDataToCache :: OdbS3Details -> Text -> ObjectLength -> ObjectType
-                        -> IO ()
-writeObjMetaDataToCache dets sha len typ = do
-    debug $ "writeObjMetaDataToCache " ++ show sha
-    modifyMVar_ (knownObjects dets) $
-        return . M.insert sha (LooseRemoteMetaKnown len typ)
-
-odbS3BackendWriteCallback :: F'git_odb_backend_write_callback
-odbS3BackendWriteCallback oid be obj_data len obj_type = do
+writeCallback :: F'git_odb_backend_write_callback
+writeCallback oid be obj_data len obj_type = do
+    debug "S3.writeCallback..."
     r <- c'git_odb_hash oid obj_data len obj_type
     case r of
         0 -> do
-             str <- oidToStr oid
-             wrap ("odbS3BackendWriteCallback " ++ str)
-                  (go >> return 0)
-                  (return (-1))
+            (dets, _, sha) <- unpackDetails be oid
+            wrap (T.unpack $ "S3.writeCallback " <> sha)
+                (go dets sha >> return 0)
+                (return (-1))
         n -> return n
   where
-    go = do
-        (dets, oidStr, sha) <- unpackDetails be oid
-        let hdr = Bin.encode ((fromIntegral len,
-                               fromIntegral obj_type) :: (Int64,Int64))
+    go dets sha = do
         bytes <- curry BU.unsafePackCStringLen
-                      (castPtr obj_data) (fromIntegral len)
-        let payload = BL.append hdr (BL.fromChunks [bytes])
-        runResourceT $ putFileS3 dets sha (sourceLbs payload)
+                     (castPtr obj_data) (fromIntegral len)
+        writeObject dets sha
+            (Just (fromLength len, fromType obj_type, bytes))
 
-        wrapRegisterObject (registerObject (callbacks dets))
-            sha (Just (fromLength len, fromType obj_type))
-                `orElse` return ()
+existsCallback :: F'git_odb_backend_exists_callback
+existsCallback be oid = do
+    (dets, _, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.existsCallback " <> sha)
+        (do exists <- objectExists dets sha
+            return $ if exists then 1 else 0)
+        (return (-1))
 
-        -- Write a copy to the local cache
-        writeObjectToCache dets sha (fromLength len)
-            (fromType obj_type) bytes
+refreshCallback :: F'git_odb_backend_refresh_callback
+refreshCallback _ =
+    return 0                    -- do nothing
 
-odbS3BackendExistsCallback :: F'git_odb_backend_exists_callback
-odbS3BackendExistsCallback be oid = do
-    str <- oidToStr oid
-    wrap ("odbS3BackendExistsCallback " ++ str) go (return (-1))
+foreachCallback :: F'git_odb_backend_foreach_callback
+foreachCallback be callback payload =
+    return (-1)                 -- fallback to standard method
+
+writePackCallback :: F'git_odb_backend_writepack_callback
+writePackCallback writePackPtr be callback payload =
+    wrap "S3.writePackCallback" go (return (-1))
   where
     go = do
-        (dets, oidStr, sha) <- unpackDetails be oid
-        objs <- readMVar (knownObjects dets)
-        let deb = M.lookup sha objs
-        debug $ "odbS3BackendExistsCallback lookup: " ++ show deb
-        case M.lookup sha objs of
-            Just DoesNotExist -> return 0
-            Just _            -> return 1
-            Nothing -> do
-                location <- wrapLookupObject (lookupObject (callbacks dets))
-                                sha `orElse` return Nothing
-                r <- case location of
-                    Just (ObjectInPack base) -> return (PackedRemote base)
-                    Just ObjectLoose         -> return LooseRemote
-                    _ -> do
-                        exists <- wrap "odbS3BackendExistsCallback failed"
-                                      (runResourceT $ testFileS3 dets sha)
-                                      (return False)
-                        if exists
-                            then do
-                                wrapRegisterObject
-                                    (registerObject (callbacks dets))
-                                    sha Nothing `orElse` return ()
-                                return LooseRemote
-                            else return DoesNotExist
-
-                putStrLn $ "Updating object status: " ++ show r
-                modifyMVar_ (knownObjects dets) $ return . M.insert sha r
-                return $ if r == DoesNotExist then 0 else 1
-
-odbS3BackendRefreshCallback :: F'git_odb_backend_refresh_callback
-odbS3BackendRefreshCallback _ = return 0 -- do nothing
-
-odbS3BackendForeachCallback :: F'git_odb_backend_foreach_callback
-odbS3BackendForeachCallback be callback payload =
-    return (-1)                 -- fallback to the standard method
-
-odbS3WritePackCallback :: F'git_odb_backend_writepack_callback
-odbS3WritePackCallback writePackPtr be callback payload =
-    wrap "odbS3WritePackCallback" go (return (-1))
-  where
-    go = do
-        odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
-        poke writePackPtr (packWriter odbS3)
+        poke writePackPtr . packWriter
+            =<< peek (castPtr be :: Ptr OdbS3Backend)
         return 0
 
-odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
-odbS3BackendFreeCallback be = do
-    debug "odbS3BackendFreeCallback"
+freeCallback :: F'git_odb_backend_free_callback
+freeCallback be = do
+    debug "S3.freeCallback"
     odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
     dets  <- liftIO $ deRefStablePtr (details odbS3)
 
@@ -924,77 +1207,41 @@ odbS3BackendFreeCallback be = do
     free (packWriter odbS3)
     freeStablePtr (details odbS3)
 
-foreign export ccall "odbS3BackendFreeCallback"
-  odbS3BackendFreeCallback :: F'git_odb_backend_free_callback
-foreign import ccall "&odbS3BackendFreeCallback"
-  odbS3BackendFreeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
-
-observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
-                   -> IO [Text]
-observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
-    debug $ "observePackObjects for " ++ show packSha
-
-    -- Iterate the "database", which gives us a list of all the oids contained
-    -- within it
-    mshas <- newMVar []
-    r <- flip (lgForEachObject odbPtr) nullPtr $ \oid _ -> do
-        modifyMVar_ mshas $ \shas ->
-            (:) <$> oidToSha oid <*> pure shas
-        return 0
-    checkResult r "lgForEachObject failed"
-
-    -- Update the known objects map with the fact that we've got a local cache
-    -- of the pack file.
-    debug $ "observePackObjects: update known objects map"
-    now  <- getCurrentTime
-    shas <- readMVar mshas
-    let obj = PackedCached (replaceExtension idxFile "pack") idxFile now
-    modifyMVar_ (knownObjects dets) $ \objs ->
-        return $ foldr (`M.insert` obj) objs shas
-
-    debug $ "observePackObjects: pack file has been observed"
-    return shas
-
-odbS3WritePackAddCallback :: F'git_odb_writepack_add_callback
-odbS3WritePackAddCallback wp bytes len progress =
-    wrap "odbS3WritePackAddCallback" go (return (-1))
+foreign export ccall "freeCallback"
+  freeCallback :: F'git_odb_backend_free_callback
+foreign import ccall "&freeCallback"
+  freeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
+
+packAddCallback :: F'git_odb_writepack_add_callback
+packAddCallback wp dataPtr len progress =
+    wrap "S3.packAddCallback"
+        (go >> return 0)
+        (return (-1))
   where
     go = do
         be    <- c'git_odb_writepack'backend <$> peek wp
         odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
         dets  <- deRefStablePtr (details odbS3)
-        let dir = tempDirectory dets
+        bytes <- curry BU.unsafePackCStringLen
+                     (castPtr dataPtr) (fromIntegral len)
+        writePackFile dets bytes
 
-        bs <- curry BU.unsafePackCStringLen (castPtr bytes) (fromIntegral len)
-        debug $ "odbS3WritePackAddCallback: building index for "
-            ++ show (B.length bs) ++ " bytes"
-        (packSha, packPath, idxPath) <- lgBuildPackIndex dir bs
+packCommitCallback :: F'git_odb_writepack_commit_callback
+packCommitCallback wp progress =
+    return 0                    -- do nothing
 
-        -- Upload the actual files to S3 if it's not already then, and then
-        -- register the objects within the pack in the global index.
-        packExists <- liftIO $ wrapLookupPackFile
-                          (lookupPackFile (callbacks dets))
-                          packSha `orElse` return Nothing
-        case packExists of
-            Just True -> return ()
-            _ -> runResourceT $ uploadPackAndIndex dets packPath idxPath packSha
-        return 0
-
-odbS3WritePackCommitCallback :: F'git_odb_writepack_commit_callback
-odbS3WritePackCommitCallback wp progress = return 0 -- do nothing
-
-odbS3WritePackFreeCallback :: F'git_odb_writepack_free_callback
-odbS3WritePackFreeCallback wp = do
-    debug "odbS3WritePackFreeCallback"
+packFreeCallback :: F'git_odb_writepack_free_callback
+packFreeCallback wp = do
+    debug "S3.packFreeCallback"
     writepack <- peek wp
     freeHaskellFunPtr (c'git_odb_writepack'add writepack)
     freeHaskellFunPtr (c'git_odb_writepack'commit writepack)
 
-foreign export ccall "odbS3WritePackFreeCallback"
-  odbS3WritePackFreeCallback :: F'git_odb_writepack_free_callback
-foreign import ccall "&odbS3WritePackFreeCallback"
-  odbS3WritePackFreeCallbackPtr :: FunPtr F'git_odb_writepack_free_callback
-
+foreign export ccall "packFreeCallback"
+  packFreeCallback :: F'git_odb_writepack_free_callback
+foreign import ccall "&packFreeCallback"
+  packFreeCallbackPtr :: FunPtr F'git_odb_writepack_free_callback
+
 odbS3Backend :: Git.MonadGit m
              => S3Configuration NormalQuery
              -> Configuration
@@ -1005,24 +1252,17 @@ odbS3Backend :: Git.MonadGit m
              -> BackendCallbacks
              -> m (Ptr C'git_odb_backend)
 odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
-  readFun       <- mk'git_odb_backend_read_callback odbS3BackendReadCallback
-  readPrefixFun <-
-      mk'git_odb_backend_read_prefix_callback odbS3BackendReadPrefixCallback
-  readHeaderFun <-
-      mk'git_odb_backend_read_header_callback odbS3BackendReadHeaderCallback
-  writeFun      <- mk'git_odb_backend_write_callback odbS3BackendWriteCallback
-  existsFun     <- mk'git_odb_backend_exists_callback odbS3BackendExistsCallback
-  refreshFun    <-
-      mk'git_odb_backend_refresh_callback odbS3BackendRefreshCallback
-  foreachFun    <-
-      mk'git_odb_backend_foreach_callback odbS3BackendForeachCallback
-  writepackFun  <-
-      mk'git_odb_backend_writepack_callback odbS3WritePackCallback
+  readFun       <- mk'git_odb_backend_read_callback readCallback
+  readPrefixFun <- mk'git_odb_backend_read_prefix_callback readPrefixCallback
+  readHeaderFun <- mk'git_odb_backend_read_header_callback readHeaderCallback
+  writeFun      <- mk'git_odb_backend_write_callback writeCallback
+  existsFun     <- mk'git_odb_backend_exists_callback existsCallback
+  refreshFun    <- mk'git_odb_backend_refresh_callback refreshCallback
+  foreachFun    <- mk'git_odb_backend_foreach_callback foreachCallback
+  writepackFun  <- mk'git_odb_backend_writepack_callback writePackCallback
 
-  writePackAddFun  <-
-      mk'git_odb_writepack_add_callback odbS3WritePackAddCallback
-  writePackCommitFun  <-
-      mk'git_odb_writepack_commit_callback odbS3WritePackCommitCallback
+  writePackAddFun    <- mk'git_odb_writepack_add_callback packAddCallback
+  writePackCommitFun <- mk'git_odb_writepack_commit_callback packCommitCallback
 
   objects   <- newMVar M.empty
   dirExists <- isDirectory dir
@@ -1051,10 +1291,11 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
           , c'git_odb_backend'refresh     = refreshFun
           , c'git_odb_backend'foreach     = foreachFun
           , c'git_odb_backend'writepack   = writepackFun
-          , c'git_odb_backend'free        = odbS3BackendFreeCallbackPtr
+          , c'git_odb_backend'free        = freeCallbackPtr
           }
 
   details' <- newStablePtr odbS3details
+
   ptr <- castPtr <$> new OdbS3Backend
       { odbS3Parent = odbS3Parent
       , packWriter  = nullPtr
@@ -1064,7 +1305,7 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
       { c'git_odb_writepack'backend = ptr
       , c'git_odb_writepack'add     = writePackAddFun
       , c'git_odb_writepack'commit  = writePackCommitFun
-      , c'git_odb_writepack'free    = odbS3WritePackFreeCallbackPtr
+      , c'git_odb_writepack'free    = packFreeCallbackPtr
       }
   pokeByteOff ptr (sizeOf (undefined :: C'git_odb_backend)) packWriterPtr
 
@@ -1122,7 +1363,7 @@ s3Factory bucket accessKey secretKey dir callbacks = lgFactory
             Aws.Error
             dir
             callbacks
-
+
 data S3MockService = S3MockService
     { objects :: MVar (HashMap (Text, Text) BL.ByteString)
     }
