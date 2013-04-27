@@ -60,9 +60,10 @@ Library
     , containers           >= 0.4.2
     , data-default         >= 0.5.1
     , directory            >= 1.1.0.2
+    , either               >= 3.4
     , errors               >= 1.4.1
     , http-conduit         >= 1.8.5.1
-    , lens                 >= 3.9
+    , lens                 >= 3.8
     , lifted-base          >= 0.2.0.2
     , resourcet            >= 0.4.6
     , retry                >= 0.2.0.0
