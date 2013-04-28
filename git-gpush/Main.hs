@@ -58,6 +58,18 @@ options = Options
     <*> argument (Just . Just) (value Nothing)
     <*> arguments Just hidden
 
+volume :: Options -> Sh a -> Sh a
+volume opts = if verbose opts then verbosely else silently
+
+sh :: MonadIO m => Options -> Sh a -> m a
+sh opts = shelly . volume opts
+
+git :: [Text] -> Sh Text
+git = run "git"
+
+git_ :: [Text] -> Sh ()
+git_ = run_ "git"
+
 main :: IO ()
 main = withLibGitDo $ execParser opts >>= pushToGitHub
   where
@@ -66,43 +78,51 @@ main = withLibGitDo $ execParser opts >>= pushToGitHub
     hdr  = "git-gpush 1.0.0 - push to GitHub with smarter behavior"
     desc = "\nDescription goes here."
 
-volume :: Options -> Sh a -> Sh a
-volume opts = if verbose opts then verbosely else silently
-
 pushToGitHub :: Options -> IO ()
 pushToGitHub opts = do
-    -- Determine the current HEAD at the remote
+    gd <- fromText . TL.init
+              <$> (sh opts $ run "git" ["rev-parse", "--git-dir"])
+
     remoteName <- case remote opts of
-        Nothing -> return "origin" -- jww (2013-04-28): bug
+        Nothing -> sh opts $ getRemoteName gd
         Just x  -> return (TL.pack x)
 
     remoteHead <-
         head . TL.words . TL.init
-            <$> (shelly $ volume opts $
-                 git [ "ls-remote", remoteName, "HEAD" ])
+            <$> (sh opts $ git [ "ls-remote", remoteName, "HEAD" ])
 
-    gd <- shelly $ volume opts $
-          fromText . TL.init <$> run "git" ["rev-parse", "--git-dir"]
-
-    void $ withRepository lgFactory gd $ do
-        cref <- resolveRef "HEAD"
-        for cref $ \cref -> do
-            hc <- resolveCommitRef cref
-            let hcoid = renderObjOid (commitOid hc)
-            rcoid <- Tagged <$> parseOid (TL.toStrict remoteHead)
-            objs <- missingObjects
-                        (Just (CommitObjectId rcoid))
-                        (CommitObjectId (commitOid hc))
-            for_ objs $ \obj -> case obj of
-                Git.CommitObj cref -> do
-                    c <- resolveCommitRef cref
-                    shelly $ volume opts $
-                        processCommitTags (commitLog c)
-                _ -> return ()
+    withRepository lgFactory gd $ do
+        cref <- fromJust <$> resolveRef "HEAD"
+        hc   <- resolveCommitRef cref
+        let hcoid = renderObjOid (commitOid hc)
+        rcoid <- Tagged <$> parseOid (TL.toStrict remoteHead)
+        objs <- missingObjects
+                    (Just (CommitObjectId rcoid))
+                    (CommitObjectId (commitOid hc))
+        for_ objs $ \obj -> case obj of
+            Git.CommitObj cref -> do
+                commit <- resolveCommitRef cref
+                sh opts $ processCommitTags (commitLog commit)
+            _ -> return ()
 
     unless (dryRun opts) $
-        shelly $ volume opts $
-            git_ $ [ "push", remoteName ] <> map TL.pack (args opts)
+        sh opts $ git_ $ [ "push", remoteName ] <> map TL.pack (args opts)
+
+getRemoteName :: FilePath -> Sh Text
+getRemoteName gd = do
+    mref <- liftIO $ withRepository lgFactory gd $ lookupRef "HEAD"
+    case mref of
+        Nothing -> error "Could not find HEAD"
+        Just (Reference _ (RefObj _)) ->
+            error "Cannot push from a detached HEAD"
+        Just (Reference _ (RefSymbolic (TL.fromStrict -> branch)))
+            | "refs/heads/" `TL.isPrefixOf` branch ->
+                TL.init <$> git [ "config"
+                                , "branch." <> base branch <> ".remote" ]
+            | otherwise ->
+                error "Cannot push from a branch outside refs/heads"
+  where
+    base = TL.drop (TL.length "refs/heads/")
 
 data CommitTag
     = ConfirmTag
@@ -136,6 +156,9 @@ processCommitTags msg =
                     return $ if ec == 0
                         then Just (TL.init who)
                         else Nothing
+
+            -- jww (2013-04-28): Instead of using ghi here, we should use the
+            -- github library, after reading in ghi.token.
             run_ "ghi"
                 $ [ "edit", "-m"
                   , "Please confirm that this has been fixed."
@@ -144,11 +167,4 @@ processCommitTags msg =
                <> [ x | x <- [ "-u", fromJust mreport' ], isJust mreport' ]
                <> [ issue ]
 
-
-git :: [Text] -> Sh Text
-git = run "git"
-
-git_ :: [Text] -> Sh ()
-git_ = run_ "git"
-
--- Main.hs (git-monitor) ends here
+-- Main.hs (git-gpush) ends here
