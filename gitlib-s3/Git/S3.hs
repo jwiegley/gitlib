@@ -646,15 +646,6 @@ catalogPackFile dets packSha idxPath = do
     debug $ "catalogPackFile: " ++ show packSha
     lgWithPackFile idxPath $
         liftIO . observePackObjects dets packSha idxPath True
-
-packLoadObject :: OdbS3Details -> Text -> FilePath -> FilePath -> Bool
-               -> IO (Maybe ObjectInfo)
-packLoadObject dets sha packPath idxPath metadataOnly = do
-    liftIO $ debug $ "getObjectFromPack "
-        ++ show packPath ++ " " ++ show sha
-    mresult <- lgReadFromPack idxPath sha metadataOnly
-    for mresult $ \(typ, len, bytes) ->
-        return $ ObjectInfo (fromLength len) (fromType typ) Nothing (Just bytes)
 
 cacheLookupEntry :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
 cacheLookupEntry dets sha =
@@ -687,28 +678,45 @@ cacheLoadObject dets sha ce metadataOnly = do
         then return . Just $ ObjectInfo len typ Nothing Nothing
         else runResourceT $ remoteLoadObject dets sha
 
-    go (LooseCached len typ _ path) =
-        if metadataOnly
-        then return . Just $ ObjectInfo len typ (Just path) Nothing
-        else Just <$> (ObjectInfo
-                       <$> pure len
-                       <*> pure typ
-                       <*> pure (Just path)
-                       <*> (Just <$> B.readFile (pathStr path)))
+    go (LooseCached len typ _ path)
+        | metadataOnly =
+            return . Just $ ObjectInfo len typ (Just path) Nothing
+        | otherwise = do
+            exists <- liftIO $ isFile path
+            if exists
+                then Just <$> (ObjectInfo
+                               <$> pure len
+                               <*> pure typ
+                               <*> pure (Just path)
+                               <*> (Just <$> B.readFile (pathStr path)))
+                else go LooseRemote
 
     go (PackedRemote packSha) = do
         mpaths <- runResourceT $ remoteReadPackFile dets packSha
         join <$> (for mpaths $ \(packPath,idxPath) -> do
             void $ catalogPackFile dets packSha idxPath
-            packLoadObject dets sha packPath idxPath metadataOnly)
+            packLoadObject dets sha packSha packPath idxPath metadataOnly)
 
-    go (PackedCached _ _ packPath idxPath) =
-        packLoadObject dets sha packPath idxPath metadataOnly
+    go (PackedCached _ packSha packPath idxPath) =
+        packLoadObject dets sha packSha packPath idxPath metadataOnly
 
-    go (PackedCachedMetaKnown len typ _ _ packPath idxPath) =
-        if metadataOnly
-        then return . Just $ ObjectInfo len typ Nothing Nothing
-        else packLoadObject dets sha packPath idxPath metadataOnly
+    go (PackedCachedMetaKnown len typ _ packSha packPath idxPath)
+        | metadataOnly =
+            return . Just $ ObjectInfo len typ Nothing Nothing
+        | otherwise =
+            packLoadObject dets sha packSha packPath idxPath metadataOnly
+
+    packLoadObject dets sha packSha packPath idxPath metadataOnly = do
+        bothExist <- liftIO $ (&&) <$> isFile packPath <*> isFile idxPath
+        if bothExist
+            then do
+                liftIO $ debug $ "getObjectFromPack "
+                    ++ show packPath ++ " " ++ show sha
+                mresult <- lgReadFromPack idxPath sha metadataOnly
+                for mresult $ \(typ, len, bytes) ->
+                    return $ ObjectInfo (fromLength len) (fromType typ)
+                        Nothing (Just bytes)
+            else go (PackedRemote packSha)
 
 cacheStoreObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
 cacheStoreObject dets sha info@ObjectInfo {..} = do
