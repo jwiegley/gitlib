@@ -409,9 +409,11 @@ doModifyTree :: Git.MonadGit m
              -> [Text]
              -> Bool
              -> (Maybe (TreeEntry m)
-                 -> GitHubRepository m (Maybe (TreeEntry m)))
-             -> GitHubRepository m (Maybe (TreeEntry m))
-doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
+                 -> GitHubRepository m
+                     (Git.ModifyTreeResult (GitHubRepository m)))
+             -> GitHubRepository m (Git.ModifyTreeResult (GitHubRepository m))
+doModifyTree t [] _ _ =
+    return . Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
@@ -437,8 +439,10 @@ doModifyTree t (name:names) createIfNotExist f = do
         ze <- f y
         liftIO $ modifyIORef (ghTreeContents (Git.getTreeData t)) $
             case ze of
-                Nothing -> HashMap.delete name
-                Just z' -> HashMap.insert name z'
+                Git.TreeEntryNotFound     -> id
+                Git.TreeEntryPersistent _ -> id
+                Git.TreeEntryDeleted      -> HashMap.delete name
+                Git.TreeEntryMutated z'   -> HashMap.insert name z'
         return ze
 
         else
@@ -448,28 +452,37 @@ doModifyTree t (name:names) createIfNotExist f = do
         -- required, throw an exception to avoid colliding with user-defined
         -- 'Left' values.
         case y of
-            Nothing -> return Nothing
+            Nothing -> return Git.TreeEntryNotFound
             Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
             Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
             Just (Git.TreeEntry st')  -> do
                 st <- Git.resolveTreeRef st'
                 ze <- doModifyTree st names createIfNotExist f
-                liftIO $ do
-                    modifyIORef (ghTreeOid (Git.getTreeData t))
-                        (const Nothing)
-                    stc <- readIORef (ghTreeContents (Git.getTreeData st))
-                    modifyIORef (ghTreeContents (Git.getTreeData t)) $
-                        if HashMap.null stc
-                        then HashMap.delete name
-                        else HashMap.insert name (Git.treeEntry st)
+                case ze of
+                    Git.TreeEntryNotFound     -> return ()
+                    Git.TreeEntryPersistent _ -> return ()
+                    Git.TreeEntryDeleted      -> postUpdate st
+                    Git.TreeEntryMutated _    -> postUpdate st
                 return ze
+  where
+    postUpdate st = liftIO $ do
+        modifyIORef (ghTreeOid (Git.getTreeData t))
+            (const Nothing)
+        stc <- readIORef (ghTreeContents (Git.getTreeData st))
+        modifyIORef (ghTreeContents (Git.getTreeData t)) $
+            if HashMap.null stc
+            then HashMap.delete name
+            else HashMap.insert name (Git.treeEntry st)
 
 ghModifyTree :: Git.MonadGit m
              => Tree m -> FilePath -> Bool
              -> (Maybe (TreeEntry m)
-                 -> GitHubRepository m (Maybe (TreeEntry m)))
+                 -> GitHubRepository m
+                     (Git.ModifyTreeResult (GitHubRepository m)))
              -> GitHubRepository m (Maybe (TreeEntry m))
-ghModifyTree tree = doModifyTree tree . splitPath
+ghModifyTree t path createIfNotExist f =
+    Git.fromModifyTreeResult <$>
+        doModifyTree t (splitPath path) createIfNotExist f
 
 splitPath :: FilePath -> [Text]
 splitPath path = T.splitOn "/" text

@@ -363,10 +363,8 @@ doLookupTreeEntry t (name:names) = do
   if null names
       then return y
       else case y of
-          Just (Git.BlobEntry {})   ->
-              failure Git.TreeCannotTraverseBlob
-          Just (Git.CommitEntry {}) ->
-              failure Git.TreeCannotTraverseCommit
+          Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+          Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
           Just (Git.TreeEntry t')   -> do
               t'' <- Git.resolveTreeRef t'
               doLookupTreeEntry t'' names
@@ -387,7 +385,7 @@ insertEntry builder key oid attrs = do
       withForeignPtr builder $ \ptr ->
       withCString key $ \name ->
           c'git_treebuilder_insert nullPtr ptr name coid attrs
-  when (r2 < 0) $ failure Git.TreeBuilderInsertFailed
+  when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed (T.pack key))
 
 dropEntry :: Git.MonadGit m
           => ForeignPtr C'git_treebuilder -> String -> LgRepository m ()
@@ -395,7 +393,7 @@ dropEntry builder key = do
   r2 <- liftIO $ withForeignPtr builder $ \ptr ->
       withCString key $ \name ->
           c'git_treebuilder_remove ptr name
-  when (r2 < 0) $ failure Git.TreeBuilderRemoveFailed
+  when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed (T.pack key))
 
 doWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (Maybe (Oid m))
 doWriteTree t = do
@@ -437,9 +435,11 @@ doModifyTree :: Git.MonadGit m
              => Tree m
              -> [Text]
              -> Bool
-             -> (Maybe (TreeEntry m) -> LgRepository m (Maybe (TreeEntry m)))
-             -> LgRepository m (Maybe (TreeEntry m))
-doModifyTree t [] _ _ = return . Just . Git.TreeEntry . Git.Known $ t
+             -> (Maybe (TreeEntry m)
+                 -> LgRepository m (Git.ModifyTreeResult (LgRepository m)))
+             -> LgRepository m (Git.ModifyTreeResult (LgRepository m))
+doModifyTree t [] _ _ =
+    return . Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ t
 doModifyTree t (name:names) createIfNotExist f = do
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
@@ -472,48 +472,57 @@ doModifyTree t (name:names) createIfNotExist f = do
           -- required, throw an exception to avoid colliding with user-defined
           -- 'Left' values.
           case y of
-              Nothing -> return Nothing
+              Nothing -> return Git.TreeEntryNotFound
               Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
               Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
               Just (Git.TreeEntry st')  -> do
                   st <- Git.resolveTreeRef st'
                   ze <- doModifyTree st names createIfNotExist f
-                  liftIO $ modifyIORef
-                      (lgPendingUpdates (Git.getTreeData t))
-                      (HashMap.insert name st)
-                  return ze
+                  case ze of
+                      Git.TreeEntryNotFound     -> return ze
+                      Git.TreeEntryPersistent _ -> return ze
+                      Git.TreeEntryDeleted      -> postUpdate st ze
+                      Git.TreeEntryMutated _    -> postUpdate st ze
   where
+    postUpdate st ze = do
+        liftIO $ modifyIORef
+            (lgPendingUpdates (Git.getTreeData t))
+            (HashMap.insert name st)
+        return ze
+
     returnTree tr n z = do
         let contents = lgTreeContents tr
         case z of
-            Nothing -> dropEntry contents n
-            Just z' -> do
+            Git.TreeEntryNotFound     -> return ()
+            Git.TreeEntryPersistent x -> return ()
+            Git.TreeEntryDeleted      -> dropEntry contents n
+            Git.TreeEntryMutated z'   -> do
                 (oid,mode) <- treeEntryToOid z'
-                case oid of
-                    Nothing   -> dropEntry contents n
-                    Just oid' -> insertEntry contents n oid' mode
+                insertEntry contents n oid mode
         return z
 
     treeEntryToOid (Git.BlobEntry oid kind) =
-        return (Just (unTagged oid),
+        return (unTagged oid,
                 case kind of
                     Git.PlainBlob      -> 0o100644
                     Git.ExecutableBlob -> 0o100755
                     Git.SymlinkBlob    -> 0o120000
                     Git.UnknownBlob    -> 0o100000)
     treeEntryToOid (Git.CommitEntry coid) = do
-        return (Just (unTagged coid), 0o160000)
+        return (unTagged coid, 0o160000)
     treeEntryToOid (Git.TreeEntry tr) = do
         oid <- Git.treeRefOid tr
-        return (Just (unTagged oid), 0o040000)
+        return (unTagged oid, 0o040000)
 
 lgModifyTree
   :: Git.MonadGit m
   => Tree m -> FilePath -> Bool
-     -> (Maybe (TreeEntry m) -> LgRepository m (Maybe (TreeEntry m)))
+     -> (Maybe (TreeEntry m)
+         -> LgRepository m (Git.ModifyTreeResult (LgRepository m)))
      -> LgRepository m (Maybe (TreeEntry m))
 lgModifyTree t path createIfNotExist f =
-    doModifyTree t (splitPath path) createIfNotExist f
+    Git.fromModifyTreeResult <$>
+        doModifyTree t (splitPath path) createIfNotExist f
 
 splitPath :: FilePath -> [Text]
 splitPath path = T.splitOn "/" text

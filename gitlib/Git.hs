@@ -146,8 +146,8 @@ data GitException = BackendError Text
                   | TranslationException Text
                   | TreeCreateFailed Text
                   | TreeBuilderCreateFailed
-                  | TreeBuilderInsertFailed
-                  | TreeBuilderRemoveFailed
+                  | TreeBuilderInsertFailed Text
+                  | TreeBuilderRemoveFailed Text
                   | TreeBuilderWriteFailed
                   | TreeLookupFailed
                   | TreeCannotTraverseBlob
@@ -285,6 +285,23 @@ treeEntry = TreeEntry . treeRef
 commitEntry :: Repository m => Commit m -> TreeEntry m
 commitEntry = CommitEntry . commitOid
 
+data ModifyTreeResult m = TreeEntryNotFound
+                        | TreeEntryDeleted
+                        | TreeEntryPersistent (TreeEntry m)
+                        | TreeEntryMutated (TreeEntry m)
+
+fromModifyTreeResult :: ModifyTreeResult m -> Maybe (TreeEntry m)
+fromModifyTreeResult TreeEntryNotFound = Nothing
+fromModifyTreeResult TreeEntryDeleted = Nothing
+fromModifyTreeResult (TreeEntryPersistent x) = Just x
+fromModifyTreeResult (TreeEntryMutated x) = Just x
+
+toModifyTreeResult :: (TreeEntry m -> ModifyTreeResult m)
+                   -> Maybe (TreeEntry m)
+                   -> ModifyTreeResult m
+toModifyTreeResult _ Nothing  = TreeEntryNotFound
+toModifyTreeResult f (Just x) = f x
+
 -- | A 'Tree' is anything that is "treeish".
 --
 -- Minimal complete definition: 'modifyTree'.  Note that for some treeish
@@ -293,7 +310,7 @@ commitEntry = CommitEntry . commitOid
 data Tree m = Tree
     { modifyTree :: FilePath    -- path within the tree
                  -> Bool        -- create subtree's leading up to path?
-                 -> (Maybe (TreeEntry m) -> m (Maybe (TreeEntry m)))
+                 -> (Maybe (TreeEntry m) -> m (ModifyTreeResult m))
                  -> m (Maybe (TreeEntry m))
 
     , lookupEntry      :: FilePath -> m (Maybe (TreeEntry m))
@@ -313,7 +330,7 @@ mkTree :: Repository m
        => (Tree m
            -> FilePath           -- path within the tree
            -> Bool               -- create subtree's leading up to path?
-           -> (Maybe (TreeEntry m) -> m (Maybe (TreeEntry m)))
+           -> (Maybe (TreeEntry m) -> m (ModifyTreeResult m))
            -> m (Maybe (TreeEntry m)))
        -> (Tree m -> m (TreeOid m))
        -> (forall a. Tree m -> (FilePath -> TreeEntry m -> m a) -> m [a])
@@ -323,18 +340,20 @@ mkTree modifyTree' writeTree' traverseEntries' treeData = tr
   where
     tr = Tree
         { modifyTree       = modifyTree' tr
-        , lookupEntry      = \path -> modifyTree' tr path False return
+        , lookupEntry      =
+            \path -> modifyTree' tr path False
+                     (return . toModifyTreeResult TreeEntryPersistent)
         , putTreeEntry     = \path ent ->
                                  void $ modifyTree' tr path True
-                                     (const (return (Just ent)))
+                                     (const (return (TreeEntryMutated ent)))
         , putBlob'         = \path b kind ->
                                  putTreeEntry tr path (BlobEntry b kind)
-        , putBlob          = \path b -> putBlob' tr path b PlainBlob
+        , putBlob          = \path b   -> putBlob' tr path b PlainBlob
         , putTree          = \path tr' -> putTreeEntry tr path (TreeEntry tr')
-        , putCommit        = \path c -> putTreeEntry tr path (CommitEntry c)
+        , putCommit        = \path c   -> putTreeEntry tr path (CommitEntry c)
         , dropFromTree     = \path ->
                                  void $ modifyTree' tr path False
-                                     (const (return Nothing))
+                                     (const (return TreeEntryDeleted))
         , writeTree        = writeTree' tr
         , traverseEntries  = traverseEntries' tr
         , traverseEntries_ = void . traverseEntries' tr
