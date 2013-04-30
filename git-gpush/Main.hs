@@ -15,7 +15,8 @@ import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Trans.Cont
 import qualified Data.ByteString as B (readFile)
-import           Data.Foldable hiding (concat)
+import           Data.Char
+import           Data.Foldable hiding (concat,elem)
 import           Data.Function (fix)
 import           Data.List
 import           Data.Map (Map)
@@ -132,7 +133,7 @@ data CommitTag
     deriving (Eq, Show)
 
 findTags :: Text -> [CommitTag]
-findTags = concat . map go . tails . TL.words
+findTags = concat . map go . tails . map norm . TL.words
   where
     go [] = []
     go [x] = []
@@ -143,6 +144,8 @@ findTags = concat . map go . tails . TL.words
     go _ = []
 
     isIssue issue = not (TL.null issue) && TL.head issue == '#'
+
+    norm = TL.filter $ \c -> c `elem` "#:_-" || isDigit c || isLetter c
 
 processCommitTags :: T.Text -> Sh ()
 processCommitTags msg =
