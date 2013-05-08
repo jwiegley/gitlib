@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+g{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -163,10 +163,7 @@ processCommitTags msg =
             -- jww (2013-04-28): Instead of using ghi here, we should use the
             -- github library, after reading in ghi.token.
             run_ "ghi"
-                $ [ "edit", "-m"
-                  , "Please confirm that this has been fixed."
-                  , "-L", "need confirmation"
-                  ]
+                $ [ "edit", "-L", "need confirmation" ]
                <> [ x | x <- [ "-u", fromJust mreport' ], isJust mreport' ]
                <> [ issue ]
 
