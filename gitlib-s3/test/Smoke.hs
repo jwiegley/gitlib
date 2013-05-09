@@ -53,7 +53,20 @@ s3Factory = Lg.lgFactory
                  else Nothing)
                 Error
                 tmpDir
-                def { S3.headObject = \bucket path ->
+                def { S3.registerObject = \sha _ -> do
+                           putStrLn $ "registerObject: " ++ show sha
+                           modifyMVar_ objectMap
+                               (return . Map.insert sha S3.ObjectLoose)
+                    , S3.registerPackFile = \packBase shas -> do
+                           putStrLn $ "registerPackFile: " ++ show packBase
+                           modifyMVar_ objectMap
+                               (\m -> return $ foldr
+                                      (flip Map.insert
+                                       (S3.ObjectInPack packBase)) m shas)
+                    , S3.lookupObject = \sha -> do
+                           putStrLn $ "lookupObject: " ++ show sha
+                           Map.lookup sha <$> readMVar objectMap
+                    , S3.headObject = \bucket path ->
                        S3.mockHeadObject svc bucket path
                     , S3.getObject  = \bucket path range ->
                        S3.mockGetObject svc bucket path range
