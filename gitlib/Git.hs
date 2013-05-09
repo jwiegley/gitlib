@@ -441,7 +441,7 @@ tegRefOid (Known x) = tagOid x
 
 {- $merges -}
 
-data ModificationKind = Modified | Added | Deleted
+data ModificationKind = Unchanged | Modified | Added | Deleted
                       deriving (Eq, Ord, Enum, Show)
 
 data MergeResult m
