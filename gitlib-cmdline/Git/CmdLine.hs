@@ -159,6 +159,12 @@ cliDoesRepoExist remoteURI = do
     git_ [ "ls-remote", TL.fromStrict remoteURI ]
     (==0) <$> lastExitCode
 
+cliFilePathToURI :: Git.MonadGit m => FilePath -> m Text
+cliFilePathToURI =
+    fmap (T.append "file://localhost" . TL.toStrict . toTextIgnore)
+        . liftIO
+        . F.canonicalizePath
+
 cliPushCommitDirectly :: Git.MonadGit m
                       => CommitName m -> Text -> Text -> Maybe FilePath
                       -> CmdLineRepository m (CommitRef m)
