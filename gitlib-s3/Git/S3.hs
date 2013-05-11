@@ -39,9 +39,10 @@ import           Control.Exception
 import qualified Control.Exception.Lifted as Exc
 import           Control.Lens ((??))
 import           Control.Monad
-import           Control.Monad.Instances
 import           Control.Monad.IO.Class
+import           Control.Monad.Instances
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Cont
 import           Control.Monad.Trans.Either
 import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Resource
@@ -57,8 +58,8 @@ import           Data.Conduit
 import           Data.Conduit.Binary
 import qualified Data.Conduit.List as CList
 import           Data.Default
-import           Data.Function (fix)
 import           Data.Foldable (for_)
+import           Data.Function (fix)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as M
 import           Data.Int (Int64)
@@ -890,90 +891,35 @@ remoteCatalogContents dets = do
             for_ mpaths $ \(_,idxPath) ->
                 liftIO $ catalogPackFile dets packSha idxPath
 
--- | 'HardlyT' uses 'EitherT' to implement a semantic inverse of the 'MaybeT'
---    transformer: rather than 'Nothing' values short-circuiting computation
---    and a final correct result appearing in a 'Just', it it is the 'Just'
---    values which short-circuit.  The behavior is similar to <|>, but
---    requires only a Monad interface.
-type HardlyT m a = EitherT a m ()
-
--- | 'found' indicates that a sought value was found, and the HardlyT monad
---   should short-circuit with that value wrapped in Just.
-found :: Monad m => a -> HardlyT m a
-found = left
-{-# INLINE found #-}
-
--- | 'further' is a no-op, but is useful with certain other combinators, for
---   example, the 'fromMaybeH' function that applies the regular
---   short-circuiting meaning of Maybe values:
---
--- >>> hardlyT $ maybe further found Nothing >> left 10
--- Just 10
--- >>> hardlyT $ maybe further found (Just 20) >> left 10
--- Just 20
-further :: Monad m => HardlyT m a
-further = right ()
-{-# INLINE further #-}
-
--- | 'fromMaybeH' takes a regular Maybe value, and applies it's
---   short-circuiting semantics within the HardlyT monad transformer.  This
---   means that 'Just' value will cause the monad to exit with that value as
---   the result.
-fromMaybeH :: Monad m => Maybe a -> HardlyT m a
-fromMaybeH = maybe further found
-{-# INLINE fromMaybeH #-}
-
--- | 'runHardlyT' is the equivalent to 'runEitherT', for the 'HardlyT' monad.
-runHardlyT :: Monad m => HardlyT m a -> m (Maybe a)
-runHardlyT = eitherT (return . Just) (const (return Nothing))
-{-# INLINE runHardlyT #-}
-
--- | 'finallyE' acts on a short-circuiting value which is about to exit the
---   'EitherT' transformer block, within the context it was generated in.
---
--- >>> runEitherT $ right 20 >> left 10 `finallyE` (return . (+1))
--- Left 11
---
---   The cleanup function to 'finallyE' has the option of modifying the
---   short-circuiting value as well.
-finallyE :: Monad m => EitherT e m a -> (e -> m e) -> EitherT e m a
-finallyE action cleanup = EitherT $ do
-    result <- runEitherT action
-    case result of
-        Left e  -> Left `liftM` cleanup e
-        Right _ -> return result
-
-accessObject :: (CacheEntry -> HardlyT IO (CacheEntry,b))
-             -> OdbS3Details
+accessObject :: OdbS3Details
              -> Text
-             -> IO (Maybe b)
-accessObject f dets sha = fmap (fmap snd) . runHardlyT $ do
-    mentry <- lift $ cacheLookupEntry dets sha
-    for_ mentry f
+             -> IO (Maybe CacheEntry)
+accessObject dets sha = flip runContT return $ callCC $ \exit -> do
+    mentry <- liftIO $ cacheLookupEntry dets sha
+    for_ mentry $ const $
+        exit mentry
 
-    mentry <- lift $ callbackLocateObject dets sha
-    for_ mentry $ \entry ->
-        f entry `finallyE` \x@(entry',_) -> do
-            cacheUpdateEntry dets sha entry'
-            return x
+    mentry <- liftIO $ callbackLocateObject dets sha
+    for_ mentry $ \entry -> do
+        liftIO $ cacheUpdateEntry dets sha entry
+        exit mentry
 
-    exists <- lift $ runResourceT $ remoteObjectExists dets sha
-    if exists
-        then f LooseRemote `finallyE` \x@(entry',_) -> do
-                cacheUpdateEntry dets sha entry'
-                callbackRegisterCacheEntry dets sha entry'
-                return x
-        else further
+    exists <- liftIO $ runResourceT $ remoteObjectExists dets sha
+    when exists $ do
+        liftIO $ cacheUpdateEntry dets sha LooseRemote
+        liftIO $ callbackRegisterCacheEntry dets sha LooseRemote
+        exit (Just LooseRemote)
 
     -- jww (2013-04-27): This is disabled, pending further discussion with
     -- Snoyman about Bug #965.
     -- lift $ runResourceT $ remoteCatalogContents dets
 
-    mentry <- lift $ do cacheLookupEntry dets sha
-    for_ mentry $ \entry ->
-        f entry `finallyE` \x@(entry',_) -> do
-            callbackRegisterCacheEntry dets sha entry
-            return x
+    mentry <- liftIO $ cacheLookupEntry dets sha
+    for_ mentry $ \entry -> do
+        liftIO $ callbackRegisterCacheEntry dets sha entry
+        exit mentry
+
+    return Nothing
 
 -- All of these functions follow the same general outline:
 --
@@ -999,7 +945,7 @@ expectingJust msg (Just x) = return x
 
 objectExists :: OdbS3Details -> Text -> IO CacheEntry
 objectExists dets sha = do
-    mce <- accessObject (left . join (,)) dets sha
+    mce <- accessObject dets sha
     return $ fromMaybe DoesNotExist mce
 
 readObject :: OdbS3Details -> Text -> Bool -> IO (Maybe ObjectInfo)
