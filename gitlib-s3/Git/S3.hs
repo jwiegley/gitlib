@@ -4,12 +4,14 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 module Git.S3
        ( s3Factory, odbS3Backend, addS3Backend
@@ -34,16 +36,13 @@ import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
 import           Control.Concurrent.MVar
-import           Control.Error.Util
 import           Control.Exception
 import qualified Control.Exception.Lifted as Exc
 import           Control.Lens ((??))
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Instances
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Cont
-import           Control.Monad.Trans.Either
 import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Resource
 import           Control.Retry
@@ -59,7 +58,6 @@ import           Data.Conduit.Binary
 import qualified Data.Conduit.List as CList
 import           Data.Default
 import           Data.Foldable (for_)
-import           Data.Function (fix)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as M
 import           Data.Int (Int64)
@@ -313,6 +311,7 @@ coidToJSON :: ForeignPtr C'git_oid -> A.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $
                       fmap A.toJSON . oidToStr
 
+pokeByteString :: ByteString -> Ptr (Ptr b) -> ObjectLength -> IO ()
 pokeByteString bytes data_p (fromIntegral . getObjectLength -> len) = do
     content <- mallocBytes len
     BU.unsafeUseAsCString bytes $ copyBytes content ?? len
@@ -563,7 +562,7 @@ readRefs be = do
                   (return False)
     if exists
         then do
-            bytes <- wrap ("Failed to read 'refs.json'")
+            bytes <- wrap "Failed to read 'refs.json'"
                          (runResourceT $ do
                              result <- getFileS3 dets "refs.json" Nothing
                              result $$+- await)
@@ -611,6 +610,8 @@ mirrorRefsToS3 be = do
     go name ref = case Git.refTarget ref of
         Git.RefSymbolic target     -> (name, Left target)
         Git.RefObj (Git.ByOid oid) -> (name, Right oid)
+        -- jww (2013-05-11): What to do here?
+        Git.RefObj (Git.Known _)   -> error "Was not expecting a known object!"
 
 observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
                    -> IO [Text]
@@ -628,7 +629,7 @@ observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
 
     -- Update the known objects map with the fact that we've got a local cache
     -- of the pack file.
-    debug $ "observePackObjects: update known objects map"
+    debug "observePackObjects: update known objects map"
     now  <- getCurrentTime
     shas <- readMVar mshas
     let obj = PackedCached now packSha (replaceExtension idxFile "pack") idxFile
@@ -762,7 +763,7 @@ callbackRegisterPackFile dets packSha shas = do
         packSha shas `orElse` return ()
 
 callbackRegisterCacheEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
-callbackRegisterCacheEntry dets sha ce = do
+callbackRegisterCacheEntry dets sha ce =
     wrap ("callbackRegisterCacheEntry " ++ show sha ++ " " ++ show ce)
         (go ce)
         (return ())
@@ -850,7 +851,7 @@ remoteReadPackFile dets packSha = do
   where
     download path = do
         minfo <- lift $ remoteReadFile dets path
-        for minfo $ \ObjectInfo {..} -> do
+        for minfo $ \ObjectInfo {..} ->
             expectingJust
                 ("failed to download data for " <> pathText path)
                 infoData
@@ -880,7 +881,7 @@ remoteStoreObject _ _ _ =
 
 remoteCatalogContents :: OdbS3Details -> ResourceT IO ()
 remoteCatalogContents dets = do
-    debug $ "remoteCatalogContents"
+    debug "remoteCatalogContents"
     items <- listBucketS3 dets
     for_ items $ \item ->
         when (".idx" `T.isSuffixOf` item) $ do
@@ -1251,7 +1252,7 @@ s3MockService = S3MockService <$> newMVar M.empty
 
 mockGetBucket :: (MonadIO m, MonadBaseControl IO m)
               => S3MockService -> Text -> Text -> ResourceT m (Maybe [Text])
-mockGetBucket svc bucket prefix = do
+mockGetBucket svc bucket prefix =
     wrap "mockGetBucket" (Just <$> go) (return Nothing)
   where
     go = do
@@ -1262,7 +1263,7 @@ mockGetBucket svc bucket prefix = do
 
 mockHeadObject :: (MonadIO m, MonadBaseControl IO m)
                => S3MockService -> Text -> Text -> ResourceT m (Maybe Bool)
-mockHeadObject svc bucket path = do
+mockHeadObject svc bucket path =
     wrap "mockHeadObject" go (return Nothing)
   where
     go = do
@@ -1273,7 +1274,7 @@ mockHeadObject svc bucket path = do
 mockGetObject :: (MonadIO m, MonadBaseControl IO m)
               => S3MockService -> Text -> Text -> Maybe (Int64, Int64)
               -> ResourceT m (Maybe (Either Text BL.ByteString))
-mockGetObject svc bucket path range = do
+mockGetObject svc bucket path range =
     wrap "mockHeadObject" go (return Nothing)
   where
     go = do
@@ -1289,7 +1290,7 @@ mockGetObject svc bucket path range = do
 mockPutObject :: (MonadIO m, MonadBaseControl IO m)
               => S3MockService -> Text -> Text -> Int -> BL.ByteString
               -> ResourceT m (Maybe (Either Text ()))
-mockPutObject svc bucket path _ bytes = do
+mockPutObject svc bucket path _ bytes =
     wrap "mockPutObject" go (return Nothing)
   where
     go = do
