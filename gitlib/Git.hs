@@ -2,7 +2,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -23,7 +22,6 @@ import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.Default
 import           Data.Map (Map)
-import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Tagged
 import           Data.Text (Text)
@@ -421,7 +419,7 @@ referenceToRef :: Repository m
 referenceToRef mname mref =
     case mref of
         Nothing -> return Nothing
-        Just ref@(Reference { refTarget = RefObj x }) ->
+        Just (Reference { refTarget = RefObj x }) ->
             return (Just x)
         Just ref@(Reference { refTarget = RefSymbolic name' }) ->
             if fromMaybe name' mname /= name'
@@ -437,7 +435,7 @@ data Tag m = Tag
 
 tagRefOid :: Repository m => TagRef m -> TagOid m
 tagRefOid (ByOid x) = x
-tegRefOid (Known x) = tagOid x
+tagRefOid (Known x) = tagOid x
 
 {- $merges -}
 
@@ -564,8 +562,8 @@ withRepository :: (Repository (t m), MonadTrans t,
                -> FilePath
                -> t m a
                -> m a
-withRepository factory path action =
+withRepository factory path =
     withRepository' factory
-        ((defaultOptions factory) { repoPath = path }) action
+        (defaultOptions factory) { repoPath = path }
 
 -- Git.hs

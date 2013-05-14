@@ -9,7 +9,6 @@
 
 module Main where
 
-import           Control.Arrow (first)
 import           Control.Concurrent (threadDelay)
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
@@ -23,7 +22,6 @@ import           Data.Text (Text)
 import qualified Data.Text as T (pack, unpack)
 import qualified Data.Text.Lazy as TL (pack, unpack, toStrict, init)
 import           Data.Time
-import           Data.Traversable (sequenceA)
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git hiding (Options)
@@ -142,7 +140,7 @@ doMain opts = do
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
         -- time, typically using SIGINT (C-c) or even SIGKILL.
-        (snapshotTree opts wd userName userEmail ref sref) sc str toid ft
+        snapshotTree opts wd userName userEmail ref sref sc str toid ft
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots
@@ -210,7 +208,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
                  => Tree m
                  -> Map FilePath (FileEntry m)
                  -> FilePath -> FileEntry m -> m ()
-    scanNewEntry str ft fp (FileEntry mt (BlobEntry oid exe) foid) =
+    scanNewEntry str ft fp (FileEntry mt (BlobEntry oid exe) _) =
         case Map.lookup fp ft of
             Nothing -> do
                 infoL $ "Added to snapshot: " ++ fileStr fp
@@ -221,13 +219,14 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
                     putBlob' str fp oid exe
                 | mt /= oldMt || oid /= fileOid -> do
                     path <- fileStr <$>
-                            (liftIO $ canonicalizePath (wd </> fp))
+                            liftIO (canonicalizePath (wd </> fp))
                     infoL $ "Changed: " ++ fileStr fp
                     contents <- liftIO $ B.readFile path
                     newOid   <- createBlob (BlobString contents)
                     putBlob' str fp newOid exe
                 | otherwise -> return ()
             _ -> return ()
+    scanNewEntry _str _ft _fp (FileEntry _mt _ _foid) = return ()
 
 data FileEntry m = FileEntry
     { fileModTime   :: UTCTime

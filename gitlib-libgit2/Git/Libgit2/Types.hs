@@ -3,8 +3,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -14,7 +12,6 @@ module Git.Libgit2.Types where
 import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Exception
-import           Control.Failure
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
@@ -34,15 +31,18 @@ data Repository = Repository
     { repoOptions :: Git.RepositoryOptions
     , repoObj     :: ForeignPtr C'git_repository }
 
+repoPath :: Repository -> FilePath
 repoPath = Git.repoPath . repoOptions
 
 instance Eq Repository where
   x == y = repoPath x == repoPath y && repoObj x == repoObj y
 
 pathText :: FilePath -> Text
-pathText (toText -> Left e) =
-    throw . Git.BackendError $ "Could not render path: " <> T.pack (show e)
-pathText (toText -> Right p) = p
+pathText = go . toText
+  where
+    go (Left e) =
+        throw . Git.BackendError $ "Could not render path: " <> T.pack (show e)
+    go (Right p) = p
 
 pathStr :: FilePath -> String
 pathStr = T.unpack . pathText

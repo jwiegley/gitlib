@@ -594,7 +594,7 @@ mirrorRefsFromS3 be = do
                     c'git_reference_symbolic_create ptr repoPtr namePtr
                         targetPtr 1
             Just Git.Reference {
-                Git.refTarget = Git.RefObj x@(Git.ByOid (Tagged coid)) } ->
+                Git.refTarget = Git.RefObj (Git.ByOid (Tagged coid)) } ->
                 withForeignPtr (getOid coid) $ \coidPtr ->
                     c'git_reference_create ptr repoPtr namePtr coidPtr 1
             _ -> return 0
@@ -602,20 +602,13 @@ mirrorRefsFromS3 be = do
 
 mirrorRefsToS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsToS3 be = do
-    odbS3 <- liftIO $ peek (castPtr be :: Ptr OdbS3Backend)
     names <- Git.allRefNames
     refs  <- mapM Git.lookupRef names
     liftIO $ writeRefs be (M.fromList (L.zip names refs))
-  where
-    go name ref = case Git.refTarget ref of
-        Git.RefSymbolic target     -> (name, Left target)
-        Git.RefObj (Git.ByOid oid) -> (name, Right oid)
-        -- jww (2013-05-11): What to do here?
-        Git.RefObj (Git.Known _)   -> error "Was not expecting a known object!"
 
 observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
                    -> IO [Text]
-observePackObjects dets packSha idxFile alsoWithRemote odbPtr = do
+observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
     debug $ "observePackObjects: " ++ show idxFile
 
     -- Iterate the "database", which gives us a list of all the oids contained
@@ -695,7 +688,7 @@ cacheLoadObject dets sha ce metadataOnly = do
 
     go (PackedRemote packSha) = do
         mpaths <- runResourceT $ remoteReadPackFile dets packSha
-        join <$> (for mpaths $ \(packPath,idxPath) -> do
+        join <$> for mpaths (\(packPath,idxPath) -> do
             void $ catalogPackFile dets packSha idxPath
             packLoadObject dets sha packSha packPath idxPath metadataOnly)
 
@@ -708,7 +701,7 @@ cacheLoadObject dets sha ce metadataOnly = do
         | otherwise =
             packLoadObject dets sha packSha packPath idxPath metadataOnly
 
-    packLoadObject dets sha packSha packPath idxPath metadataOnly = do
+    packLoadObject _dets sha packSha packPath idxPath metadataOnly = do
         bothExist <- liftIO $ (&&) <$> isFile packPath <*> isFile idxPath
         if bothExist
             then do
@@ -840,13 +833,13 @@ remoteReadPackFile dets packSha = do
 
     runMaybeT $ do
         exists <- liftIO $ isFile packPath
-        if exists
-            then return (Just ())
-            else download packPath
+        void $ if exists
+               then return (Just ())
+               else download packPath
         exists <- liftIO $ isFile idxPath
-        if exists
-            then return (Just ())
-            else download idxPath
+        void $ if exists
+               then return (Just ())
+               else download idxPath
         return (packPath,idxPath)
   where
     download path = do
@@ -942,7 +935,7 @@ accessObject dets sha = flip runContT return $ callCC $ \exit -> do
 
 expectingJust :: (MonadIO m, MonadBaseControl IO m) => Text -> Maybe a -> m a
 expectingJust msg Nothing  = throw (Git.BackendError msg)
-expectingJust msg (Just x) = return x
+expectingJust _msg (Just x) = return x
 
 objectExists :: OdbS3Details -> Text -> IO CacheEntry
 objectExists dets sha = do
@@ -997,7 +990,7 @@ readCallback data_p len_p type_p be oid = do
             return (Just ())
 
 readPrefixCallback :: F'git_odb_backend_read_prefix_callback
-readPrefixCallback out_oid oid_p len_p type_p be oid len =
+readPrefixCallback _out_oid _oid_p _len_p _type_p _be _oid _len =
     wrap "S3.readPrefixCallback"
         -- jww (2013-04-22): Not yet implemented.
         (throwIO (Git.BackendError
@@ -1050,11 +1043,11 @@ refreshCallback _ =
     return c'GIT_OK             -- do nothing
 
 foreachCallback :: F'git_odb_backend_foreach_callback
-foreachCallback be callback payload =
+foreachCallback _be _callback _payload =
     return c'GIT_ERROR          -- fallback to standard method
 
 writePackCallback :: F'git_odb_backend_writepack_callback
-writePackCallback writePackPtr be callback payload =
+writePackCallback writePackPtr be _callback _payload =
     wrap "S3.writePackCallback" go (return c'GIT_ERROR)
   where
     go = do
@@ -1092,7 +1085,7 @@ foreign import ccall "&freeCallback"
   freeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
 packAddCallback :: F'git_odb_writepack_add_callback
-packAddCallback wp dataPtr len progress =
+packAddCallback wp dataPtr len _progress =
     wrap "S3.packAddCallback"
         (go >> return c'GIT_OK)
         (return c'GIT_ERROR)
@@ -1106,7 +1099,7 @@ packAddCallback wp dataPtr len progress =
         writePackFile dets bytes
 
 packCommitCallback :: F'git_odb_writepack_commit_callback
-packCommitCallback wp progress =
+packCommitCallback _wp _progress =
     return c'GIT_OK             -- do nothing
 
 packFreeCallback :: F'git_odb_writepack_free_callback
@@ -1252,7 +1245,7 @@ s3MockService = S3MockService <$> newMVar M.empty
 
 mockGetBucket :: (MonadIO m, MonadBaseControl IO m)
               => S3MockService -> Text -> Text -> ResourceT m (Maybe [Text])
-mockGetBucket svc bucket prefix =
+mockGetBucket svc _bucket prefix =
     wrap "mockGetBucket" (Just <$> go) (return Nothing)
   where
     go = do

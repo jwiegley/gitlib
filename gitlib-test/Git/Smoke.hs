@@ -15,18 +15,14 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Control
 import Data.List (sort)
-import Data.Proxy
 import Data.Tagged
 import Data.Time
 import Data.Time.Clock.POSIX
-import Filesystem (removeTree, isDirectory)
-import Filesystem.Path.CurrentOS
 import Git
 import Git.Utils
 import Prelude hiding (FilePath, putStr)
 import Test.HUnit
-import Test.Hspec (Spec, Example, describe, it, hspec)
-import Test.Hspec.Expectations
+import Test.Hspec (Spec, describe, it)
 import Test.Hspec.HUnit ()
 
 sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
@@ -39,7 +35,7 @@ smokeTestSpec :: (Repository (t IO), MonadGit (t IO), MonadTrans t,
               => RepositoryFactory t IO c
               -> RepositoryFactory t2 (t IO) c2
               -> Spec
-smokeTestSpec pr pr2 = describe "Smoke tests" $ do
+smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
@@ -227,13 +223,10 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       putBlob tree "README.md" blob
       commit <- createCommit [] (treeRef tree) sig sig "Initial commit" Nothing
 
-      let sig2 = Signature { signatureName   = "Second Name"
-                           , signatureEmail = "user2@email.org"
-                           , signatureWhen  = fakeTime 1348982883 }
       blob <- createBlobUtf8 "This is some content."
       putBlob tree "foo.txt" blob
-      commit' <- createCommit [commitRef commit] (treeRef tree) sig sig
-                             "This is another log message." (Just masterRef)
+      createCommit [commitRef commit] (treeRef tree) sig sig
+          "This is another log message." (Just masterRef)
 
       liftIO $ True @?= True
 
@@ -248,8 +241,8 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
       putBlob tree "Two"         =<< createBlobUtf8 "Two\n"
       putBlob tree "Files/Three" =<< createBlobUtf8 "Three\n"
       putBlob tree "More/Four"   =<< createBlobUtf8 "Four\n"
-      commit <- createCommit [] (treeRef tree) sig sig "Initial commit"
-                            (Just masterRef)
+      createCommit [] (treeRef tree) sig sig "Initial commit"
+          (Just masterRef)
 
       paths <- traverseEntries tree $ \fp _ -> return fp
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
@@ -308,7 +301,6 @@ smokeTestSpec pr pr2 = describe "Smoke tests" $ do
   --                 coid @?= renderObjOid (commitRefOid cref)
 
   where
-    control' f = liftWith f >>= restoreT . return
     fakeTime secs = utcToZonedTime utc (posixSecondsToUTCTime secs)
 
 -- Main.hs ends here

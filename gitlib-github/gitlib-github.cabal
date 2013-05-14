@@ -16,6 +16,7 @@ Source-repository head
 
 Library
   hs-source-dirs: .
+  ghc-options: -Wall
   default-language: Haskell98
   build-depends:
       base >= 3 && < 5

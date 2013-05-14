@@ -1,8 +1,6 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 
@@ -14,23 +12,18 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.ByteString
-import           Data.Dynamic
 import           Data.Tagged
-import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
-import           Debug.Trace
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
-import           Filesystem
-import           Filesystem.Path.CurrentOS (FilePath, (</>))
+import           Filesystem.Path.CurrentOS ((</>))
 import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
 import           Foreign.C.Types
 import           Foreign.ForeignPtr
 import           Foreign.Marshal.Alloc
-import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git
@@ -38,7 +31,6 @@ import           Git.Libgit2.Backend
 import           Git.Libgit2.Trace
 import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)
-import           System.IO.Unsafe
 
 type ObjPtr a = Maybe (ForeignPtr a)
 
@@ -52,7 +44,7 @@ addTracingBackend = do
     repo <- lgGet
     case F.toText (repoPath repo </> "objects") of
         Left p -> error $ "Object directory does not exist: " ++ T.unpack p
-        Right p -> do
+        Right p ->
             liftIO $ withCString (T.unpack p) $ \objectsDir ->
                 alloca $ \loosePtr -> do
                     r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
@@ -61,7 +53,7 @@ addTracingBackend = do
 
                     loosePtr' <- peek loosePtr
                     backend   <- traceBackend loosePtr'
-                    odbBackendAdd repo backend 3
+                    void $ odbBackendAdd repo backend 3
                     return ()
 
 coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
@@ -149,12 +141,12 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
 -- toSeconds :: ZonedTime -> Integer
 -- toSeconds  = round . utcTimeToPOSIXSeconds
 
-peekGitTime :: Ptr (C'git_time) -> IO ZonedTime
+peekGitTime :: Ptr C'git_time -> IO ZonedTime
 peekGitTime tptr = do
-    when <- peek tptr
+    moment <- peek tptr
     return (utcToZonedTime
-            (minutesToTimeZone (fromIntegral (c'git_time'offset when)))
-            (posixSecondsToUTCTime (fromIntegral (c'git_time'time when))))
+            (minutesToTimeZone (fromIntegral (c'git_time'offset moment)))
+            (posixSecondsToUTCTime (fromIntegral (c'git_time'time moment))))
 
 packGitTime :: ZonedTime -> C'git_time
 packGitTime zt = C'git_time
@@ -168,10 +160,11 @@ packSignature conv sig = do
   name  <- peek (p'git_signature'name sig)  >>= packCString
   email <- peek (p'git_signature'email sig) >>= packCString
   time  <- peekGitTime (p'git_signature'when sig)
-  return $
-    Git.Signature { Git.signatureName  = U.toUnicode conv name
-                  , Git.signatureEmail = U.toUnicode conv email
-                  , Git.signatureWhen  = time }
+  return Git.Signature
+      { Git.signatureName  = U.toUnicode conv name
+      , Git.signatureEmail = U.toUnicode conv email
+      , Git.signatureWhen  = time
+      }
 
 withSignature :: U.Converter -> Git.Signature
               -> (Ptr C'git_signature -> IO a) -> IO a

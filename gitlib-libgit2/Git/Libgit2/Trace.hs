@@ -8,13 +8,10 @@ module Git.Libgit2.Trace where
 import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Monad
-import           Data.ByteString.Unsafe
-import           Debug.Trace (trace)
 import           Foreign.C.String
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
-import qualified Git
 import           Git.Libgit2.Backend
 import           Prelude hiding ((.), mapM_)
 
@@ -22,7 +19,7 @@ data TraceBackend = TraceBackend { traceParent :: C'git_odb_backend
                                  , traceNext   :: Ptr C'git_odb_backend }
 
 instance Storable TraceBackend where
-  sizeOf p = sizeOf (undefined :: C'git_odb_backend) +
+  sizeOf _ = sizeOf (undefined :: C'git_odb_backend) +
              sizeOf (undefined :: Ptr C'git_odb_backend)
   alignment p = alignment (traceParent p)
   peek p = do
@@ -43,8 +40,13 @@ traceBackendReadCallback data_p len_p type_p be oid = do
   putStrLn $ "Read " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
-  (mK'git_odb_backend_read_callback (c'git_odb_backend'read tn))
-    data_p len_p type_p (traceNext tb) oid
+  mK'git_odb_backend_read_callback
+      (c'git_odb_backend'read tn)
+      data_p
+      len_p
+      type_p
+      (traceNext tb)
+      oid
 
 traceBackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
 traceBackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
@@ -52,8 +54,15 @@ traceBackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
   putStrLn $ "Read Prefix " ++ oidStr ++ " " ++ show len
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
-  (mK'git_odb_backend_read_prefix_callback (c'git_odb_backend'read_prefix tn))
-    out_oid oid_p len_p type_p (traceNext tb) oid len
+  mK'git_odb_backend_read_prefix_callback
+      (c'git_odb_backend'read_prefix tn)
+      out_oid
+      oid_p
+      len_p
+      type_p
+      (traceNext tb)
+      oid
+      len
 
 traceBackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
 traceBackendReadHeaderCallback len_p type_p be oid = do
@@ -61,8 +70,12 @@ traceBackendReadHeaderCallback len_p type_p be oid = do
   putStrLn $ "Read Header " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
-  (mK'git_odb_backend_read_header_callback (c'git_odb_backend'read_header tn))
-    len_p type_p (traceNext tb) oid
+  mK'git_odb_backend_read_header_callback
+      (c'git_odb_backend'read_header tn)
+      len_p
+      type_p
+      (traceNext tb)
+      oid
 
 traceBackendWriteCallback :: F'git_odb_backend_write_callback
 traceBackendWriteCallback oid be obj_data len obj_type = do
@@ -73,8 +86,13 @@ traceBackendWriteCallback oid be obj_data len obj_type = do
       putStrLn $ "Write " ++ oidStr ++ " len " ++ show len
       tb <- peek (castPtr be :: Ptr TraceBackend)
       tn <- peek (traceNext tb)
-      (mK'git_odb_backend_write_callback (c'git_odb_backend'write tn))
-        oid (traceNext tb) obj_data len obj_type
+      mK'git_odb_backend_write_callback
+          (c'git_odb_backend'write tn)
+          oid
+          (traceNext tb)
+          obj_data
+          len
+          obj_type
     n -> return n
 
 traceBackendExistsCallback :: F'git_odb_backend_exists_callback
@@ -83,8 +101,10 @@ traceBackendExistsCallback be oid = do
   putStrLn $ "Exists " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
-  (mK'git_odb_backend_exists_callback (c'git_odb_backend'exists tn))
-    (traceNext tb) oid
+  mK'git_odb_backend_exists_callback
+      (c'git_odb_backend'exists tn)
+      (traceNext tb)
+      oid
 
 traceBackendFreeCallback :: F'git_odb_backend_free_callback
 traceBackendFreeCallback be = do
@@ -112,7 +132,7 @@ traceBackend be = do
 
   castPtr <$> new TraceBackend {
     traceParent = C'git_odb_backend {
-         c'git_odb_backend'version     = fromIntegral 1
+         c'git_odb_backend'version     = 1
        , c'git_odb_backend'odb         = nullPtr
        , c'git_odb_backend'read        = readFun
        , c'git_odb_backend'read_prefix = readPrefixFun

@@ -2,7 +2,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 module Git.Utils where
 
@@ -16,24 +16,20 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Conduit
 import qualified Data.Conduit.List as CList
-import           Data.Default
 import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.List
 import           Data.Monoid
-import           Data.Proxy
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Traversable hiding (mapM, forM, sequence)
-import           Debug.Trace
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null, concat)
 import           Git
 import           Prelude hiding (FilePath)
-import           System.IO.Unsafe
 
 oid :: Repository m => Tree m -> m Text
 oid t = renderObjOid <$> writeTree t
@@ -42,13 +38,13 @@ createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
 createBlobUtf8 = createBlob . BlobString . T.encodeUtf8
 
 catBlob :: Repository m => Text -> m ByteString
-catBlob str = do
+catBlob str =
     if len == 40
-        then do
+    then do
         oid <- parseOid str
         lookupBlob (Tagged oid) >>= blobToByteString
 
-        else do
+    else do
         obj <- lookupObject str
         case obj of
             BlobObj (ByOid oid) -> lookupBlob oid >>= blobToByteString
@@ -120,13 +116,14 @@ copyTreeEntry (BlobEntry oid kind) needed = do
 copyTreeEntry (CommitEntry oid) needed = do
     coid <- parseOid (renderObjOid oid)
     return (CommitEntry (Tagged coid), needed)
+copyTreeEntry (TreeEntry _) _ = error "This should never be called"
 
 copyTree :: (Repository m, Repository (t m), MonadTrans t)
          => TreeRef m
          -> HashSet Text
          -> t m (TreeRef (t m), HashSet Text)
 copyTree tr needed = do
-    oid <- unTagged <$> (lift $ treeRefOid tr)
+    oid <- unTagged <$> lift (treeRefOid tr)
     let sha = renderOid oid
     oid2 <- parseOid (renderOid oid)
     if HashSet.member sha needed
@@ -143,13 +140,11 @@ copyTree tr needed = do
 
         else return (ByOid (Tagged oid2), needed)
   where
+    doCopyTreeEntry _ needed' (_,TreeEntry {}) = return needed'
     doCopyTreeEntry tree2 needed' (fp,ent) = do
-        case ent of
-            TreeEntry {} -> return needed'
-            _ -> do
-                (ent2,needed'') <- copyTreeEntry ent needed'
-                putTreeEntry tree2 fp ent2
-                return needed''
+        (ent2,needed'') <- copyTreeEntry ent needed'
+        putTreeEntry tree2 fp ent2
+        return needed''
 
 copyCommit :: (Repository m, Repository (t m), MonadTrans t)
            => CommitRef m
@@ -188,21 +183,17 @@ copyCommit cr mref needed = do
 --   'missingObjects', expand it to include all subtrees and blobs as well.
 --   Ordering is preserved.
 allMissingObjects :: Repository m => [Object m] -> m [Object m]
-allMissingObjects objs = do
-    objs <- forM objs $ \obj -> case obj of
-        BlobObj ref   -> return [obj]
-        CommitObj ref -> return [obj]
-        TagObj ref    -> return [obj]
-        TreeObj ref   -> do
+allMissingObjects objs =
+    fmap concat . forM objs $ \obj -> case obj of
+        TreeObj ref -> do
             tr       <- resolveTreeRef ref
-            subobjss <- traverseEntries tr $ \fp ent -> do
+            subobjss <- traverseEntries tr $ \_ ent ->
                 return $ case ent of
-                    Git.BlobEntry oid _ ->
-                        [Git.BlobObj (Git.ByOid oid)]
-                    Git.TreeEntry tr' -> [Git.TreeObj tr']
+                    Git.BlobEntry oid _ -> [Git.BlobObj (Git.ByOid oid)]
+                    Git.TreeEntry tr'   -> [Git.TreeObj tr']
                     _ -> []
             return (obj:concat subobjss)
-    return $ concat objs
+        _ -> return [obj]
 
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works.
@@ -223,7 +214,7 @@ genericPushCommit cname remoteRefName = do
                         roid <- lift $ parseOid rsha
                         return $ Just (Just (CommitObjectId (Tagged roid)))
                     | otherwise -> do
-                        mapM (liftIO . putStrLn . T.unpack) commits1
+                        mapM_ (liftIO . putStrLn . T.unpack) commits1
                         failure (Git.PushNotFastForward $
                                  "SHA " <> rsha
                                         <> " not found in remote")
@@ -249,7 +240,6 @@ genericPushCommit cname remoteRefName = do
         return $ renderObjOid . commitRefOid <$> r
 
     crefToSha cref  = return (renderObjOid (commitRefOid cref))
-    crefToPair cref = (,) <$> crefToSha cref <*> pure (CommitObj cref)
 
 commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =
@@ -324,7 +314,7 @@ withNewRepository factory path action = do
 withNewRepository' :: (Repository (t m), MonadGit (t m),
                        MonadBaseControl IO m, MonadIO m, MonadTrans t)
                    => RepositoryFactory t m c -> FilePath -> t m a -> m a
-withNewRepository' factory path action = do
+withNewRepository' factory path action =
     Exc.bracket_ recover recover $
         withRepository' factory (defaultOptions factory)
             { repoPath       = path

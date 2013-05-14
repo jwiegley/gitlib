@@ -6,25 +6,24 @@
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 module Git.Sample
        ( SampleRepository(..), Repository(..)
-       , Git.Oid(..), BlobOid(..), TreeOid(..), CommitOid(..)
-       , Tree(..), Commit(..)
-       , TreeRef(..), CommitRef(..), Reference(..)
+       , Git.Oid(..), BlobOid(), TreeOid(), CommitOid()
+       , Tree(), Commit()
+       , TreeRef(), CommitRef(), Reference()
        , sampleFactory
        , sampleGet
        ) where
 
 import           Control.Applicative
-import           Control.Failure
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
-import           Data.Tagged
 import           Filesystem.Path.CurrentOS as F
 import           Prelude hiding (FilePath)
-import qualified Git as Git
+import qualified Git
 
 data Void
 
@@ -61,34 +60,32 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     deleteRepository = undefined
 
 instance Show (Git.Oid (SampleRepository m)) where
-    show (Oid coid) = undefined
+    show (Oid _coid) = undefined
 
 instance Ord (Git.Oid (SampleRepository m)) where
-    Oid coid1 `compare` Oid coid2 = undefined
+    Oid _coid1 `compare` Oid _coid2 = undefined
 
 instance Eq (Git.Oid (SampleRepository m)) where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
-type TreeEntry m = Git.TreeEntry (SampleRepository m)
+-- type TreeEntry m = Git.TreeEntry (SampleRepository m)
 
 data Repository = Repository Void
 
 instance Eq Repository where
-  x == y = undefined
+  _x == _y = undefined
 
 instance Show Repository where
-  show x = undefined
+  show _x = undefined
 
 newtype SampleRepository m a = SampleRepository
     { sampleRepositoryReaderT :: ReaderT Repository m a }
     deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
 
-type Oid m       = Git.Oid (SampleRepository m)
-
 type BlobOid m   = Git.BlobOid (SampleRepository m)
 type TreeOid m   = Git.TreeOid (SampleRepository m)
 type CommitOid m = Git.CommitOid (SampleRepository m)
-type TagOid m    = Git.TagOid (SampleRepository m)
+--type TagOid m    = Git.TagOid (SampleRepository m)
 
 type Tree m      = Git.Tree (SampleRepository m)
 type Commit m    = Git.Commit (SampleRepository m)
@@ -114,7 +111,7 @@ sampleFactory = Git.RepositoryFactory
     }
 
 openSampleRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
-openSampleRepository opts = undefined
+openSampleRepository _opts = undefined
 
 runSampleRepository :: Git.MonadGit m
                     => Repository -> SampleRepository m a -> m a
