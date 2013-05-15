@@ -440,7 +440,7 @@ tagRefOid (Known x) = tagOid x
 {- $merges -}
 
 data ModificationKind = Unchanged | Modified | Added | Deleted | TypeChanged
-                      deriving (Eq, Ord, Enum, Show)
+                      deriving (Eq, Ord, Enum, Show, Read)
 
 data MergeStatus
     = NoConflict
@@ -453,7 +453,7 @@ data MergeStatus
     | LeftDeletedRightTypeChanged
     | LeftTypeChangedRightDeleted
     | BothTypeChanged
-    deriving (Eq, Ord, Enum, Show)
+    deriving (Eq, Ord, Enum, Show, Read)
 
 mergeStatus :: ModificationKind -> ModificationKind -> MergeStatus
 mergeStatus Unchanged Unchanged     = NoConflict
