@@ -22,7 +22,7 @@ import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import qualified Data.ByteString as B
-import           Data.Conduit
+import           Data.Conduit hiding (MonadBaseControl)
 import           Data.Function
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
