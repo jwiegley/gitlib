@@ -231,10 +231,12 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
         else case leftHead of
             Nothing ->
                 failure (Git.BackendError "Reference missing: HEAD (left)")
-            Just lh -> performMerge repo (Git.commitRefOid lh)
+            Just lh -> recordMerge repo (Git.commitRefOid lh)
 
   where
-    performMerge repo leftHead = do
+    -- jww (2013-05-15): This function should not overwrite head, but simply
+    -- create a detached commit and return its id.
+    recordMerge repo leftHead = do
         rightHead <- getOid "MERGE_HEAD"
         xs <- shellyNoDir $ silently $ errExit False $ do
             xs <- returnConflict . TL.init
