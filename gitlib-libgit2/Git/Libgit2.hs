@@ -91,7 +91,8 @@ import           System.IO (openBinaryTempFile, hClose)
 import qualified System.IO.Unsafe as SU
 
 debug :: MonadIO m => String -> m ()
-debug = liftIO . putStrLn
+--debug = liftIO . putStrLn
+debug = return ()
 
 instance Git.MonadGit m => Git.Repository (LgRepository m) where
     data Oid (LgRepository m) = Oid
