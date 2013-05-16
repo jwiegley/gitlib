@@ -277,7 +277,7 @@ instance Storable OdbS3Backend where
 
 debug :: MonadIO m => String -> m ()
 --debug = liftIO . putStrLn
-debug = return ()
+debug = const (return ())
 
 toType :: ObjectType -> C'git_otype
 toType (ObjectType t) = fromIntegral t
