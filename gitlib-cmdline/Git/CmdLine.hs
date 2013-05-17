@@ -224,9 +224,7 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
         git_ $ [ "--git-dir", repoPath repo ]
             <> [ "pull", "--quiet"
                , TL.fromStrict remoteNameOrURI
-               , TL.fromStrict remoteRefName
-                     <> ":"
-                     <> TL.fromStrict remoteRefName ]
+               , TL.fromStrict remoteRefName ]
         lastExitCode
     if r == 0
         then Git.MergeSuccess <$> getOid "HEAD"
