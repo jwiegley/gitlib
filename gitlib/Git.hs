@@ -184,7 +184,7 @@ data Reference m a = Reference
     { refName   :: !Text
     , refTarget :: !(RefTarget m a) }
 
-data CommitName m = CommitObjectId !(Tagged (Commit m) (Oid m))
+data CommitName m = CommitObjectId !(CommitOid m)
                   | CommitRefName !Text
                   | CommitReference !(Reference m (Commit m))
 
