@@ -907,12 +907,13 @@ accessObject dets sha = flip runContT return $ callCC $ \exit -> do
 
     -- jww (2013-04-27): This is disabled, pending further discussion with
     -- Snoyman about Bug #965.
+    --
     -- lift $ runResourceT $ remoteCatalogContents dets
-
-    mentry <- liftIO $ cacheLookupEntry dets sha
-    for_ mentry $ \entry -> do
-        liftIO $ callbackRegisterCacheEntry dets sha entry
-        exit mentry
+    --
+    -- mentry <- liftIO $ cacheLookupEntry dets sha
+    -- for_ mentry $ \entry -> do
+    --     liftIO $ callbackRegisterCacheEntry dets sha entry
+    --     exit mentry
 
     return Nothing
 
