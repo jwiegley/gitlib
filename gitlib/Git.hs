@@ -499,11 +499,11 @@ data MergeResult m
 
 instance Repository m => Show (MergeResult m) where
     show (MergeSuccess mc) = "MergeSuccess (" ++ show mc ++ ")"
-    show (MergeConflicted hl hr mc cs) =
+    show (MergeConflicted mc hl hr cs) =
         "MergeResult"
-     ++ "\n    { mergeHeadLeft  = " ++ show hl
+     ++ "\n    { mergeCommit    = " ++ show mc
+     ++ "\n    , mergeHeadLeft  = " ++ show hl
      ++ "\n    , mergeHeadRight = " ++ show hr
-     ++ "\n    , mergeCommit    = " ++ show mc
      ++ "\n    , mergeConflicts = " ++ show cs
      ++ "\n    }"
 

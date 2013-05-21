@@ -248,9 +248,9 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
             git_ [ "--git-dir", repoPath repo
                  , "commit", "-F", ".git/MERGE_MSG" ]
             return xs
-        Git.MergeConflicted <$> pure leftHead
+        Git.MergeConflicted <$> getOid "HEAD"
+                            <*> pure leftHead
                             <*> pure rightHead
-                            <*> getOid "HEAD"
                             <*> pure xs
 
     getOid name = do
