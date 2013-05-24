@@ -31,8 +31,8 @@ import           Filesystem.Path.CurrentOS hiding (null, concat)
 import           Git
 import           Prelude hiding (FilePath)
 
-oid :: Repository m => Tree m -> m Text
-oid t = renderObjOid <$> writeTree t
+treeOid :: Repository m => Tree m -> m Text
+treeOid t = renderObjOid <$> writeTree t
 
 createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
 createBlobUtf8 = createBlob . BlobString . T.encodeUtf8
@@ -85,7 +85,7 @@ commitTreeEntry c path =
 
 copyOid :: (Repository m, Repository (t m), MonadTrans t)
         => Oid m -> t m (Oid (t m))
-copyOid oid = parseOid (renderOid oid)
+copyOid = parseOid . renderOid
 
 copyBlob :: (Repository m, Repository (t m), MonadTrans t)
          => BlobRef m

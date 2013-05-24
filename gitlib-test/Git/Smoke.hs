@@ -50,43 +50,43 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       toid <- Git.parseOid "c0c848a2737a6a8533a18e6bd4d04266225e0271"
       tr <- lookupTree (Tagged toid)
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   it "create two trees" $ withNewRepository pr "twoTrees.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
       putBlob tr "goodbye/files/world.txt" goodbye
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   it "delete an item from a tree" $ withNewRepository pr "deleteTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- newTree
       putBlob tr "hello/world.txt" hello
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       putBlob tr "goodbye/files/world.txt"
           =<< createBlobUtf8 "Goodbye, world!\n"
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- Confirm that deleting world.txt also deletes the now-empty
       -- subtree goodbye/files, which also deletes the then-empty subtree
       -- goodbye, returning us back the original tree.
       dropFromTree tr "goodbye/files/world.txt"
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   it "create a single commit" $ withNewRepository pr "createCommit.git" $ do
@@ -96,7 +96,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
       putBlob tr "goodbye/files/world.txt" goodbye
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- The Oid has been cleared in tr, so this tests that it gets
@@ -157,7 +157,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
       putBlob tr "goodbye/files/world.txt" goodbye
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- The Oid has been cleared in tr, so this tests that it gets written as
@@ -172,7 +172,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
       goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
       putBlob tr "goodbye/files/world.txt" goodbye2
-      x <- oid tr
+      x <- treeOid tr
       liftIO $ x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
       let sig = Signature {
