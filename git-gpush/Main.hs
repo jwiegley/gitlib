@@ -144,8 +144,12 @@ processCommitTags msg =
             -- jww (2013-04-28): Instead of using ghi here, we should use the
             -- github library, after reading in ghi.token.
             run_ "ghi"
-                $ [ "edit", "-L", "need confirmation" ]
+                $ [ "edit" ]
                <> [ x | x <- [ "-u", fromJust mreport' ], isJust mreport' ]
                <> [ issue ]
+            run_ "ghi" [ "comment"
+                       , "-m", "Please confirm that this has been fixed."
+                       , issue ]
+            run_ "ghi" [ "label", issue, "-a", "need confirmation" ]
 
 -- Main.hs (git-gpush) ends here
