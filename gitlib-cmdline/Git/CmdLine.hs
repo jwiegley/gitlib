@@ -221,7 +221,8 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
             throw (Git.BackendError $ "Repository does not exist: "
                    `T.append` T.pack (show remoteNameOrURI))
 
-        git_ $ [ "--git-dir", repoPath repo ]
+        git_ $ [ "--git-dir", repoPath repo
+               , "-c", "merge.conflictstyle=merge" ]
             <> [ "pull", "--quiet"
                , TL.fromStrict remoteNameOrURI
                , TL.fromStrict remoteRefName ]
