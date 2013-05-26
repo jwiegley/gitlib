@@ -67,6 +67,7 @@ Library
     , lifted-base          >= 0.2.0.2
     , resourcet            >= 0.4.6
     , retry                >= 0.2.0.0
+    , stm                  >= 2.4.2
     , system-fileio        >= 0.3.9
     , system-filepath      >= 0.4.7
     , tagged               >= 0.4.4

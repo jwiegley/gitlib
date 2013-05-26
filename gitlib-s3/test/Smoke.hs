@@ -9,12 +9,10 @@ module Main where
 
 import           Aws
 import           Control.Applicative
--- import           Control.Concurrent
 import           Control.Exception (finally)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Default (def)
--- import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, isNothing)
 import           Data.Text as T
 import           Filesystem

@@ -38,7 +38,7 @@ import           Bindings.Libgit2.Oid
 import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
-import           Control.Concurrent.MVar
+import           Control.Concurrent.STM hiding (orElse)
 import           Control.Exception
 import qualified Control.Exception.Lifted as Exc
 import           Control.Lens ((??))
@@ -64,6 +64,7 @@ import           Data.Foldable (for_)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as M
 import           Data.Int (Int64)
+import           Data.IORef
 import qualified Data.List as L
 import           Data.Maybe
 import           Data.Monoid
@@ -250,7 +251,7 @@ data OdbS3Details = OdbS3Details
       -- In the 'knownObjects' map, if the object is not present, we must query
       -- via the 'lookupObject' callback above.  If it is present, it can be
       -- one of the CacheEntry's possible states.
-    , knownObjects    :: MVar (HashMap Text CacheEntry)
+    , knownObjects    :: TVar (HashMap Text CacheEntry)
     , tempDirectory   :: FilePath
     }
 
@@ -637,10 +638,10 @@ observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
 
     -- Iterate the "database", which gives us a list of all the oids contained
     -- within it
-    mshas <- newMVar []
+    mshas <- newIORef []
     r <- flip (lgForEachObject odbPtr) nullPtr $ \oid _ -> do
-        modifyMVar_ mshas $ \shas ->
-            (:) <$> oidToSha oid <*> pure shas
+        sha <- oidToSha oid
+        modifyIORef mshas (sha:)
         return c'GIT_OK
     checkResult r "lgForEachObject failed"
 
@@ -648,10 +649,10 @@ observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
     -- of the pack file.
     debug "observePackObjects: update known objects map"
     now  <- getCurrentTime
-    shas <- readMVar mshas
+    shas <- readIORef mshas
     let obj = PackedCached now packSha (replaceExtension idxFile "pack") idxFile
-    modifyMVar_ (knownObjects dets) $ \objs ->
-        return $ foldr (`M.insert` obj) objs shas
+    atomically $ modifyTVar (knownObjects dets) $ \objs ->
+        foldr (`M.insert` obj) objs shas
 
     debug $ "observePackObjects: observed "
         ++ show (Prelude.length shas) ++ " objects"
@@ -673,13 +674,13 @@ cacheLookupEntry dets sha =
         (return Nothing)
   where
     go = do
-        objs <- readMVar (knownObjects dets)
+        objs <- readTVarIO (knownObjects dets)
         return $ M.lookup sha objs
 
 cacheUpdateEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
 cacheUpdateEntry dets sha ce = do
     debug $ "cacheUpdateEntry " ++ show sha ++ " " ++ show ce
-    modifyMVar_ (knownObjects dets) $ return . M.insert sha ce
+    atomically $ modifyTVar (knownObjects dets) $ M.insert sha ce
 
 cacheLoadObject :: OdbS3Details -> Text -> CacheEntry -> Bool
                 -> IO (Maybe ObjectInfo)
@@ -1185,7 +1186,7 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
   writePackAddFun    <- mk'git_odb_writepack_add_callback packAddCallback
   writePackCommitFun <- mk'git_odb_writepack_commit_callback packCommitCallback
 
-  objects   <- newMVar M.empty
+  objects   <- newTVarIO M.empty
   dirExists <- isDirectory dir
   unless dirExists $ createTree dir
 
@@ -1286,11 +1287,11 @@ s3Factory bucket accessKey secretKey dir callbacks = lgFactory
             callbacks
 
 data S3MockService = S3MockService
-    { objects :: MVar (HashMap (Text, Text) BL.ByteString)
+    { objects :: TVar (HashMap (Text, Text) BL.ByteString)
     }
 
 s3MockService :: IO S3MockService
-s3MockService = S3MockService <$> newMVar M.empty
+s3MockService = S3MockService <$> newTVarIO M.empty
 
 mockGetBucket :: (MonadIO m, MonadBaseControl IO m)
               => S3MockService -> Text -> Text -> ResourceT m (Maybe [Text])
@@ -1298,7 +1299,7 @@ mockGetBucket svc _bucket prefix =
     wrap "mockGetBucket" (Just <$> go) (return Nothing)
   where
     go = do
-        objs <- liftIO $ readMVar (objects svc)
+        objs <- liftIO $ readTVarIO (objects svc)
         return $ Prelude.filter (prefix `T.isPrefixOf`)
                $ map snd
                $ M.keys objs
@@ -1309,7 +1310,7 @@ mockHeadObject svc bucket path =
     wrap "mockHeadObject" go (return Nothing)
   where
     go = do
-        objs <- liftIO $ readMVar (objects svc)
+        objs <- liftIO $ readTVarIO (objects svc)
         return $ maybe (Just False) (const (Just True)) $
             M.lookup (bucket, path) objs
 
@@ -1320,7 +1321,7 @@ mockGetObject svc bucket path range =
     wrap "mockHeadObject" go (return Nothing)
   where
     go = do
-        objs <- liftIO $ readMVar (objects svc)
+        objs <- liftIO $ readTVarIO (objects svc)
         let obj = maybe (Left $ T.pack $ "Not found: "
                          ++ show bucket ++ "/" ++ show path)
                       Right $
@@ -1336,8 +1337,8 @@ mockPutObject svc bucket path _ bytes =
     wrap "mockPutObject" go (return Nothing)
   where
     go = do
-        liftIO $ modifyMVar_ (objects svc) $
-            return . M.insert (bucket, path) bytes
+        liftIO $ atomically $ modifyTVar (objects svc) $
+            M.insert (bucket, path) bytes
         return $ Just $ Right ()
 
 -- S3.hs
