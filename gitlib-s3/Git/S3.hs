@@ -11,7 +11,10 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
+{-# OPTIONS_GHC -fno-warn-name-shadowing
+                -fno-warn-unused-binds
+                -fno-warn-orphans #-}
 
 module Git.S3
        ( s3Factory, odbS3Backend, addS3Backend
@@ -719,10 +722,7 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     debug $ "cacheStoreObject " ++ show sha ++ " " ++ show info
     go >>= cacheUpdateEntry dets sha
   where
-    go | Nothing <- infoData =
-           return $ LooseRemoteMetaKnown infoLength infoType
-
-       | Just path <- infoPath = do
+    go | Just path <- infoPath = do
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
@@ -731,6 +731,9 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
            B.writeFile (pathStr path) bytes
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
+
+       | otherwise =
+           return $ LooseRemoteMetaKnown infoLength infoType
 
 callbackLocateObject :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
 callbackLocateObject dets sha = do
