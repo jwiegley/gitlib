@@ -122,7 +122,7 @@ data BackendCallbacks = BackendCallbacks
       -- object to the S3 repository.  The for tracking it is that sometimes
       -- calling 'locateObject' can be much faster than querying Amazon.
 
-    , registerPackFile :: Text -> [Text] -> IO ()
+    , registerPackFile :: Text -> [Text] -> ObjectLength -> IO ()
       -- 'registerPackFile' takes the basename of a pack file, and a list of
       -- SHAs which are contained with the pack.  It must register this in an
       -- index, for the sake of the next function.
@@ -181,7 +181,7 @@ data BackendCallbacks = BackendCallbacks
 instance Default BackendCallbacks where
     def = BackendCallbacks
         { registerObject   = \_ _     -> return ()
-        , registerPackFile = \_ _     -> return ()
+        , registerPackFile = \_ _ _   -> return ()
         , lookupObject     = \_       -> return Nothing
         , lookupPackFile   = \_       -> return Nothing
         , getBucket        = \_ _     -> return Nothing
@@ -338,10 +338,12 @@ wrapRegisterObject f name metadata =
         (f name metadata)
         (return ())
 
-wrapRegisterPackFile :: (Text -> [Text] -> IO ()) -> Text -> [Text] -> IO ()
-wrapRegisterPackFile f name shas =
+wrapRegisterPackFile :: (Text -> [Text] -> ObjectLength -> IO ())
+                     -> Text -> [Text] -> ObjectLength
+                     -> IO ()
+wrapRegisterPackFile f name shas len =
     wrap ("registerPackFile: " ++ show name)
-        (f name shas)
+        (f name shas len)
         (return ())
 
 wrapLookupObject :: (Text -> IO (Maybe ObjectStatus))
@@ -751,13 +753,14 @@ callbackRegisterObject dets sha info@ObjectInfo {..} = do
     wrapRegisterObject (registerObject (callbacks dets)) sha
         (Just (infoLength, infoType))`orElse` return ()
 
-callbackRegisterPackFile :: OdbS3Details -> Text -> [Text] -> IO ()
-callbackRegisterPackFile dets packSha shas = do
+callbackRegisterPackFile :: OdbS3Details -> Text -> [Text] -> ObjectLength
+                         -> IO ()
+callbackRegisterPackFile dets packSha shas len = do
     debug $ "callbackRegisterPackFile " ++ show packSha
     -- Let whoever is listening know about this pack files and its contained
     -- objects
     wrapRegisterPackFile (registerPackFile (callbacks dets))
-        packSha shas `orElse` return ()
+        packSha shas len `orElse` return ()
 
 callbackRegisterCacheEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
 callbackRegisterCacheEntry dets sha ce =
@@ -975,9 +978,9 @@ writeObject dets sha info = do
 
 writePackFile :: OdbS3Details -> ByteString -> IO ()
 writePackFile dets bytes = do
-    debug $ "writePackFile: building index for "
-        ++ show (B.length bytes) ++ " bytes"
     let dir = tempDirectory dets
+        len = B.length bytes
+    debug $ "writePackFile: building index for " ++ show len ++ " bytes"
     (packSha, packPath, idxPath) <- lgBuildPackIndex dir bytes
 
     runResourceT $
@@ -989,7 +992,7 @@ writePackFile dets bytes = do
     -- This updates the local cache and remote registry with knowledge of
     -- every object in the pack file.
     shas <- catalogPackFile dets packSha idxPath
-    callbackRegisterPackFile dets packSha shas
+    callbackRegisterPackFile dets packSha shas (ObjectLength (fromIntegral len))
 
 readCallback :: F'git_odb_backend_read_callback
 readCallback data_p len_p type_p be oid = do
