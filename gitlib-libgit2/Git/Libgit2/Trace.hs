@@ -96,7 +96,7 @@ traceBackendWriteCallback oid be obj_data len obj_type = do
     n -> return n
 
 traceBackendExistsCallback :: F'git_odb_backend_exists_callback
-traceBackendExistsCallback be oid = do
+traceBackendExistsCallback be oid confirmNotExists = do
   oidStr <- oidToStr oid
   putStrLn $ "Exists " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
@@ -105,6 +105,7 @@ traceBackendExistsCallback be oid = do
       (c'git_odb_backend'exists tn)
       (traceNext tb)
       oid
+      confirmNotExists
 
 traceBackendFreeCallback :: F'git_odb_backend_free_callback
 traceBackendFreeCallback be = do

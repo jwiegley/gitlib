@@ -19,7 +19,7 @@ import Bindings.Libgit2.Indexer
 #ccall git_odb_read , Ptr (Ptr <git_odb_object>) -> Ptr <git_odb> -> Ptr <git_oid> -> IO (CInt)
 #ccall git_odb_read_prefix , Ptr (Ptr <git_odb_object>) -> Ptr <git_odb> -> Ptr <git_oid> -> CSize -> IO (CInt)
 #ccall git_odb_read_header , Ptr CSize -> Ptr <git_otype> -> Ptr <git_odb> -> Ptr <git_oid> -> IO (CInt)
-#ccall git_odb_exists , Ptr <git_odb> -> Ptr <git_oid> -> IO (CInt)
+#ccall git_odb_exists , Ptr <git_odb> -> Ptr <git_oid> -> CInt -> IO (CInt)
 #ccall git_odb_refresh , Ptr <git_odb> -> IO (CInt)
 #ccall git_odb_foreach , Ptr <git_odb> -> <git_odb_foreach_cb> -> Ptr () -> IO (CInt)
 #ccall git_odb_write , Ptr <git_oid> -> Ptr <git_odb> -> Ptr () -> CSize -> <git_otype> -> IO (CInt)

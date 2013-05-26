@@ -47,7 +47,7 @@ import Bindings.Libgit2.Indexer
     int (* readstream)(struct git_odb_stream * *,
                        struct git_odb_backend *,
                        const git_oid *);
-    int (* exists)(struct git_odb_backend *, const git_oid *);
+    int (* exists)(struct git_odb_backend *, const git_oid *, bool);
     int (* refresh)(struct git_odb_backend *);
     int (* foreach)(struct git_odb_backend *,
                     git_odb_foreach_cb cb,
@@ -64,7 +64,7 @@ import Bindings.Libgit2.Indexer
 #callback git_odb_backend_write_callback , Ptr <git_oid> -> Ptr <git_odb_backend> -> Ptr () -> CSize -> <git_otype> -> IO CInt
 #callback git_odb_backend_writestream_callback , Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> CSize -> <git_otype> -> IO CInt
 #callback git_odb_backend_readstream_callback , Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
-#callback git_odb_backend_exists_callback , Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
+#callback git_odb_backend_exists_callback , Ptr <git_odb_backend> -> Ptr <git_oid> -> CInt -> IO CInt
 #callback git_odb_backend_refresh_callback , Ptr <git_odb_backend> -> IO CInt
 #callback git_odb_backend_foreach_callback , Ptr <git_odb_backend> -> <git_odb_foreach_cb> -> Ptr () -> IO CInt
 #callback git_odb_backend_writepack_callback , Ptr (Ptr <git_odb_writepack>) -> Ptr <git_odb_backend> -> <git_transfer_progress_callback> -> Ptr () -> IO CInt

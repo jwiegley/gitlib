@@ -619,7 +619,7 @@ lgExistsObject oid = do
                 -- ptr doesn't leak.
                 withForeignPtr (getOid oid) $ \coid -> do
                     ptr <- peek pptr
-                    r <- c'git_odb_exists ptr coid
+                    r <- c'git_odb_exists ptr coid 0
                     c'git_odb_free ptr
                     return (Just (r == 0))
     maybe (failure Git.RepositoryInvalid) return result

@@ -888,34 +888,38 @@ remoteCatalogContents dets = do
 
 accessObject :: OdbS3Details
              -> Text
+             -> Bool
              -> IO (Maybe CacheEntry)
-accessObject dets sha = flip runContT return $ callCC $ \exit -> do
-    mentry <- liftIO $ cacheLookupEntry dets sha
-    for_ mentry $ const $
-        exit mentry
+accessObject dets sha remote =
+    flip runContT return $ callCC $ \exit -> do
+        mentry <- liftIO $ cacheLookupEntry dets sha
+        for_ mentry $ const $
+            exit mentry
 
-    mentry <- liftIO $ callbackLocateObject dets sha
-    for_ mentry $ \entry -> do
-        liftIO $ cacheUpdateEntry dets sha entry
-        exit mentry
+        mentry <- liftIO $ callbackLocateObject dets sha
+        for_ mentry $ \entry -> do
+            liftIO $ cacheUpdateEntry dets sha entry
+            exit mentry
 
-    exists <- liftIO $ runResourceT $ remoteObjectExists dets sha
-    when exists $ do
-        liftIO $ cacheUpdateEntry dets sha LooseRemote
-        liftIO $ callbackRegisterCacheEntry dets sha LooseRemote
-        exit (Just LooseRemote)
+        unless remote $ exit Nothing
 
-    -- jww (2013-04-27): This is disabled, pending further discussion with
-    -- Snoyman about Bug #965.
-    --
-    -- lift $ runResourceT $ remoteCatalogContents dets
-    --
-    -- mentry <- liftIO $ cacheLookupEntry dets sha
-    -- for_ mentry $ \entry -> do
-    --     liftIO $ callbackRegisterCacheEntry dets sha entry
-    --     exit mentry
+        exists <- liftIO $ runResourceT $ remoteObjectExists dets sha
+        when exists $ do
+            liftIO $ cacheUpdateEntry dets sha LooseRemote
+            liftIO $ callbackRegisterCacheEntry dets sha LooseRemote
+            exit (Just LooseRemote)
 
-    return Nothing
+        -- jww (2013-04-27): This is disabled, pending further discussion with
+        -- Snoyman about Bug #965.
+        --
+        -- lift $ runResourceT $ remoteCatalogContents dets
+        --
+        -- mentry <- liftIO $ cacheLookupEntry dets sha
+        -- for_ mentry $ \entry -> do
+        --     liftIO $ callbackRegisterCacheEntry dets sha entry
+        --     exit mentry
+
+        return Nothing
 
 -- All of these functions follow the same general outline:
 --
@@ -936,18 +940,26 @@ accessObject dets sha = flip runContT return $ callCC $ \exit -> do
 --     in the future.
 
 expectingJust :: (MonadIO m, MonadBaseControl IO m) => Text -> Maybe a -> m a
-expectingJust msg Nothing  = throw (Git.BackendError msg)
+expectingJust msg Nothing   = throw (Git.BackendError msg)
 expectingJust _msg (Just x) = return x
 
-objectExists :: OdbS3Details -> Text -> IO CacheEntry
-objectExists dets sha = do
-    mce <- accessObject dets sha
+objectExists :: OdbS3Details -> Text -> Bool -> IO CacheEntry
+objectExists dets sha remote = do
+    mce <- accessObject dets sha remote
     return $ fromMaybe DoesNotExist mce
 
 readObject :: OdbS3Details -> Text -> Bool -> IO (Maybe ObjectInfo)
 readObject dets sha metadataOnly = do
-    ce <- objectExists dets sha
-    cacheLoadObject dets sha ce metadataOnly
+    ce <- objectExists dets sha False
+
+    -- By passing False to 'objectExists', we force it to query only the local
+    -- cache and database registry for information about the object, and not
+    -- Amazon.  If it's unknown, we make the assumption that it exists loosely
+    -- on S3, as this will almost always be the case with objects saved by the
+    -- School of Haskell (which does not use packs).
+    let ce' = case ce of DoesNotExist -> LooseRemote; _ -> ce
+    cacheLoadObject dets sha ce' metadataOnly
+        `catch` \(_ :: SomeException) -> return Nothing
 
 readObjectMetadata :: OdbS3Details -> Text -> IO (Maybe ObjectInfo)
 readObjectMetadata dets sha = readObject dets sha True
@@ -1033,10 +1045,11 @@ writeCallback oid be obj_data len obj_type = do
                  Nothing (Just bytes))
 
 existsCallback :: F'git_odb_backend_exists_callback
-existsCallback be oid = do
+existsCallback be oid confirmNotExists = do
     (dets, _, sha) <- unpackDetails be oid
-    wrap (T.unpack $ "S3.existsCallback " <> sha)
-        (do ce <- objectExists dets sha
+    wrap (T.unpack $ "S3.existsCallback "
+                  <> sha <> " " <> T.pack (show confirmNotExists))
+        (do ce <- objectExists dets sha (confirmNotExists == 0)
             return $ if ce == DoesNotExist then 0 else 1)
         (return c'GIT_ERROR)
 
