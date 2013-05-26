@@ -886,7 +886,7 @@ remoteWriteFile dets path typ bytes = do
         Just QuotaCheckSuccess      -> go
         Just QuotaSoftLimitExceeded -> go -- jww (2013-05-26): ???
         Just QuotaHardLimitExceeded ->
-            throw (Git.BackendError "Failed to write: user quota exceeded")
+            throw (Git.BackendError "Failed to write: quota exceeded")
   where
     go = do
         debug $ "remoteWriteFile " ++ show path
