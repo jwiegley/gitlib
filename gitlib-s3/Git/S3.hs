@@ -19,7 +19,7 @@
 module Git.S3
        ( s3Factory, odbS3Backend, addS3Backend
        , ObjectStatus(..), BackendCallbacks(..)
-       , ObjectType(..), ObjectLength(..)
+       , ObjectType(..), ObjectLength(..), QuotaStatus(..)
        , S3MockService(), s3MockService
        , mockGetBucket, mockHeadObject, mockGetObject, mockPutObject
        -- , readRefs, writeRefs
@@ -116,8 +116,17 @@ instance A.ToJSON ObjectLength; instance A.FromJSON ObjectLength
 instance A.ToJSON ObjectType;   instance A.FromJSON ObjectType
 instance A.ToJSON ObjectStatus; instance A.FromJSON ObjectStatus
 
+data QuotaStatus = QuotaCheckSuccess
+                 | QuotaSoftLimitExceeded
+                 | QuotaHardLimitExceeded
+                  deriving (Eq, Enum, Show, Generic)
+
 data BackendCallbacks = BackendCallbacks
-    { registerObject :: Text -> Maybe (ObjectLength, ObjectType) -> IO ()
+    { checkQuota :: ObjectLength -> IO (Maybe QuotaStatus)
+      -- 'checkQuota' gives the backend a chance to reject the upload of
+      -- objects that may exceed per-user quotas.
+
+    , registerObject :: Text -> Maybe (ObjectLength, ObjectType) -> IO ()
       -- 'registerObject' reports that a SHA has been written as a loose
       -- object to the S3 repository.  The for tracking it is that sometimes
       -- calling 'locateObject' can be much faster than querying Amazon.
@@ -180,7 +189,8 @@ data BackendCallbacks = BackendCallbacks
 
 instance Default BackendCallbacks where
     def = BackendCallbacks
-        { registerObject   = \_ _     -> return ()
+        { checkQuota       = \_       -> return Nothing
+        , registerObject   = \_ _     -> return ()
         , registerPackFile = \_ _ _   -> return ()
         , lookupObject     = \_       -> return Nothing
         , lookupPackFile   = \_       -> return Nothing
@@ -329,6 +339,14 @@ unpackDetails be oid = do
     oidStr <- oidToStr oid
     return (dets, oidStr, T.pack oidStr)
 
+wrapCheckQuota :: (ObjectLength -> IO (Maybe QuotaStatus))
+               -> ObjectLength
+               -> IO (Maybe QuotaStatus)
+wrapCheckQuota f len =
+    wrap ("checkQuota " ++ show len)
+        (f len)
+        (return Nothing)
+
 wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Text
                    -> Maybe (ObjectLength, ObjectType)
@@ -860,12 +878,22 @@ remoteReadPackFile dets packSha = do
 remoteWriteFile :: OdbS3Details -> Text -> ObjectType -> ByteString
                 -> ResourceT IO ()
 remoteWriteFile dets path typ bytes = do
-    debug $ "remoteWriteFile " ++ show path
-    let hdr = Bin.encode ((fromIntegral (B.length bytes),
-                           fromIntegral (getObjectType typ))
-                          :: (Int64,Int64))
-        payload = BL.append hdr (BL.fromChunks [bytes])
-    putFileS3 dets path (sourceLbs payload)
+    mstatus <- liftIO $ wrapCheckQuota (checkQuota (callbacks dets))
+                   (ObjectLength (fromIntegral (B.length bytes)))
+    case mstatus of
+        Nothing                     -> go
+        Just QuotaCheckSuccess      -> go
+        Just QuotaSoftLimitExceeded -> go -- jww (2013-05-26): ???
+        Just QuotaHardLimitExceeded ->
+            throw (Git.BackendError "Failed to write: user quota exceeded")
+  where
+    go = do
+        debug $ "remoteWriteFile " ++ show path
+        let hdr = Bin.encode ((fromIntegral (B.length bytes),
+                               fromIntegral (getObjectType typ))
+                              :: (Int64,Int64))
+            payload = BL.append hdr (BL.fromChunks [bytes])
+        putFileS3 dets path (sourceLbs payload)
 
 remoteLoadObject :: OdbS3Details -> Text -> ResourceT IO (Maybe ObjectInfo)
 remoteLoadObject dets sha = do
