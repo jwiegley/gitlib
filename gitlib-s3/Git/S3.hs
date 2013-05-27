@@ -119,8 +119,14 @@ instance A.ToJSON ObjectStatus; instance A.FromJSON ObjectStatus
 
 data QuotaStatus = QuotaCheckSuccess
                  | QuotaSoftLimitExceeded
+                   { quotaStatusAmount :: Int64
+                   , quotaStatusLimit  :: Int64
+                   }
                  | QuotaHardLimitExceeded
-                  deriving (Eq, Enum, Show, Generic)
+                   { quotaStatusAmount :: Int64
+                   , quotaStatusLimit  :: Int64
+                   }
+                  deriving (Eq, Show, Generic)
 
 data BackendCallbacks = BackendCallbacks
     { checkQuota :: ObjectLength -> IO (Maybe QuotaStatus)
@@ -882,10 +888,10 @@ remoteWriteFile dets path typ bytes = do
     mstatus <- liftIO $ wrapCheckQuota (checkQuota (callbacks dets))
                    (ObjectLength (fromIntegral (B.length bytes)))
     case mstatus of
-        Nothing                     -> go
-        Just QuotaCheckSuccess      -> go
-        Just QuotaSoftLimitExceeded -> go -- jww (2013-05-26): ???
-        Just QuotaHardLimitExceeded ->
+        Nothing -> go
+        Just QuotaCheckSuccess -> go
+        Just (QuotaSoftLimitExceeded {}) -> go -- jww (2013-05-26): ???
+        Just (QuotaHardLimitExceeded {}) ->
             throw (Git.BackendError "Failed to write: quota exceeded")
   where
     go = do
