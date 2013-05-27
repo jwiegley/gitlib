@@ -203,10 +203,14 @@ cliResetHard refname =
     doRunGit run_ [ "reset", "--hard", TL.fromStrict refname ] $ return ()
 
 cliPullCommitDirectly :: Git.MonadGit m
-                      => Text -> Text -> Maybe FilePath
+                      => Text
+                      -> Text
+                      -> Text
+                      -> Text
+                      -> Maybe FilePath
                       -> CmdLineRepository m
                           (Git.MergeResult (CmdLineRepository m))
-cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
+cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
     repo     <- cliGet
     leftHead <- Git.resolveRef "HEAD"
 
@@ -222,7 +226,10 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName msshCmd = do
                    `T.append` T.pack (show remoteNameOrURI))
 
         git_ $ [ "--git-dir", repoPath repo
-               , "-c", "merge.conflictstyle=merge" ]
+               , "-c", "user.name=" <> TL.fromStrict user
+               , "-c", "user.email=" <> TL.fromStrict email
+               , "-c", "merge.conflictstyle=merge"
+               ]
             <> [ "pull", "--quiet"
                , TL.fromStrict remoteNameOrURI
                , TL.fromStrict remoteRefName ]
