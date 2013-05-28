@@ -10,17 +10,15 @@ import System.Exit
 import System.Process (system)
 
 main :: IO ()
-main = do
+main = withLibGitDo $ do
   putStrLn "Creating Git repository..."
   _ <- system "git init smoke.git"
 
   putStrLn "Accessing directly..."
-  c'git_threads_init
   alloca $ \ptr -> do
     withCString "smoke.git/.git" $ \str -> do
       r <- c'git_repository_open ptr str
       when (r < 0) $ exitWith (ExitFailure 1)
       peek ptr >>= c'git_repository_free
-  c'git_threads_shutdown
 
 -- Main.hs ends here

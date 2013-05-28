@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.18.0.5
+Version:             0.18.0.6
 Synopsis:            Low-level bindings to libgit2
 Description:         Bindings to libgit2 v0.18.0.
 License-file:        LICENSE
@@ -28,6 +28,7 @@ Source-repository head
 Test-suite smoke
   default-language: Haskell98
   type: exitcode-stdio-1.0
+  ghc-options: -Wall
   main-is: Main.hs
   hs-source-dirs: test
   build-depends:
@@ -37,6 +38,7 @@ Test-suite smoke
 
 Library
   hs-source-dirs: .
+  ghc-options: -Wall
   default-language: Haskell98
   default-extensions:
     ForeignFunctionInterface
@@ -208,6 +210,7 @@ Library
   cc-options: -g         -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL
   ld-options: -g
   if os(windows)
+    ghc-options: -DWINDOWS
     cc-options: -DGIT_WIN32 -DWIN32 -DWIN32_SHA1 -D_DEBUG -D_WIN32_WINNT=0x0501 -DGIT_WINHTTP
     c-sources:
       libgit2/src/hash/hash_win32.c

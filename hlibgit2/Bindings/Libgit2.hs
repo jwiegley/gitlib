@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Bindings.Libgit2
     ( module Bindings.Libgit2.Attr
     , module Bindings.Libgit2.Blob
@@ -45,8 +47,9 @@ module Bindings.Libgit2
     , module Bindings.Libgit2.Transport
     , module Bindings.Libgit2.Tree
     , module Bindings.Libgit2.Types
-    , module Bindings.Libgit2.Version
+#ifdef WINDOWS
     , module Bindings.Libgit2.Windows
+#endif
     , withLibGitDo
     ) where
 import Bindings.Libgit2.Attr
@@ -95,8 +98,9 @@ import Bindings.Libgit2.Trace
 import Bindings.Libgit2.Transport
 import Bindings.Libgit2.Tree
 import Bindings.Libgit2.Types
-import Bindings.Libgit2.Version
+#ifdef WINDOWS
 import Bindings.Libgit2.Windows
+#endif
 
 -- import Control.Monad.IO.Class (MonadIO, liftIO)
 -- import Control.Monad.Trans.Control (MonadBaseControl)
@@ -113,5 +117,7 @@ import System.Mem (performGC)
 --   thread libgit2 library is performed.
 withLibGitDo :: IO a -> IO a
 withLibGitDo f = do
-    c'git_threads_init
-    finally f (performGC >> c'git_threads_shutdown)
+    r <- c'git_threads_init
+    if r < 0
+        then error "c'git_threads_init failed"
+        else finally f (performGC >> c'git_threads_shutdown)
