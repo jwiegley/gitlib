@@ -5,8 +5,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
+{-# OPTIONS_GHC -fno-warn-name-shadowing
+                -fno-warn-unused-binds
+                -fno-warn-orphans #-}
 
 -- | Interface for opening and creating repositories.  Repository objects are
 --   immutable, and serve only to refer to the given repository.  Any data
@@ -99,8 +101,7 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
         { getOid :: ForeignPtr C'git_oid
         }
     data TreeData (LgRepository m) = TreeData
-        { lgTreeInfo       :: IORef (Base m (Tree m) C'git_tree)
-        , lgPendingUpdates :: IORef (HashMap Text (Tree m))
+        { lgPendingUpdates :: IORef (HashMap Text (Tree m))
         , lgTreeContents   :: ForeignPtr C'git_treebuilder
         }
 
@@ -266,13 +267,12 @@ lgTraverseEntries initialTree f = go "" initialTree
             return 0
 
 lgMakeTree :: Git.MonadGit m
-           => IORef (Base m (Tree m) C'git_tree)
-           -> IORef (HashMap Text (Tree m))
+           => IORef (HashMap Text (Tree m))
            -> ForeignPtr C'git_treebuilder
            -> Tree m
-lgMakeTree info updates contents =
+lgMakeTree updates contents =
     Git.mkTree lgModifyTree lgWriteTree lgTraverseEntries $
-        TreeData info updates contents
+        TreeData updates contents
 
 -- | Create a new, empty tree.
 --
@@ -290,17 +290,16 @@ lgNewTree = do
 
     if r < 0
         then failure (Git.TreeCreateFailed "Failed to create new tree builder")
-        else lgMakeTree <$> liftIO (newIORef (Base Nothing Nothing))
-                        <*> liftIO (newIORef HashMap.empty)
+        else lgMakeTree <$> liftIO (newIORef HashMap.empty)
                         <*> pure fptr
 
 lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) (Oid m)
              -> LgRepository m (Tree m)
 lgLookupTree len oid = do
     -- jww (2013-01-28): Verify the oid here
-    (info,upds,fptr) <- lookupObject' (getOid (unTagged oid)) len
+    (upds,fptr) <- lookupObject' (getOid (unTagged oid)) len
           c'git_tree_lookup c'git_tree_lookup_prefix $
-          \coid obj _ ->
+          \_coid obj _ ->
               withForeignPtr obj $ \objPtr -> do
                   -- count <- c'git_tree_entrycount (castPtr objPtr)
                   -- size <- newIORef 0
@@ -315,10 +314,8 @@ lgLookupTree len oid = do
                                     "Failed to create tree builder")
                       else do
                       upds <- liftIO $ newIORef HashMap.empty
-                      info <- liftIO $ newIORef
-                              (Base (Just (Tagged (Oid coid))) (Just obj))
-                      return (info,upds,fptr)
-    return $ lgMakeTree info upds fptr
+                      return (upds,fptr)
+    return $ lgMakeTree upds fptr
 
 entryToTreeEntry :: Git.MonadGit m => Ptr C'git_tree_entry -> IO (TreeEntry m)
 entryToTreeEntry entry = do

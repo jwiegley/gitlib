@@ -8,15 +8,9 @@
 
 module Main where
 
-import           Control.Monad
-import qualified Git as Git
 import qualified Git.CmdLine as Cli
 import qualified Git.Libgit2 as Lg
 import qualified Git.Smoke as Git
-import           System.Exit
-import           Test.HUnit
-import           Test.Hspec (Spec, describe, it, hspec)
-import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 

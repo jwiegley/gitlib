@@ -6,7 +6,10 @@
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+
+{-# OPTIONS_GHC -fno-warn-name-shadowing
+                -fno-warn-unused-binds
+                -fno-warn-orphans #-}
 
 module Git.Sample
        ( SampleRepository(..), Repository(..)
@@ -52,12 +55,14 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     pushCommit       = undefined
     traverseCommits  = undefined
     missingObjects   = undefined
+    traverseObjects  = undefined
     newTree          = undefined
     hashContents     = undefined
     createBlob       = undefined
     createCommit     = undefined
     createTag        = undefined
     deleteRepository = undefined
+    remoteFetch      = undefined
 
 instance Show (Git.Oid (SampleRepository m)) where
     show (Oid _coid) = undefined

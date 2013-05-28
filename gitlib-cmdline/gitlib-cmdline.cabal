@@ -46,6 +46,7 @@ Test-suite smoke
   default-language: Haskell98
   type: exitcode-stdio-1.0
   main-is: Smoke.hs
+  ghc-options: -Wall
   hs-source-dirs: test
   build-depends:
       base >=3

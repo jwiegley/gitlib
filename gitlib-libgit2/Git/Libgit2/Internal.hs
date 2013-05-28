@@ -151,7 +151,7 @@ peekGitTime tptr = do
 packGitTime :: ZonedTime -> C'git_time
 packGitTime zt = C'git_time
     { c'git_time'time   =
-           fromIntegral (floor (utcTimeToPOSIXSeconds (zonedTimeToUTC zt)))
+           floor (utcTimeToPOSIXSeconds (zonedTimeToUTC zt))
     , c'git_time'offset = fromIntegral (timeZoneMinutes (zonedTimeZone zt))
     }
 

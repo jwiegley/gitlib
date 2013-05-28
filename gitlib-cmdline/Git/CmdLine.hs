@@ -105,11 +105,14 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     pushCommit      = \name _ rrefname -> Git.genericPushCommit name rrefname
     traverseCommits = cliTraverseCommits
     missingObjects  = cliMissingObjects
+    traverseObjects = error "Not defined: CmdLineRepository.traverseObjects"
     newTree         = cliNewTree
     hashContents    = cliHashContents
     createBlob      = cliCreateBlob
     createCommit    = cliCreateCommit
     createTag       = cliCreateTag
+
+    remoteFetch     = error "Not defined: CmdLineRepository.remoteFetch"
 
     deleteRepository =
         cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions

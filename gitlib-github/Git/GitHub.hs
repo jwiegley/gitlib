@@ -105,6 +105,7 @@ instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
     existsObject     = error "Not defined: GitHubRepository.existsObject"
     traverseCommits  = error "Not defined: GitHubRepository.traverseCommits"
     missingObjects   = error "Not defined: GitHubRepository.missingObjects"
+    traverseObjects  = error "Not defined: GitHubRepository.traverseObjects"
     newTree          = ghNewTree
                        -- jww (2013-03-14): do the hashing locally
     hashContents     = error "Not defined: GitHubRepository.hashContents"
@@ -112,6 +113,7 @@ instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
     createCommit     = ghCreateCommit
     createTag        = error "Not defined: GitHubRepository.createTag"
     deleteRepository = ghDeleteRepository
+    remoteFetch      = error "Not defined: GitHubRepository.remoteFetch"
 
 data GitHubBlob = GitHubBlob
     { ghBlobContent  :: ByteString
