@@ -226,8 +226,12 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
                    `T.append` T.pack (show remoteNameOrURI))
 
         git_ $ [ "--git-dir", repoPath repo
-               , "-c", "user.name=" <> TL.fromStrict user
-               , "-c", "user.email=" <> TL.fromStrict email
+               , "config", "user.name", TL.fromStrict user
+               ]
+        git_ $ [ "--git-dir", repoPath repo
+               , "config", "user.email", TL.fromStrict email
+               ]
+        git_ $ [ "--git-dir", repoPath repo
                , "-c", "merge.conflictstyle=merge"
                ]
             <> [ "pull", "--quiet"
