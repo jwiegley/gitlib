@@ -210,7 +210,7 @@ Library
   cc-options: -g         -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL
   ld-options: -g
   if os(windows)
-    ghc-options: -DWINDOWS
+    cpp-options: -DWINDOWS
     cc-options: -DGIT_WIN32 -DWIN32 -DWIN32_SHA1 -D_DEBUG -D_WIN32_WINNT=0x0501 -DGIT_WINHTTP
     c-sources:
       libgit2/src/hash/hash_win32.c
