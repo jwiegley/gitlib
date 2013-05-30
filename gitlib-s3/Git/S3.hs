@@ -272,12 +272,7 @@ instance Storable OdbS3Backend where
   sizeOf _ =
         sizeOf (undefined :: C'git_odb_backend)
       + sizeOf (undefined :: Ptr C'git_odb_writepack)
-      + sizeOf (undefined :: StablePtr Manager)
-      + sizeOf (undefined :: StablePtr Text)
-      + sizeOf (undefined :: StablePtr Text)
-      + sizeOf (undefined :: StablePtr Configuration)
-      + sizeOf (undefined :: StablePtr (S3Configuration NormalQuery))
-      + sizeOf (undefined :: StablePtr BackendCallbacks)
+      + sizeOf (undefined :: StablePtr OdbS3Details)
 
   peek p = do
     v0 <- peekByteOff p 0
