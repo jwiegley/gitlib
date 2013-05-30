@@ -37,7 +37,8 @@ data RepositoryFacts = RepositoryFacts
     { hasSymbolicReferences :: !Bool
     } deriving Show
 
-type MonadGit m = (Failure Git.GitException m, MonadIO m, Applicative m)
+type MonadGit m = (Failure Git.GitException m, Applicative m,
+                   MonadIO m, MonadBaseControl IO m)
 
 -- | 'Repository' is the central point of contact between user code and
 -- Git data objects.  Every object must belong to some repository.
@@ -164,6 +165,7 @@ data GitException = BackendError Text
                   | ObjectRefRequiresFullOid
                   | OidCopyFailed
                   | OidParseFailed Text
+                  | QuotaHardLimitExceeded Int Int
                   deriving (Eq, Show, Typeable)
 
 -- jww (2013-02-11): Create a BackendException data constructor of forall

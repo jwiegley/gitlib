@@ -12,12 +12,14 @@ module Git.Libgit2.Types where
 import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Exception
+import           Control.Monad (liftM)
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Data.Conduit
+import           Data.IORef
 import           Data.Monoid
 import           Data.Text (Text)
 import           Data.Text as T (pack, unpack)
@@ -29,7 +31,9 @@ import           System.IO.Unsafe
 
 data Repository = Repository
     { repoOptions :: Git.RepositoryOptions
-    , repoObj     :: ForeignPtr C'git_repository }
+    , repoObj     :: ForeignPtr C'git_repository
+    , repoExcTrap :: IORef (Maybe Git.GitException)
+    }
 
 repoPath :: Repository -> FilePath
 repoPath = Git.repoPath . repoOptions
@@ -105,5 +109,8 @@ type Options m    = Git.Options (LgRepository m)
 
 lgGet :: Monad m => LgRepository m Repository
 lgGet = LgRepository ask
+
+lgExcTrap :: Monad m => LgRepository m (IORef (Maybe Git.GitException))
+lgExcTrap = repoExcTrap `liftM` lgGet
 
 -- Types.hs

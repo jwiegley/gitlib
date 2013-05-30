@@ -34,6 +34,7 @@ module Git.Libgit2
        , lgFactory
        , lgForEachObject
        , lgGet
+       , lgExcTrap
        , lgLoadPackFileInMemory
        , lgReadFromPack
        , lgWithPackFile
@@ -131,17 +132,26 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     traverseObjects = error "Not defined: LgRepository.traverseObjects"
     newTree         = lgNewTree
     hashContents    = lgHashContents
-    createBlob      = lgCreateBlob
-    createCommit    = lgCreateCommit
+    createBlob      = lgWrap . lgCreateBlob
     createTag       = undefined
+
+    createCommit p t a c l r = lgWrap $ lgCreateCommit p t a c l r
 
     deleteRepository = lgGet >>= liftIO . removeTree . repoPath
 
     buildPackFile   = lgBuildPackFile
     buildPackIndex  = lgBuildPackIndexWrapper
-    writePackFile   = lgWritePackFile
+    writePackFile   = lgWrap . lgWritePackFile
 
     remoteFetch     = lgRemoteFetch
+
+lgWrap :: (MonadIO m, MonadBaseControl IO m)
+       => LgRepository m a -> LgRepository m a
+lgWrap f = f `Exc.catch` \e -> do
+    etrap <- lgExcTrap
+    mexc  <- liftIO $ readIORef etrap
+    liftIO $ writeIORef etrap Nothing
+    maybe (throw (e :: SomeException)) throw mexc
 
 lgParseOid :: Git.MonadGit m => Text -> LgRepository m (Oid m)
 lgParseOid str
@@ -1281,8 +1291,11 @@ openLgRepository opts = do
                         error $ "Could not open repository " ++ T.unpack p
                     ptr' <- peek ptr
                     newForeignPtr p'git_repository_free ptr'
+        excTrap <- newIORef Nothing
         return Repository { repoOptions = opts
-                          , repoObj     = fptr }
+                          , repoObj     = fptr
+                          , repoExcTrap = excTrap
+                          }
 
 runLgRepository :: Repository -> LgRepository m a -> m a
 runLgRepository repo action =

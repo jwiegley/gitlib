@@ -188,10 +188,15 @@ data BackendCallbacks = BackendCallbacks
     , acquireLock :: Text -> IO Text
     , releaseLock :: Text -> IO ()
 
-    , shuttingDown    :: IO ()
+    , shuttingDown :: IO ()
       -- 'shuttingDown' informs whoever registered with this backend that we
       -- are about to disappear, and as such any resources which they acquired
       -- on behalf of this backend should be released.
+
+    , setException :: Git.GitException -> IO ()
+      -- 'setException' is used to indicate to gitlib that a more meaningful
+      -- exception has occurred, from the one that will be raised by libgit2
+      -- upon exiting this backend with an error status.
     }
 
 instance Default BackendCallbacks where
@@ -210,6 +215,7 @@ instance Default BackendCallbacks where
         , acquireLock      = \_       -> return ""
         , releaseLock      = \_       -> return ()
         , shuttingDown     = return ()
+        , setException     = \_       -> return ()
         }
 
 data CacheEntry
@@ -451,6 +457,12 @@ wrapReleaseLock f name =
 
 wrapShuttingDown :: IO () -> IO ()
 wrapShuttingDown f = wrap "shuttingDown..." f (return ())
+
+wrapSetException :: (Git.GitException -> IO ()) -> Git.GitException -> IO ()
+wrapSetException f e =
+    wrap ("setException: " ++ show e)
+        (f e)
+        (return ())
 
 awsRetry :: Transaction r a
          => Configuration
@@ -885,9 +897,13 @@ remoteWriteFile dets path typ bytes = do
     case mstatus of
         Nothing -> go
         Just QuotaCheckSuccess -> go
-        Just (QuotaSoftLimitExceeded {}) -> go -- jww (2013-05-26): ???
-        Just (QuotaHardLimitExceeded {}) ->
-            throw (Git.BackendError "Failed to write: quota exceeded")
+        Just (QuotaSoftLimitExceeded {}) -> go
+        Just (QuotaHardLimitExceeded {..}) -> do
+            let e = Git.QuotaHardLimitExceeded
+                        (fromIntegral quotaStatusAmount)
+                        (fromIntegral quotaStatusLimit)
+            liftIO $ wrapSetException (setException (callbacks dets)) e
+            throw e
   where
     go = do
         debug $ "remoteWriteFile " ++ show path
