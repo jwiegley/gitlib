@@ -257,9 +257,7 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
             xs <- returnConflict . TL.init
                   <$> git [ "--git-dir", repoPath repo
                           , "status", "-z", "--porcelain" ]
-            forM_ (Map.keys xs) $ \fp ->
-                git_ [ "--git-dir", repoPath repo
-                     , "add", toTextIgnore fp ]
+            forM_ (Map.assocs xs) $ uncurry (handleFile repo)
             git_ [ "--git-dir", repoPath repo
                  , "commit", "-F", ".git/MERGE_MSG" ]
             return xs
@@ -267,6 +265,11 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
                             <*> pure leftHead
                             <*> pure rightHead
                             <*> pure xs
+
+    handleFile repo fp (Git.Deleted, Git.Deleted) =
+        git_ [ "--git-dir", repoPath repo, "rm", "--cached", toTextIgnore fp ]
+    handleFile repo fp (_, _) =
+        git_ [ "--git-dir", repoPath repo, "add", toTextIgnore fp ]
 
     getOid name = do
         mref <- Git.resolveRef name
