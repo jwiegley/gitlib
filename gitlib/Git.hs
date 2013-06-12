@@ -147,7 +147,7 @@ data GitException = BackendError Text
                   | TreeBuilderCreateFailed
                   | TreeBuilderInsertFailed Text
                   | TreeBuilderRemoveFailed Text
-                  | TreeBuilderWriteFailed
+                  | TreeBuilderWriteFailed Text
                   | TreeLookupFailed
                   | TreeCannotTraverseBlob
                   | TreeCannotTraverseCommit

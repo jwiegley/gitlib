@@ -381,9 +381,11 @@ doLookupTreeEntry t (name:names) = do
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 lgWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (TreeOid m)
-lgWriteTree t = doWriteTree t
-                >>= maybe (failure Git.TreeBuilderWriteFailed)
-                          (return . Tagged)
+lgWriteTree t =
+    doWriteTree t
+        >>= maybe (failure (Git.TreeBuilderWriteFailed
+                            "Attempt to write a tree with no entries"))
+                  (return . Tagged)
 
 insertEntry :: Git.MonadGit m
             => ForeignPtr C'git_treebuilder -> String -> Oid m -> CUInt
@@ -406,17 +408,15 @@ dropEntry builder key = do
 doWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (Maybe (Oid m))
 doWriteTree t = do
     repo <- lgGet
-
     let tdata    = Git.getTreeData t
         contents = lgTreeContents tdata
+
     upds <- liftIO $ readIORef (lgPendingUpdates tdata)
-    mapM_ (\(k,v) -> do
-                oid <- doWriteTree v
-                case oid of
-                    Nothing   -> dropEntry contents (T.unpack k)
-                    Just oid' ->
-                        insertEntry contents (T.unpack k) oid' 0o040000)
-          (HashMap.toList upds)
+    forM_ (HashMap.toList upds) $ \(k,v) -> do
+        oid <- doWriteTree v
+        case oid of
+            Nothing   -> dropEntry contents (T.unpack k)
+            Just oid' -> insertEntry contents (T.unpack k) oid' 0o040000
     liftIO $ writeIORef (lgPendingUpdates tdata) HashMap.empty
 
     cnt <- liftIO $ withForeignPtr contents c'git_treebuilder_entrycount
@@ -436,7 +436,13 @@ doWriteTree t = do
                 withForeignPtr repo $ \repoPtr -> do
                     r3 <- c'git_treebuilder_write coid' repoPtr builder
                     return (r3,coid)
-        when (r3 < 0) $ failure Git.TreeBuilderWriteFailed
+        when (r3 < 0) $ do
+            errPtr <- liftIO $ c'giterr_last
+            err    <- liftIO $ peek errPtr
+            errStr <- liftIO $ peekCString (c'git_error'message err)
+            failure (Git.TreeBuilderWriteFailed $ T.pack $
+                     "c'git_treebuilder_write failed with " ++ show r3
+                     ++ ": " ++ errStr)
         return (Just (Oid coid))
 
 doModifyTree :: Git.MonadGit m
