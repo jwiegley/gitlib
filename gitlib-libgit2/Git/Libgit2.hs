@@ -385,6 +385,13 @@ lgWriteTree t =
                             "Attempt to write a tree with no entries"))
                   (return . Tagged)
 
+lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
+lgTreeEntryCount t = do
+    let tdata    = Git.getTreeData t
+        contents = lgTreeContents tdata
+    fromIntegral
+        <$> liftIO (withForeignPtr contents c'git_treebuilder_entrycount)
+
 insertEntry :: Git.MonadGit m
             => ForeignPtr C'git_treebuilder -> String -> Oid m -> CUInt
             -> LgRepository m ()
