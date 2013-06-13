@@ -379,11 +379,11 @@ doLookupTreeEntry t (name:names) = do
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 lgWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (TreeOid m)
-lgWriteTree t =
+lgWriteTree t = do
+    -- This is the Oid of every empty tree
+    emptyTreeOid <- Git.parseOid "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
     doWriteTree t
-        >>= maybe (failure (Git.TreeBuilderWriteFailed
-                            "Attempt to write a tree with no entries"))
-                  (return . Tagged)
+        >>= return . Tagged . fromMaybe emptyTreeOid
 
 lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
 lgTreeEntryCount t = do
