@@ -278,19 +278,30 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
                                  T.append "Reference missing: " name)
             Just ref -> return (Git.commitRefOid ref)
 
-    charToModKind 'M' = Git.Modified
-    charToModKind 'U' = Git.Modified
-    charToModKind 'A' = Git.Added
-    charToModKind 'D' = Git.Deleted
-    charToModKind _   = Git.Unchanged
+    charToModKind 'M' = Right Git.Modified
+    charToModKind 'U' = Left Git.Unchanged
+    charToModKind 'A' = Right Git.Added
+    charToModKind 'D' = Right Git.Deleted
+    charToModKind _   = Right Git.Unchanged
 
     returnConflict xs =
         Map.fromList
             . filter (\(_, (l, r)) -> ((&&) `on` (/= Git.Unchanged)) l r)
             . map (\l -> (fromText $ TL.drop 3 l,
-                          (charToModKind (TL.index l 0),
-                           charToModKind (TL.index l 1)))) . init
+                          getModKinds (TL.index l 0) (TL.index l 1)))
+            . init
             . TL.splitOn "\NUL" $ xs
+
+    getModKinds l r = case (charToModKind l, charToModKind r) of
+        -- What this really means is that they are both *unmerged*, not
+        -- unchanged, so we call that modified.  'U' doesn't really mean
+        -- unchanged in the git status output, but it can imply that the file
+        -- either was modified, or that it wasn't modified.  It's a little
+        -- confusing in that regard.
+        (Left _, Left _)   -> (Git.Modified, Git.Modified)
+        (Left x, Right y)  -> (x, y)
+        (Right x, Left y)  -> (x, y)
+        (Right x, Right y) -> (x, y)
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
