@@ -311,8 +311,6 @@ lgLookupTree len oid = do
           c'git_tree_lookup c'git_tree_lookup_prefix $
           \_coid obj _ ->
               withForeignPtr obj $ \objPtr -> do
-                  -- count <- c'git_tree_entrycount (castPtr objPtr)
-                  -- size <- newIORef 0
                   (r,fptr) <- alloca $ \pptr -> do
                       r <- c'git_treebuilder_create pptr objPtr
                       builder <- peek pptr
