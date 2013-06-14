@@ -261,10 +261,17 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
             git_ [ "--git-dir", repoPath repo
                  , "commit", "-F", ".git/MERGE_MSG" ]
             return xs
-        Git.MergeConflicted <$> getOid "HEAD"
-                            <*> pure leftHead
-                            <*> pure rightHead
-                            <*> pure xs
+        Git.MergeConflicted
+            <$> getOid "HEAD"
+            <*> pure leftHead
+            <*> pure rightHead
+            <*> pure (Map.fromList . filter (isConflict . snd)
+                                   . Map.toList $ xs)
+
+    isConflict (Git.Deleted, Git.Deleted) = False
+    isConflict (_, Git.Unchanged)         = False
+    isConflict (Git.Unchanged, _)         = False
+    isConflict _                          = True
 
     handleFile repo fp (Git.Deleted, Git.Deleted) =
         git_ [ "--git-dir", repoPath repo, "rm", "--cached", toTextIgnore fp ]
