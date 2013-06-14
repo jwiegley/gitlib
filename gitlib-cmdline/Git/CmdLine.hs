@@ -268,6 +268,8 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
 
     handleFile repo fp (Git.Deleted, Git.Deleted) =
         git_ [ "--git-dir", repoPath repo, "rm", "--cached", toTextIgnore fp ]
+    handleFile repo fp (Git.Unchanged, Git.Deleted) =
+        git_ [ "--git-dir", repoPath repo, "rm", "--cached", toTextIgnore fp ]
     handleFile repo fp (_, _) =
         git_ [ "--git-dir", repoPath repo, "add", toTextIgnore fp ]
 
@@ -278,30 +280,33 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
                                  T.append "Reference missing: " name)
             Just ref -> return (Git.commitRefOid ref)
 
-    charToModKind 'M' = Right Git.Modified
-    charToModKind 'U' = Left Git.Unchanged
-    charToModKind 'A' = Right Git.Added
-    charToModKind 'D' = Right Git.Deleted
-    charToModKind _   = Right Git.Unchanged
+    charToModKind 'M' = Just Git.Modified
+    charToModKind 'U' = Just Git.Unchanged
+    charToModKind 'A' = Just Git.Added
+    charToModKind 'D' = Just Git.Deleted
+    charToModKind _   = Nothing
 
     returnConflict xs =
         Map.fromList
-            . filter (\(_, (l, r)) -> ((&&) `on` (/= Git.Unchanged)) l r)
+            . map (\(f, (l, r)) -> (f, getModKinds l r))
+            . filter (\(_, (l, r)) -> ((&&) `on` isJust) l r)
             . map (\l -> (fromText $ TL.drop 3 l,
-                          getModKinds (TL.index l 0) (TL.index l 1)))
+                          (charToModKind (TL.index l 0),
+                           charToModKind (TL.index l 1))))
             . init
             . TL.splitOn "\NUL" $ xs
 
-    getModKinds l r = case (charToModKind l, charToModKind r) of
-        -- What this really means is that they are both *unmerged*, not
-        -- unchanged, so we call that modified.  'U' doesn't really mean
-        -- unchanged in the git status output, but it can imply that the file
-        -- either was modified, or that it wasn't modified.  It's a little
-        -- confusing in that regard.
-        (Left _, Left _)   -> (Git.Modified, Git.Modified)
-        (Left x, Right y)  -> (x, y)
-        (Right x, Left y)  -> (x, y)
-        (Right x, Right y) -> (x, y)
+    getModKinds l r = case (l, r) of
+        (Nothing, Just x)    -> (Git.Unchanged, x)
+        (Just x, Nothing)    -> (x, Git.Unchanged)
+        -- 'U' really means unmerged, but it can mean both modified and
+        -- unmodified as a result.  Example: UU means both sides have modified
+        -- a file, but AU means that the left side added the file and the
+        -- right side knows nothing about the file.
+        (Just Git.Unchanged,
+         Just Git.Unchanged) -> (Git.Modified, Git.Modified)
+        (Just x, Just y)     -> (x, y)
+        (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
