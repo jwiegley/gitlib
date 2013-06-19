@@ -276,6 +276,11 @@ data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
                  | TreeEntry   { treeEntryRef   :: !(TreeRef m) }
                  | CommitEntry { commitEntryRef :: !(CommitOid m) }
 
+treeEntryOid :: Repository m => TreeEntry m -> m (Oid m)
+treeEntryOid (BlobEntry boid _) = return $ unTagged boid
+treeEntryOid (TreeEntry tref)   = unTagged <$> treeRefOid tref
+treeEntryOid (CommitEntry coid) = return $ unTagged coid
+
 blobEntry :: Repository m => BlobOid m -> BlobKind -> TreeEntry m
 blobEntry = BlobEntry
 
