@@ -191,15 +191,18 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
         r <- lastExitCode
         if r == 0
             then return Nothing
-            else Just . TL.toStrict <$> lastStderr
+            else Just
+                 . (\x -> if "non-fast-forward" `T.isInfixOf` x
+                         then Git.PushNotFastForward x
+                         else (Git.BackendError $ "git push failed:\n" <> x))
+                 . TL.toStrict <$> lastStderr
     case merr of
         Nothing  -> do
             mcref <- Git.resolveRef remoteRefName
             case mcref of
                 Nothing   -> failure (Git.BackendError $ "git push failed")
                 Just cref -> return cref
-        Just err ->
-            failure (Git.BackendError $ "git push failed:\n" <> err)
+        Just err -> failure err
 
 cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliResetHard refname =
