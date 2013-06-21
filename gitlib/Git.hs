@@ -137,6 +137,7 @@ data GitException = BackendError Text
                   | GitError Text
                   | RepositoryNotExist
                   | RepositoryInvalid
+                  | RepositoryCannotAccess Text
                   | BlobCreateFailed
                   | BlobEmptyCreateFailed
                   | BlobEncodingUnknown Text

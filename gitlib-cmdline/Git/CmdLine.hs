@@ -155,12 +155,15 @@ runGit_ :: Git.MonadGit m
         => [TL.Text] -> CmdLineRepository m ()
 runGit_ = flip (doRunGit run_) (return ())
 
-cliDoesRepoExist :: Text -> Sh Bool
-cliDoesRepoExist remoteURI = do
+cliRepoDoesExist :: Text -> Sh (Either Git.GitException ())
+cliRepoDoesExist remoteURI = do
     setenv "SSH_ASKPASS" "echo"
     setenv "GIT_ASKPASS" "echo"
     git_ [ "ls-remote", TL.fromStrict remoteURI ]
-    (==0) <$> lastExitCode
+    ec <- lastExitCode
+    return $ if ec == 0
+             then Right ()
+             else Left $ Git.RepositoryCannotAccess remoteURI
 
 cliFilePathToURI :: Git.MonadGit m => FilePath -> m Text
 cliFilePathToURI =
@@ -179,24 +182,24 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
 
-        exists <- cliDoesRepoExist remoteNameOrURI
-        unless exists $
-            throw (Git.BackendError $ "Repository does not exist: "
-                   `T.append` T.pack (show remoteNameOrURI))
-
-        git_ $ [ "--git-dir", repoPath repo ]
-            <> [ "push", TL.fromStrict remoteNameOrURI
-               , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
-                           , ":", TL.fromStrict remoteRefName ] ]
-        r <- lastExitCode
-        if r == 0
-            then return Nothing
-            else Just
-                 . (\x -> if "non-fast-forward" `T.isInfixOf` x ||
-                            "Note about fast-forwards" `T.isInfixOf` x
-                         then Git.PushNotFastForward x
-                         else (Git.BackendError $ "git push failed:\n" <> x))
-                 . TL.toStrict <$> lastStderr
+        eres <- cliRepoDoesExist remoteNameOrURI
+        case eres of
+            Left e -> return (Just e)
+            Right () -> do
+                git_ $ [ "--git-dir", repoPath repo ]
+                    <> [ "push", TL.fromStrict remoteNameOrURI
+                       , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
+                                   , ":", TL.fromStrict remoteRefName ] ]
+                r <- lastExitCode
+                if r == 0
+                    then return Nothing
+                    else Just
+                         . (\x -> if "non-fast-forward" `T.isInfixOf` x ||
+                                    "Note about fast-forwards" `T.isInfixOf` x
+                                 then Git.PushNotFastForward x
+                                 else (Git.BackendError $
+                                       "git push failed:\n" <> x))
+                         . TL.toStrict <$> lastStderr
     case merr of
         Nothing  -> do
             mcref <- Git.resolveRef remoteRefName
@@ -221,37 +224,39 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
     repo     <- cliGet
     leftHead <- Git.resolveRef "HEAD"
 
-    r <- shellyNoDir $ silently $ errExit False $ do
+    eres <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
             Nothing     -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
                                =<< liftIO (F.canonicalizePath sshCmd)
 
-        exists <- cliDoesRepoExist remoteNameOrURI
-        unless exists $
-            throw (Git.BackendError $ "Repository does not exist: "
-                   `T.append` T.pack (show remoteNameOrURI))
-
-        git_ $ [ "--git-dir", repoPath repo
-               , "config", "user.name", TL.fromStrict user
-               ]
-        git_ $ [ "--git-dir", repoPath repo
-               , "config", "user.email", TL.fromStrict email
-               ]
-        git_ $ [ "--git-dir", repoPath repo
-               , "-c", "merge.conflictstyle=merge"
-               ]
-            <> [ "pull", "--quiet"
-               , TL.fromStrict remoteNameOrURI
-               , TL.fromStrict remoteRefName ]
-        lastExitCode
-    if r == 0
-        then Git.MergeSuccess <$> getOid "HEAD"
-        else case leftHead of
-            Nothing ->
-                failure (Git.BackendError "Reference missing: HEAD (left)")
-            Just lh -> recordMerge repo (Git.commitRefOid lh)
-
+        eres <- cliRepoDoesExist remoteNameOrURI
+        case eres of
+            Left e -> return (Left e)
+            Right () -> do
+                git_ $ [ "--git-dir", repoPath repo
+                       , "config", "user.name", TL.fromStrict user
+                       ]
+                git_ $ [ "--git-dir", repoPath repo
+                       , "config", "user.email", TL.fromStrict email
+                       ]
+                git_ $ [ "--git-dir", repoPath repo
+                       , "-c", "merge.conflictstyle=merge"
+                       ]
+                    <> [ "pull", "--quiet"
+                       , TL.fromStrict remoteNameOrURI
+                       , TL.fromStrict remoteRefName ]
+                Right <$> lastExitCode
+    case eres of
+        Left err -> failure err
+        Right r  ->
+            if r == 0
+                then Git.MergeSuccess <$> getOid "HEAD"
+                else case leftHead of
+                    Nothing ->
+                        failure (Git.BackendError
+                                 "Reference missing: HEAD (left)")
+                    Just lh -> recordMerge repo (Git.commitRefOid lh)
   where
     -- jww (2013-05-15): This function should not overwrite head, but simply
     -- create a detached commit and return its id.
