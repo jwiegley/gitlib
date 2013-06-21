@@ -192,7 +192,8 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
         if r == 0
             then return Nothing
             else Just
-                 . (\x -> if "non-fast-forward" `T.isInfixOf` x
+                 . (\x -> if "non-fast-forward" `T.isInfixOf` x ||
+                            "Note about fast-forwards" `T.isInfixOf` x
                          then Git.PushNotFastForward x
                          else (Git.BackendError $ "git push failed:\n" <> x))
                  . TL.toStrict <$> lastStderr
