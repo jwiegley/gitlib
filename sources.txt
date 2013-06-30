@@ -5,14 +5,11 @@
 ./gitlib-libgit2
 ./gitlib-s3
 ./gitlib-cmdline
-./gitlib-github
 ./gitlib-cross
 ./hlibgit2
 ./vendor/aws
 ./vendor/c2hsc
 ./vendor/general-prelude
-./vendor/github
 ./vendor/stringable
-./vendor/rest-client
 ./git-monitor
 ./git-gpush
