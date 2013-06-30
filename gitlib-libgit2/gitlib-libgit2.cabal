@@ -1,5 +1,5 @@
 Name:                gitlib-libgit2
-Version:             1.0.1
+Version:             1.0.2
 Synopsis:            Libgit2 backend for gitlib
 License-file:        LICENSE
 License:             MIT
@@ -38,7 +38,7 @@ Library
           base                 >= 3 && < 5
         , gitlib
         , gitlib-utils
-        , hlibgit2             >= 0.18.0.1
+        , hlibgit2             >= 0.18.0.7
         , attempt              >= 0.4.0
         , bytestring           >= 0.9.2.1
         , conduit              >= 0.5.5
