@@ -1,10 +1,10 @@
 Name:    git-monitor
-Version: 1.0.0
+Version: 1.0.1
 
 Synopsis:    Passively snapshots working tree changes efficiently.
 Description: Passively snapshots working tree changes efficiently.
 
-Homepage:           git://github.com/fpco/gitlib
+Homepage:           http://github.com/fpco/gitlib
 License:            BSD3
 License-file:       LICENSE
 Author:             John Wiegley
