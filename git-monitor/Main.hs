@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {-# LANGUAGE ConstraintKinds #-}
@@ -19,8 +20,12 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
-import qualified Data.Text as T (pack, unpack)
-import qualified Data.Text.Lazy as TL (pack, unpack, toStrict, init)
+import qualified Data.Text as T (Text, pack, unpack)
+#if MIN_VERSION_shelly(1, 0, 0)
+import qualified Data.Text as TL (Text, pack, unpack, init)
+#else
+import qualified Data.Text.Lazy as TL (Text, pack, unpack, toStrict, init)
+#endif
 import           Data.Time
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
@@ -36,6 +41,13 @@ import           System.Log.Formatter (tfLogFormatter)
 import           System.Log.Handler (setFormatter)
 import           System.Log.Handler.Simple (streamHandler)
 import           System.Log.Logger
+
+toStrict :: TL.Text -> T.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+toStrict = id
+#else
+toStrict = TL.toStrict
+#endif
 
 instance Read FilePath
 
@@ -68,10 +80,7 @@ main = withLibGitDo $ execParser opts >>= doMain
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
     hdr  = "git-monitor 1.0.0 - quickly snapshot working tree changes"
-    desc = "\nPassively snapshot working tree changes efficiently.\n\n\
-           \The intended usage is to run \"git monitor &\" in your project\n\
-           \directory before you begin a hacking session.\n\n\
-           \Snapshots are kept in refs/snapshots/refs/heads/$BRANCH"
+    desc = "\nPassively snapshot working tree changes efficiently.\n\nThe intended usage is to run \"git monitor &\" in your project\ndirectory before you begin a hacking session.\n\nSnapshots are kept in refs/snapshots/refs/heads/$BRANCH"
 
 doMain :: Options -> IO ()
 doMain opts = do
@@ -101,7 +110,7 @@ doMain opts = do
         void $ case ref of
             Just (Reference _ (RefSymbolic name)) -> do
                 infoL $ "Tracking branch " ++ T.unpack name
-                start wd (TL.toStrict userName) (TL.toStrict userEmail) name
+                start wd (toStrict userName) (toStrict userEmail) name
             _ -> do
                 infoL "Cannot use git-monitor if no branch is checked out"
                 liftIO $ threadDelay (interval opts * 1000000)
