@@ -22,9 +22,9 @@ Source-repository head
 --     Hs-source-dirs: test
 --     Build-depends: 
 --           base >=3
---         , gitlib
---         , gitlib-test
---         , gitlib-sample
+--         , gitlib             >= 1.1.0
+--         , gitlib-test        >= 1.1.0
+--         , gitlib-sample      >= 1.1.0
 --         , HUnit              >= 1.2.5
 --         , hspec              >= 1.4.4
 --         , hspec-expectations >= 0.3
@@ -34,7 +34,7 @@ Library
     ghc-options: -Wall
     build-depends:
           base                 >= 3 && < 5
-        , gitlib
+        , gitlib               >= 1.1.0
         , failure              >= 0.2.0.1
         , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1

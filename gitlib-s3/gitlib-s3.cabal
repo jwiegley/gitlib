@@ -22,10 +22,10 @@ Test-suite smoke
   hs-source-dirs: test
   build-depends:
       base >=3
-    , gitlib
-    , gitlib-s3
-    , gitlib-test
-    , gitlib-libgit2
+    , gitlib             >= 1.1.0
+    , gitlib-s3          >= 1.1.0
+    , gitlib-test        >= 1.1.0
+    , gitlib-libgit2     >= 1.1.0
     , hlibgit2           >= 0.18.0.1
     , aws                >= 0.7.5
     , HUnit              >= 1.2.5
@@ -45,8 +45,8 @@ Library
   default-language: Haskell98
   build-depends:
       base                 >= 3 && < 5
-    , gitlib
-    , gitlib-libgit2
+    , gitlib               >= 1.1.0
+    , gitlib-libgit2       >= 1.1.0
     , ghc-prim
     , hlibgit2             >= 0.18.0.1
     , HUnit                >= 1.2.5
