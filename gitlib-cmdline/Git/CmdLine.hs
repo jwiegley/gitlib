@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -35,7 +36,11 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+#if MIN_VERSION_shelly(1, 0, 0)
+import qualified Data.Text as TL
+#else
 import qualified Data.Text.Lazy as TL
+#endif
 import           Data.Time
 import           Data.Tuple
 import qualified Filesystem as F
@@ -53,6 +58,20 @@ import           Text.Parsec.Combinator
 import           Text.Parsec.Language (haskellDef)
 import           Text.Parsec.Prim
 import           Text.Parsec.Token
+
+toStrict :: TL.Text -> T.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+toStrict = id
+#else
+toStrict = TL.toStrict
+#endif
+
+fromStrict :: T.Text -> TL.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+fromStrict = id
+#else
+fromStrict = TL.fromStrict
+#endif
 
 type BlobOid m    = Git.BlobOid (CmdLineRepository m)
 type TreeOid m    = Git.TreeOid (CmdLineRepository m)
@@ -73,7 +92,12 @@ type Reference m  = Git.Reference (CmdLineRepository m) (Commit m)
 type Object m     = Git.Object (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
-    type Oid (CmdLineRepository m)  = Git.OidTextL
+    type Oid (CmdLineRepository m)  =
+#if MIN_VERSION_shelly(1, 0, 0)
+        Git.OidText
+#else
+        Git.OidTextL
+#endif
     type Tree (CmdLineRepository m) = MutableTree m
 
     data Options (CmdLineRepository m) = Options
@@ -81,7 +105,11 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
+#if MIN_VERSION_shelly(1, 0, 0)
+    parseOid = Git.parseOidText
+#else
     parseOid = Git.parseOidTextL
+#endif
 
     lookupRef        = cliLookupRef
     createRef        = cliUpdateRef
@@ -147,7 +175,7 @@ cliRepoDoesExist :: Text -> Sh (Either Git.GitException ())
 cliRepoDoesExist remoteURI = do
     setenv "SSH_ASKPASS" "echo"
     setenv "GIT_ASKPASS" "echo"
-    git_ [ "ls-remote", TL.fromStrict remoteURI ]
+    git_ [ "ls-remote", fromStrict remoteURI ]
     ec <- lastExitCode
     return $ if ec == 0
              then Right ()
@@ -155,7 +183,7 @@ cliRepoDoesExist remoteURI = do
 
 cliFilePathToURI :: Git.MonadGit m => FilePath -> m Text
 cliFilePathToURI =
-    fmap (T.append "file://localhost" . TL.toStrict . toTextIgnore)
+    fmap (T.append "file://localhost" . toStrict . toTextIgnore)
         . liftIO
         . F.canonicalizePath
 
@@ -175,9 +203,9 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
             Left e -> return (Just e)
             Right () -> do
                 git_ $ [ "--git-dir", repoPath repo ]
-                    <> [ "push", TL.fromStrict remoteNameOrURI
-                       , TL.concat [ TL.fromStrict (Git.renderCommitName cname)
-                                   , ":", TL.fromStrict remoteRefName ] ]
+                    <> [ "push", fromStrict remoteNameOrURI
+                       , TL.concat [ fromStrict (Git.renderCommitName cname)
+                                   , ":", fromStrict remoteRefName ] ]
                 r <- lastExitCode
                 if r == 0
                     then return Nothing
@@ -187,7 +215,7 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
                                  then Git.PushNotFastForward x
                                  else (Git.BackendError $
                                        "git push failed:\n" <> x))
-                         . TL.toStrict <$> lastStderr
+                         . toStrict <$> lastStderr
     case merr of
         Nothing  -> do
             mcref <- Git.resolveRef remoteRefName
@@ -198,7 +226,7 @@ cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
 
 cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliResetHard refname =
-    doRunGit run_ [ "reset", "--hard", TL.fromStrict refname ] $ return ()
+    doRunGit run_ [ "reset", "--hard", fromStrict refname ] $ return ()
 
 cliPullCommitDirectly :: Git.MonadGit m
                       => Text
@@ -223,17 +251,17 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
             Left e -> return (Left e)
             Right () -> do
                 git_ $ [ "--git-dir", repoPath repo
-                       , "config", "user.name", TL.fromStrict user
+                       , "config", "user.name", fromStrict user
                        ]
                 git_ $ [ "--git-dir", repoPath repo
-                       , "config", "user.email", TL.fromStrict email
+                       , "config", "user.email", fromStrict email
                        ]
                 git_ $ [ "--git-dir", repoPath repo
                        , "-c", "merge.conflictstyle=merge"
                        ]
                     <> [ "pull", "--quiet"
-                       , TL.fromStrict remoteNameOrURI
-                       , TL.fromStrict remoteRefName ]
+                       , fromStrict remoteNameOrURI
+                       , fromStrict remoteRefName ]
                 Right <$> lastExitCode
     case eres of
         Left err -> failure err
@@ -312,6 +340,15 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
         (Just x, Just y)     -> (x, y)
         (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
+#if MIN_VERSION_shelly(1, 0, 0)
+type Oid = Git.OidText
+
+mkOid :: T.Text -> Git.OidText
+mkOid = Git.OidText
+
+getOid :: Git.OidText -> T.Text
+getOid = Git.getOidT
+#else
 type Oid = Git.OidTextL
 
 mkOid :: TL.Text -> Git.OidTextL
@@ -319,6 +356,7 @@ mkOid = Git.OidTextL
 
 getOid :: Git.OidTextL -> TL.Text
 getOid = Git.getOidTL
+#endif
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
@@ -347,7 +385,7 @@ cliDoCreateBlob b persist = do
     if r == ExitSuccess
         then return . Tagged
                     . mkOid
-                    . TL.fromStrict
+                    . fromStrict
                     . T.init
                     . T.decodeUtf8 $ out
         else failure Git.BlobCreateFailed
@@ -376,9 +414,9 @@ cliTraverseCommits :: Git.MonadGit m
                    -> CmdLineRepository m [a]
 cliTraverseCommits f name = do
     shas <- doRunGit run [ "--no-pager", "log", "--format=%H"
-                         , TL.fromStrict (Git.renderCommitName name) ]
+                         , fromStrict (Git.renderCommitName name) ]
             $ return ()
-    mapM (\sha -> f =<< (Git.ByOid . Tagged <$> Git.parseOid (TL.toStrict sha)))
+    mapM (\sha -> f =<< (Git.ByOid . Tagged <$> Git.parseOid (toStrict sha)))
         (TL.lines shas)
 
 cliMissingObjects :: Git.MonadGit m
@@ -388,13 +426,13 @@ cliMissingObjects mhave need = do
     shas <- doRunGit run
             ([ "--no-pager", "log", "--format=%H %T", "-z"]
              <> (case mhave of
-                      Nothing   -> [ TL.fromStrict (Git.renderCommitName need) ]
+                      Nothing   -> [ fromStrict (Git.renderCommitName need) ]
                       Just have ->
-                          [ TL.fromStrict (Git.renderCommitName have)
+                          [ fromStrict (Git.renderCommitName have)
                           , TL.append "^"
-                            (TL.fromStrict (Git.renderCommitName need)) ]))
+                            (fromStrict (Git.renderCommitName need)) ]))
             $ return ()
-    concat <$> mapM (go . T.words . TL.toStrict) (TL.lines shas)
+    concat <$> mapM (go . T.words . toStrict) (TL.lines shas)
   where
     go [csha,tsha] = do
         coid <- Git.parseOid csha
@@ -526,7 +564,7 @@ cliLookupTree oid@(Tagged (getOid -> sha)) = do
     parseLine line =
         let [prefix,path] = TL.splitOn "\t" line
             [mode,kind,sha] = TL.words prefix
-        in (TL.toStrict path,
+        in (toStrict path,
             case kind of
             "blob"   -> Git.BlobEntry (Tagged (mkOid sha)) $
                         case mode of
@@ -553,17 +591,17 @@ cliWriteTree tree = do
                                   Git.ExecutableBlob -> "100755"
                                   Git.SymlinkBlob    -> "120000"
                                   Git.UnknownBlob    -> "100000"
-                           , " blob ", sha, "\t", TL.fromStrict path ]
+                           , " blob ", sha, "\t", fromStrict path ]
     renderLine (path, Git.CommitEntry coid) = do
         return $ TL.concat [ "160000 commit "
-                           , TL.fromStrict (Git.renderObjOid coid), "\t"
-                           , TL.fromStrict path ]
+                           , fromStrict (Git.renderObjOid coid), "\t"
+                           , fromStrict path ]
     renderLine (path, Git.TreeEntry tref) = do
         treeOid <- Git.treeRefOid tref
         return $ TL.concat
             [ "040000 tree "
-            , TL.fromStrict (Git.renderObjOid treeOid), "\t"
-            , TL.fromStrict path ]
+            , fromStrict (Git.renderObjOid treeOid), "\t"
+            , fromStrict path ]
 
 cliTraverseEntries :: Git.MonadGit m
                    => (FilePath -> TreeEntry m -> CmdLineRepository m b)
@@ -648,10 +686,10 @@ cliCreateCommit parents tree author committer message ref = do
     let parentOids = map Git.commitRefOid parents
     oid <- doRunGit run
            (["commit-tree"]
-            <> [TL.fromStrict (Git.renderObjOid treeOid)]
-            <> L.concat [["-p", TL.fromStrict (Git.renderObjOid poid)] |
+            <> [fromStrict (Git.renderObjOid treeOid)]
+            <> L.concat [["-p", fromStrict (Git.renderObjOid poid)] |
                          poid <- parentOids])
-           $ do mapM_ (\(var,f,val) -> setenv var (TL.fromStrict (f val)))
+           $ do mapM_ (\(var,f,val) -> setenv var (fromStrict (f val)))
                       [ ("GIT_AUTHOR_NAME",  Git.signatureName,  author)
                       , ("GIT_AUTHOR_EMAIL", Git.signatureEmail, author)
                       , ("GIT_AUTHOR_DATE",
@@ -661,7 +699,7 @@ cliCreateCommit parents tree author committer message ref = do
                       , ("GIT_COMMITTER_DATE",
                          formatCliTime . Git.signatureWhen, committer)
                       ]
-                setStdin (TL.fromStrict message)
+                setStdin (fromStrict message)
 
     let commit = Git.Commit
             { Git.commitOid       = Tagged (mkOid (TL.init oid))
@@ -691,7 +729,7 @@ cliShowRef mrefName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
         rev <- git $ [ "--git-dir", repoPath repo, "show-ref" ]
-                 <> [ TL.fromStrict (fromJust mrefName) | isJust mrefName ]
+                 <> [ fromStrict (fromJust mrefName) | isJust mrefName ]
         ec  <- lastExitCode
         return $ if ec == 0
                  then Just $ map ((\(x:y:[]) -> (y,x)) . TL.words)
@@ -700,14 +738,14 @@ cliShowRef mrefName = do
 
 nameAndShaToRef :: TL.Text -> TL.Text -> Reference m
 nameAndShaToRef name sha =
-    Git.Reference (TL.toStrict name)
+    Git.Reference (toStrict name)
                   (Git.RefObj (Git.ByOid (Tagged (mkOid sha))))
 
 cliLookupRef :: Git.MonadGit m
              => Text -> CmdLineRepository m (Maybe (Reference m))
 cliLookupRef refName = do
     xs <- cliShowRef (Just refName)
-    let name = TL.fromStrict refName
+    let name = fromStrict refName
         ref  = maybe Nothing (lookup name) xs
     return $ maybe Nothing (Just . uncurry nameAndShaToRef .
                             \sha -> (name,sha)) ref
@@ -717,15 +755,15 @@ cliUpdateRef :: Git.MonadGit m
              -> CmdLineRepository m (Reference m)
 cliUpdateRef refName refObj@(Git.RefObj commitRef) = do
     let Tagged (getOid -> sha) = Git.commitRefOid commitRef
-    runGit_ ["update-ref", TL.fromStrict refName, sha]
+    runGit_ ["update-ref", fromStrict refName, sha]
     return (Git.Reference refName refObj)
 
 cliUpdateRef refName refObj@(Git.RefSymbolic targetName) = do
-    runGit_ ["symbolic-ref", TL.fromStrict refName, TL.fromStrict targetName]
+    runGit_ ["symbolic-ref", fromStrict refName, fromStrict targetName]
     return (Git.Reference refName refObj)
 
 cliDeleteRef :: Git.MonadGit m => Text -> CmdLineRepository m ()
-cliDeleteRef refName = runGit_ ["update-ref", "-d", TL.fromStrict refName]
+cliDeleteRef refName = runGit_ ["update-ref", "-d", fromStrict refName]
 
 cliAllRefs :: Git.MonadGit m
            => CmdLineRepository m [Reference m]
@@ -742,7 +780,7 @@ cliResolveRef refName = do
     shellyNoDir $ silently $ errExit False $ do
         rev <- git [ "--git-dir", repoPath repo
                    , "rev-parse", "--quiet", "--verify"
-                   , TL.fromStrict refName ]
+                   , fromStrict refName ]
         ec  <- lastExitCode
         return $ if ec == 0
             then Just (Git.ByOid (Tagged (mkOid (TL.init rev))))
@@ -758,12 +796,12 @@ cliCreateTag oid@(Tagged (getOid -> sha)) tagger msg name = do
     tsha <- doRunGit run ["mktag"] $ setStdin $ TL.unlines $
         [ "object " <> sha
         , "type commit"
-        , "tag " <> TL.fromStrict name
-        , "tagger " <> TL.fromStrict (Git.signatureName tagger)
-          <> " <" <> TL.fromStrict (Git.signatureEmail tagger) <> "> "
+        , "tag " <> fromStrict name
+        , "tagger " <> fromStrict (Git.signatureName tagger)
+          <> " <" <> fromStrict (Git.signatureEmail tagger) <> "> "
           <> TL.pack (formatTime defaultTimeLocale "%s %z"
                       (Git.signatureWhen tagger))
-        , ""] <> TL.lines (TL.fromStrict msg)
+        , ""] <> TL.lines (fromStrict msg)
     return $ Git.Tag (Tagged (mkOid (TL.init tsha))) (Git.ByOid oid)
 
 data Repository = Repository
@@ -844,7 +882,7 @@ openCliRepository opts = do
         Right p -> do
             when (not exists && Git.repoAutoCreate opts) $
                 shellyNoDir $ silently $
-                    git_ $ ["--git-dir", TL.fromStrict p]
+                    git_ $ ["--git-dir", fromStrict p]
                         <> ["--bare" | Git.repoIsBare opts]
                         <> ["init"]
             return Repository { repoOptions = opts }

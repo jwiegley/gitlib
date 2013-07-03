@@ -43,6 +43,15 @@ instance IsOid OidBytestring where
 parseOidBytestring :: Monad m => Text -> m OidBytestring
 parseOidBytestring x = OidBytestring `liftM` unhex (T.encodeUtf8 x)
 
+data OidText = OidText { getOidT :: T.Text }
+             deriving (Eq, Ord, Show)
+
+instance IsOid OidText where
+    renderOid (OidText x) = x
+
+parseOidText :: Monad m => Text -> m OidText
+parseOidText = return . OidText
+
 data OidTextL = OidTextL { getOidTL :: TL.Text }
               deriving (Eq, Ord, Show)
 
