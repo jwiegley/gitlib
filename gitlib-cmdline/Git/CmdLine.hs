@@ -54,8 +54,6 @@ import           Text.Parsec.Language (haskellDef)
 import           Text.Parsec.Prim
 import           Text.Parsec.Token
 
-type Oid m        = Git.Oid (CmdLineRepository m)
-
 type BlobOid m    = Git.BlobOid (CmdLineRepository m)
 type TreeOid m    = Git.TreeOid (CmdLineRepository m)
 type CommitOid m  = Git.CommitOid (CmdLineRepository m)
@@ -75,7 +73,7 @@ type Reference m  = Git.Reference (CmdLineRepository m) (Commit m)
 type Object m     = Git.Object (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
-    data Oid (CmdLineRepository m) = Oid { getOid :: TL.Text }
+    type Oid (CmdLineRepository m) = Git.OidTextL
 
     data TreeData (CmdLineRepository m) = TreeData
         { cliTreeOid      :: IORef (Maybe (TreeOid m))
@@ -87,8 +85,7 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
-    parseOid = return . Oid . TL.fromStrict
-    renderOid (Oid x) = TL.toStrict x
+    parseOid = Git.parseOidTextL
 
     lookupRef       = cliLookupRef
     createRef       = cliUpdateRef
@@ -116,15 +113,6 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
 
     deleteRepository =
         cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions
-
-instance Show (Git.Oid (CmdLineRepository m)) where
-    show (Oid x) = show x
-
-instance Ord (Git.Oid (CmdLineRepository m)) where
-    compare (Oid l) (Oid r) = compare l r
-
-instance Eq (Git.Oid (CmdLineRepository m)) where
-    Oid l == Oid r = l == r
 
 git :: [TL.Text] -> Sh TL.Text
 git args = do
@@ -324,9 +312,17 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
         (Just x, Just y)     -> (x, y)
         (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
+type Oid = Git.OidTextL
+
+mkOid :: TL.Text -> Git.OidTextL
+mkOid = Git.OidTextL
+
+getOid :: Git.OidTextL -> TL.Text
+getOid = Git.getOidTL
+
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
-cliLookupBlob oid@(Tagged (Oid sha)) = do
+cliLookupBlob oid@(Tagged (getOid -> sha)) = do
     repo <- cliGet
     (r,out,_) <-
         liftIO $ readProcessWithExitCode "git"
@@ -349,7 +345,11 @@ cliDoCreateBlob b persist = do
              <> ["-w" | persist] <> ["--stdin"])
             bs
     if r == ExitSuccess
-        then return . Tagged . Oid . TL.fromStrict . T.init . T.decodeUtf8 $ out
+        then return . Tagged
+                    . mkOid
+                    . TL.fromStrict
+                    . T.init
+                    . T.decodeUtf8 $ out
         else failure Git.BlobCreateFailed
 
 cliHashContents :: Git.MonadGit m
@@ -362,8 +362,8 @@ cliCreateBlob :: Git.MonadGit m
               -> CmdLineRepository m (BlobOid m)
 cliCreateBlob b = cliDoCreateBlob b True
 
-cliExistsObject :: Git.MonadGit m => Oid m -> CmdLineRepository m Bool
-cliExistsObject (Oid sha) = do
+cliExistsObject :: Git.MonadGit m => Oid -> CmdLineRepository m Bool
+cliExistsObject (getOid -> sha) = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
         git_ [ "--git-dir", repoPath repo, "cat-file", "-e", sha ]
@@ -418,7 +418,7 @@ cliNewTree = cliMakeTree <$> liftIO (newIORef Nothing)
                          <*> liftIO (newIORef HashMap.empty)
 
 cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
-cliLookupTree oid@(Tagged (Oid sha)) = do
+cliLookupTree oid@(Tagged (getOid -> sha)) = do
     contents <- runGit ["ls-tree", "-z", sha]
     oidRef   <- liftIO $ newIORef (Just oid)
     -- Even though the tree entries are separated by \NUL, for whatever reason
@@ -432,14 +432,14 @@ cliLookupTree oid@(Tagged (Oid sha)) = do
             [mode,kind,sha] = TL.words prefix
         in (TL.toStrict path,
             case kind of
-            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) $
+            "blob"   -> Git.BlobEntry (Tagged (mkOid sha)) $
                         case mode of
                             "100644" -> Git.PlainBlob
                             "100755" -> Git.ExecutableBlob
                             "120000" -> Git.SymlinkBlob
                             _        -> Git.UnknownBlob
-            "commit" -> Git.CommitEntry (Tagged (Oid sha))
-            "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
+            "commit" -> Git.CommitEntry (Tagged (mkOid sha))
+            "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (mkOid sha)))
             _ -> error "This cannot happen")
 
 doLookupTreeEntry :: Git.MonadGit m => Tree m -> [Text]
@@ -557,9 +557,9 @@ cliWriteTree tree = do
     rendered <- mapM renderLine (HashMap.toList contents)
     oid      <- doRunGit run ["mktree", "-z", "--missing"]
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
-    return (Tagged (Oid (TL.init oid)))
+    return (Tagged (mkOid (TL.init oid)))
   where
-    renderLine (path, Git.BlobEntry (Tagged (Oid sha)) kind) =
+    renderLine (path, Git.BlobEntry (Tagged (getOid -> sha)) kind) =
         return $ TL.concat [ case kind of
                                   Git.PlainBlob      -> "100644"
                                   Git.ExecutableBlob -> "100755"
@@ -582,7 +582,7 @@ cliTraverseEntries :: Git.MonadGit m
                    -> (FilePath -> TreeEntry m -> CmdLineRepository m b)
                    -> CmdLineRepository m [b]
 cliTraverseEntries tree f = do
-    Tagged (Oid sha) <- Git.writeTree tree
+    Tagged (getOid -> sha) <- Git.writeTree tree
     contents <- runGit ["ls-tree", "-t", "-r", "-z", sha]
     -- Even though the tree entries are separated by \NUL, for whatever reason
     -- @git ls-tree@ also outputs a newline at the end.
@@ -593,14 +593,14 @@ cliTraverseEntries tree f = do
             [mode,kind,sha] = TL.words prefix
         in (fromText path,
             case kind of
-            "blob"   -> Git.BlobEntry (Tagged (Oid sha)) $
+            "blob"   -> Git.BlobEntry (Tagged (mkOid sha)) $
                         case mode of
                             "100644" -> Git.PlainBlob
                             "100755" -> Git.ExecutableBlob
                             "120000" -> Git.SymlinkBlob
                             _        -> Git.UnknownBlob
-            "commit" -> Git.CommitEntry (Tagged (Oid sha))
-            "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (Oid sha)))
+            "commit" -> Git.CommitEntry (Tagged (mkOid sha))
+            "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (mkOid sha)))
             _ -> error "This cannot happen")
 
 parseCliTime :: String -> ZonedTime
@@ -614,7 +614,7 @@ lexer = makeTokenParser haskellDef
 
 cliLookupCommit :: Git.MonadGit m
                 => CommitOid m -> CmdLineRepository m (Commit m)
-cliLookupCommit (Tagged (Oid sha)) = do
+cliLookupCommit (Tagged (getOid -> sha)) = do
     output <- doRunGit run ["cat-file", "--batch"]
                   $ setStdin (TL.append sha "\n")
     case parse parseOutput "" (TL.unpack output) of
@@ -622,14 +622,14 @@ cliLookupCommit (Tagged (Oid sha)) = do
         Right c -> return c
   where
     parseOutput = do
-        coid       <- Tagged . Oid . TL.pack
+        coid       <- Tagged . mkOid . TL.pack
                       <$> manyTill alphaNum space
         _          <- string "commit " *> manyTill digit newline
         treeOid    <- string "tree " *>
-                      (Tagged . Oid . TL.pack
+                      (Tagged . mkOid . TL.pack
                        <$> manyTill anyChar newline)
         parentOids <- many (string "parent " *>
-                            (Tagged . Oid . TL.pack
+                            (Tagged . mkOid . TL.pack
                              <$> manyTill anyChar newline))
         author     <- parseSignature "author"
         committer  <- parseSignature "committer"
@@ -676,7 +676,7 @@ cliCreateCommit parents tree author committer message ref = do
                 setStdin (TL.fromStrict message)
 
     let commit = Git.Commit
-            { Git.commitOid       = Tagged (Oid (TL.init oid))
+            { Git.commitOid       = Tagged (mkOid (TL.init oid))
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
             , Git.commitLog       = message
@@ -713,7 +713,7 @@ cliShowRef mrefName = do
 nameAndShaToRef :: TL.Text -> TL.Text -> Reference m
 nameAndShaToRef name sha =
     Git.Reference (TL.toStrict name)
-                  (Git.RefObj (Git.ByOid (Tagged (Oid sha))))
+                  (Git.RefObj (Git.ByOid (Tagged (mkOid sha))))
 
 cliLookupRef :: Git.MonadGit m
              => Text -> CmdLineRepository m (Maybe (Reference m))
@@ -728,7 +728,7 @@ cliUpdateRef :: Git.MonadGit m
              => Text -> Git.RefTarget (CmdLineRepository m) (Commit m)
              -> CmdLineRepository m (Reference m)
 cliUpdateRef refName refObj@(Git.RefObj commitRef) = do
-    let Tagged (Oid sha) = Git.commitRefOid commitRef
+    let Tagged (getOid -> sha) = Git.commitRefOid commitRef
     runGit_ ["update-ref", TL.fromStrict refName, sha]
     return (Git.Reference refName refObj)
 
@@ -757,7 +757,7 @@ cliResolveRef refName = do
                    , TL.fromStrict refName ]
         ec  <- lastExitCode
         return $ if ec == 0
-            then Just (Git.ByOid (Tagged (Oid (TL.init rev))))
+            then Just (Git.ByOid (Tagged (mkOid (TL.init rev))))
             else Nothing
 
 -- cliLookupTag :: TagOid -> CmdLineRepository Tag
@@ -766,7 +766,7 @@ cliResolveRef refName = do
 cliCreateTag :: Git.MonadGit m
              => CommitOid m -> Git.Signature -> Text -> Text
              -> CmdLineRepository m (Tag m)
-cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
+cliCreateTag oid@(Tagged (getOid -> sha)) tagger msg name = do
     tsha <- doRunGit run ["mktag"] $ setStdin $ TL.unlines $
         [ "object " <> sha
         , "type commit"
@@ -776,7 +776,7 @@ cliCreateTag oid@(Tagged (Oid sha)) tagger msg name = do
           <> TL.pack (formatTime defaultTimeLocale "%s %z"
                       (Git.signatureWhen tagger))
         , ""] <> TL.lines (TL.fromStrict msg)
-    return $ Git.Tag (Tagged (Oid (TL.init tsha))) (Git.ByOid oid)
+    return $ Git.Tag (Tagged (mkOid (TL.init tsha))) (Git.ByOid oid)
 
 data Repository = Repository
     { repoOptions :: Git.RepositoryOptions

@@ -55,8 +55,6 @@ import           System.IO.Unsafe
 import           System.Locale (defaultTimeLocale)
 import           Text.Shakespeare.Text (st)
 
-type Oid m       = Git.Oid (GitHubRepository m)
-
 type BlobOid m   = Git.BlobOid (GitHubRepository m)
 type TreeOid m   = Git.TreeOid (GitHubRepository m)
 type CommitOid m = Git.CommitOid (GitHubRepository m)
@@ -78,7 +76,7 @@ data GitHubOptions = GitHubOptions
     } deriving (Show, Eq)
 
 instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
-    data Oid (GitHubRepository m)      = Oid { getOid :: ByteString }
+    type Oid (GitHubRepository m)      = Git.OidBytestring
     data TreeData (GitHubRepository m) = TreeData
         { ghTreeOid      :: IORef (Maybe (TreeOid m))
         , ghTreeContents :: IORef (HashMap Text (TreeEntry m))
@@ -89,8 +87,7 @@ instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = False }
 
-    parseOid x = Oid <$> unhex (T.encodeUtf8 x)
-    renderOid (Oid x) = T.toLower (T.decodeUtf8 (hex x))
+    parseOid = Git.parseOidBytestring
 
     createRef        = ghCreateRef
     lookupRef        = ghLookupRef
@@ -121,15 +118,6 @@ data GitHubBlob = GitHubBlob
     , ghBlobEncoding :: Text
     , ghBlobSha      :: Text
     , ghBlobSize     :: Int } deriving Show
-
-instance Git.MonadGit m => Show (Git.Oid (GitHubRepository m)) where
-    show = T.unpack . Git.renderOid
-
-instance Ord (Git.Oid (GitHubRepository m)) where
-    compare (Oid l) (Oid r) = compare l r
-
-instance Eq (Git.Oid (GitHubRepository m)) where
-    Oid l == Oid r = l == r
 
 -- jww (2012-12-26): If no name mangling scheme is provided, assume it is
 -- "type name prefix"
@@ -205,23 +193,31 @@ instance ToJSON Content where
 instance Default Content where
   def = Content B.empty "utf-8"
 
+type Oid = Git.OidBytestring
+
+mkOid :: ByteString -> Git.OidBytestring
+mkOid = Git.OidBytestring
+
+getOid :: Git.OidBytestring -> ByteString
+getOid = Git.getOidBS
+
 data GitHubOidProxy m = GitHubOidProxy
     { runGhpOid :: Oid m
     }
 
-instance FromJSON (GitHubOidProxy m) where
+instance FromJSON GitHubOidProxy where
   parseJSON (Object v) =
-      GitHubOidProxy . Oid <$>
-      (unsafePerformIO . unhex . T.encodeUtf8 <$> v .: "sha")
+      GitHubOidProxy . mkOid
+          <$> (unsafePerformIO . unhex . T.encodeUtf8 <$> v .: "sha")
   parseJSON _ = mzero
 
-instance ToJSON (GitHubOidProxy m) where
-  toJSON (GitHubOidProxy (Oid sha)) = object ["sha" .= show sha]
+instance ToJSON GitHubOidProxy where
+  toJSON (GitHubOidProxy (getOid -> sha)) = object ["sha" .= show sha]
 
-textToOid :: Text -> Oid m
-textToOid = Oid . unsafePerformIO . unhex . T.encodeUtf8
+textToOid :: Text -> Oid
+textToOid = mkOid . unsafePerformIO . unhex . T.encodeUtf8
 
-oidToText :: Git.MonadGit m => Oid m -> Text
+oidToText :: Oid -> Text
 oidToText = T.pack . show
 
 ghCreateBlob :: Git.MonadGit m
@@ -551,13 +547,13 @@ instance ToJSON Git.Signature where
              , "email" .= email
              , "date"  .= formatGhTime date ]
 
-data GitHubCommitProxy m = GitHubCommitProxy
+data GitHubCommitProxy = GitHubCommitProxy
     { ghpCommitOid       :: Text
     , ghpCommitAuthor    :: Git.Signature
     , ghpCommitCommitter :: Maybe Git.Signature
     , ghpCommitMessage   :: Text
-    , ghpCommitTree      :: GitHubOidProxy m
-    , ghpCommitParents   :: [GitHubOidProxy m]
+    , ghpCommitTree      :: GitHubOidProxy
+    , ghpCommitParents   :: [GitHubOidProxy]
     }
 
 -- The strange thing about commits is that converting them to JSON does not use
@@ -572,7 +568,7 @@ data GitHubCommitProxy m = GitHubCommitProxy
 --   "parents": [
 --     { "sha": "7d1b31e74ee336d15cbd21741bc88a537ed063a0" }
 --   ] }
-instance FromJSON (GitHubCommitProxy m) where
+instance FromJSON GitHubCommitProxy where
   parseJSON (Object v) =
       GitHubCommitProxy <$> v .: "sha"
                         <*> v .: "author"
@@ -582,7 +578,7 @@ instance FromJSON (GitHubCommitProxy m) where
                         <*> v .: "parents"
   parseJSON _ = mzero
 
-instance Git.MonadGit m => ToJSON (GitHubCommitProxy m) where
+instance Git.MonadGit m => ToJSON GitHubCommitProxy where
   toJSON c = object $ [ "author"    .= ghpCommitAuthor c
                       , "message"   .= ghpCommitMessage c
                       , "tree"      .= oidToText (runGhpOid (ghpCommitTree c))
@@ -592,7 +588,7 @@ instance Git.MonadGit m => ToJSON (GitHubCommitProxy m) where
                       [ "committer" .= fromJust (ghpCommitCommitter c) |
                                        isJust (ghpCommitCommitter c) ]
 
-proxyToCommit :: Git.MonadGit m => GitHubCommitProxy m -> Commit m
+proxyToCommit :: Git.MonadGit m => GitHubCommitProxy -> Commit m
 proxyToCommit cp = Git.Commit
     { Git.commitOid       = Tagged (textToOid (ghpCommitOid cp))
     , Git.commitAuthor    = ghpCommitAuthor cp
@@ -607,9 +603,9 @@ proxyToCommit cp = Git.Commit
     }
 
 ghLookupCommit :: Git.MonadGit m => CommitOid m -> GitHubRepository m (Commit m)
-ghLookupCommit oid = do
-    cp <- ghRestful "GET" ("git/commits/" <> Git.renderObjOid oid) ()
-    return (proxyToCommit cp)
+ghLookupCommit oid =
+    proxyToCommit
+        <$> ghRestful "GET" ("git/commits/" <> Git.renderObjOid oid) ()
 
 ghCreateCommit :: Git.MonadGit m
                => [CommitRef m] -> TreeRef m
@@ -617,7 +613,7 @@ ghCreateCommit :: Git.MonadGit m
                -> GitHubRepository m (Commit m)
 ghCreateCommit parents tree author committer message ref = do
     treeOid <- Git.treeRefOid tree
-    commit' <- ghRestful "POST" "git/commits" $ GitHubCommitProxy
+    commit' <- ghRestful "POST" "git/commits" GitHubCommitProxy
                 { ghpCommitOid       = ""
                 , ghpCommitAuthor    = author
                 , ghpCommitCommitter = Just committer

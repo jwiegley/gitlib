@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-# OPTIONS_GHC -fno-warn-name-shadowing
                 -fno-warn-unused-binds
@@ -20,7 +21,9 @@ module Git.Libgit2
        , Commit()
        , CommitOid()
        , CommitRef()
-       , Git.Oid(..)
+       , Git.Oid
+       , OidPtr(..)
+       , mkOid
        , Reference()
        , Repository(..)
        , Tree()
@@ -97,10 +100,55 @@ debug :: MonadIO m => String -> m ()
 --debug = liftIO . putStrLn
 debug = const (return ())
 
+type Oid = OidPtr
+
+data OidPtr = OidPtr { getOid :: ForeignPtr C'git_oid }
+
+instance Git.IsOid OidPtr where
+    renderOid = lgRenderOid
+
+mkOid :: ForeignPtr C'git_oid -> OidPtr
+mkOid = OidPtr
+
+lgParseOid :: Git.MonadGit m => Text -> LgRepository m Oid
+lgParseOid str
+  | len > 40 = failure (Git.OidParseFailed str)
+  | otherwise = do
+      oid <- liftIO $ mallocForeignPtr
+      r <- liftIO $ withCString (T.unpack str) $ \cstr ->
+          withForeignPtr oid $ \ptr ->
+              if len == 40
+                  then c'git_oid_fromstr ptr cstr
+                  else c'git_oid_fromstrn ptr cstr (fromIntegral len)
+      if r < 0
+          then failure (Git.OidParseFailed str)
+          else return (mkOid oid)
+  where
+    len = T.length str
+
+lgRenderOid :: Git.Oid (LgRepository m) -> Text
+lgRenderOid = T.pack . show
+
+instance Show OidPtr where
+    show (getOid -> coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
+
+instance Ord OidPtr where
+    (getOid -> coid1) `compare` (getOid -> coid2) =
+        SU.unsafePerformIO $
+        withForeignPtr coid1 $ \coid1Ptr ->
+        withForeignPtr coid2 $ \coid2Ptr -> do
+            r <- c'git_oid_cmp coid1Ptr coid2Ptr
+            return $ if r < 0
+                     then LT
+                     else if r > 0
+                          then GT
+                          else EQ
+
+instance Eq OidPtr where
+    oid1 == oid2 = oid1 `compare` oid2 == EQ
+
 instance Git.MonadGit m => Git.Repository (LgRepository m) where
-    data Oid (LgRepository m) = Oid
-        { getOid :: ForeignPtr C'git_oid
-        }
+    type Oid (LgRepository m) = OidPtr
     data TreeData (LgRepository m) = TreeData
         { lgPendingUpdates :: IORef (HashMap Text (Tree m))
         , lgTreeContents   :: ForeignPtr C'git_treebuilder
@@ -113,7 +161,6 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
         }
 
     parseOid        = lgParseOid
-    renderOid       = lgRenderOid
     lookupRef       = lgLookupRef
     createRef       = lgUpdateRef
     updateRef       = lgUpdateRef
@@ -153,43 +200,6 @@ lgWrap f = f `Exc.catch` \e -> do
     liftIO $ writeIORef etrap Nothing
     maybe (throw (e :: SomeException)) throw mexc
 
-lgParseOid :: Git.MonadGit m => Text -> LgRepository m (Oid m)
-lgParseOid str
-  | len > 40 = failure (Git.OidParseFailed str)
-  | otherwise = do
-      oid <- liftIO mallocForeignPtr
-      r <- liftIO $ withCString (T.unpack str) $ \cstr ->
-          withForeignPtr oid $ \ptr ->
-              if len == 40
-                  then c'git_oid_fromstr ptr cstr
-                  else c'git_oid_fromstrn ptr cstr (fromIntegral len)
-      if r < 0
-          then failure (Git.OidParseFailed str)
-          else return (Oid oid)
-  where
-    len = T.length str
-
-lgRenderOid :: Git.Oid (LgRepository m) -> Text
-lgRenderOid = T.pack . show
-
-instance Show (Git.Oid (LgRepository m)) where
-    show (Oid coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
-
-instance Ord (Git.Oid (LgRepository m)) where
-    Oid coid1 `compare` Oid coid2 =
-        SU.unsafePerformIO $
-        withForeignPtr coid1 $ \coid1Ptr ->
-        withForeignPtr coid2 $ \coid2Ptr -> do
-            r <- c'git_oid_cmp coid1Ptr coid2Ptr
-            return $ if r < 0
-                     then LT
-                     else if r > 0
-                          then GT
-                          else EQ
-
-instance Eq (Git.Oid (LgRepository m)) where
-    oid1 == oid2 = oid1 `compare` oid2 == EQ
-
 lgHashContents :: Git.MonadGit m => Git.BlobContents (LgRepository m)
                -> LgRepository m (BlobOid m)
 lgHashContents b = do
@@ -201,7 +211,7 @@ lgHashContents b = do
                           c'git_odb_hash oidPtr (castPtr cstr)
                                          (fromIntegral len) c'GIT_OBJ_BLOB)
     when (r < 0) $ failure Git.BlobCreateFailed
-    return (Tagged (Oid ptr))
+    return (Tagged (mkOid ptr))
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -216,7 +226,7 @@ lgCreateBlob b = do
     r    <- Git.blobContentsToByteString b
             >>= \bs -> liftIO $ createBlobFromByteString repo ptr bs
     when (r < 0) $ failure Git.BlobCreateFailed
-    return (Tagged (Oid ptr))
+    return (Tagged (mkOid ptr))
 
   where
     createBlobFromByteString repo coid bs =
@@ -303,7 +313,7 @@ lgNewTree = do
         else lgMakeTree <$> liftIO (newIORef HashMap.empty)
                         <*> pure fptr
 
-lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) (Oid m)
+lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
              -> LgRepository m (Tree m)
 lgLookupTree len oid = do
     -- jww (2013-01-28): Verify the oid here
@@ -333,16 +343,16 @@ entryToTreeEntry entry = do
     case () of
         () | typ == c'GIT_OBJ_BLOB ->
              do mode <- c'git_tree_entry_filemode entry
-                return $ Git.BlobEntry (Tagged (Oid oid)) $
+                return $ Git.BlobEntry (Tagged (mkOid oid)) $
                     case mode of
                         0o100644 -> Git.PlainBlob
                         0o100755 -> Git.ExecutableBlob
                         0o120000 -> Git.SymlinkBlob
                         _        -> Git.UnknownBlob
            | typ == c'GIT_OBJ_TREE ->
-             return $ Git.TreeEntry (Git.ByOid (Tagged (Oid oid)))
+             return $ Git.TreeEntry (Git.ByOid (Tagged (mkOid oid)))
            | typ == c'GIT_OBJ_COMMIT ->
-             return $ Git.CommitEntry (Tagged (Oid oid))
+             return $ Git.CommitEntry (Tagged (mkOid oid))
            | otherwise -> error "Unexpected"
 
 doLookupTreeEntry :: Git.MonadGit m
@@ -393,7 +403,7 @@ lgTreeEntryCount t = do
         <$> liftIO (withForeignPtr contents c'git_treebuilder_entrycount)
 
 insertEntry :: Git.MonadGit m
-            => ForeignPtr C'git_treebuilder -> String -> Oid m -> CUInt
+            => ForeignPtr C'git_treebuilder -> String -> Oid -> CUInt
             -> LgRepository m ()
 insertEntry builder key oid attrs = do
   r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
@@ -410,7 +420,7 @@ dropEntry builder key = do
           c'git_treebuilder_remove ptr name
   when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed (T.pack key))
 
-doWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (Maybe (Oid m))
+doWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (Maybe Oid)
 doWriteTree t = do
     repo <- lgGet
     let tdata    = Git.getTreeData t
@@ -432,7 +442,7 @@ doWriteTree t = do
     go :: Git.MonadGit m
        => ForeignPtr C'git_treebuilder
        -> ForeignPtr C'git_repository
-       -> LgRepository m (Maybe (Oid m))
+       -> LgRepository m (Maybe Oid)
     go fptr repo = do
         (r3,coid) <- liftIO $ do
             coid <- mallocForeignPtr
@@ -448,7 +458,7 @@ doWriteTree t = do
             failure (Git.TreeBuilderWriteFailed $ T.pack $
                      "c'git_treebuilder_write failed with " ++ show r3
                      ++ ": " ++ errStr)
-        return (Just (Oid coid))
+        return (Just (mkOid coid))
 
 doModifyTree :: Git.MonadGit m
              => Tree m
@@ -574,14 +584,15 @@ lgLookupCommit len oid =
                      (replicate (fromIntegral (toInteger pn))
                       (c'git_commit_parent_id c))
                      [0..pn]
-        poids' <- mapM (\x -> Git.ByOid . Tagged . Oid <$> coidPtrToOid x) poids
+        poids' <- mapM (\x -> Git.ByOid . Tagged . mkOid
+                                  <$> coidPtrToOid x) poids
 
         return Git.Commit
             {
             -- Git.commitInfo      = Base (Just (Tagged (Oid coid))) (Just obj)
             -- ,
               Git.commitOid       = oid
-            , Git.commitTree      = Git.ByOid (Tagged (Oid toid'))
+            , Git.commitTree      = Git.ByOid (Tagged (mkOid toid'))
             , Git.commitParents   = poids'
             , Git.commitAuthor    = auth
             , Git.commitCommitter = comm
@@ -616,15 +627,15 @@ lgLookupObject str
     go coid _ y = do
         typ <- liftIO $ c'git_object_type y
         case () of
-            () | typ == c'GIT_OBJ_BLOB   -> ret Git.BlobObj (Oid coid)
-               | typ == c'GIT_OBJ_TREE   -> ret Git.TreeObj (Oid coid)
-               | typ == c'GIT_OBJ_COMMIT -> ret Git.CommitObj (Oid coid)
-               | typ == c'GIT_OBJ_TAG    -> ret Git.TagObj (Oid coid)
+            () | typ == c'GIT_OBJ_BLOB   -> ret Git.BlobObj (mkOid coid)
+               | typ == c'GIT_OBJ_TREE   -> ret Git.TreeObj (mkOid coid)
+               | typ == c'GIT_OBJ_COMMIT -> ret Git.CommitObj (mkOid coid)
+               | typ == c'GIT_OBJ_TAG    -> ret Git.TagObj (mkOid coid)
                | otherwise -> failure (Git.ObjectLookupFailed str len)
 
     ret f = return . f . Git.ByOid . Tagged
 
-lgExistsObject :: Git.MonadGit m => Oid m -> LgRepository m Bool
+lgExistsObject :: Git.MonadGit m => Oid -> LgRepository m Bool
 lgExistsObject oid = do
     repo <- lgGet
     result <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
@@ -675,7 +686,7 @@ lgRevWalker name moid walker = do
             (fromIntegral ((1 :: Int) .|. (4 :: Int)))
         whileM ((==) <$> pure 0
                      <*> c'git_revwalk_next coidPtr walker)
-            (Git.ByOid . Tagged . Oid <$> coidPtrToOid coidPtr)
+            (Git.ByOid . Tagged . mkOid <$> coidPtrToOid coidPtr)
   where
     pushOid oid =
         withForeignPtr oid $ \coid -> do
@@ -765,7 +776,7 @@ lgCreateCommit parents tree author committer logText ref = do
         {
         --   Git.commitInfo      = Base (Just (Tagged (Oid coid))) Nothing
         -- ,
-          Git.commitOid       = Tagged (Oid coid)
+          Git.commitOid       = Tagged (mkOid coid)
         , Git.commitTree      = tree
         , Git.commitParents   = parents
         , Git.commitAuthor    = author
@@ -801,7 +812,7 @@ lgLookupRef name = do
             typ  <- c'git_reference_type ref
             targ <- if typ == c'GIT_REF_OID
                     then do oidPtr <- c'git_reference_target ref
-                            Git.RefObj . Git.ByOid . Tagged . Oid
+                            Git.RefObj . Git.ByOid . Tagged . mkOid
                                 <$> coidPtrToOid oidPtr
                     else do targName <- c'git_reference_symbolic_target ref
                             Git.RefSymbolic . T.decodeUtf8
@@ -855,7 +866,7 @@ lgResolveRef name = do
             if r < 0
                 then return Nothing
                 else Just <$> coidPtrToOid ptr
-    return (Git.ByOid . Tagged . Oid <$> oid)
+    return (Git.ByOid . Tagged . mkOid <$> oid)
 
 -- int git_reference_rename(git_reference *ref, const char *new_name,
 --   int force)

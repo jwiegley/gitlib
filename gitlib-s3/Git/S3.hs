@@ -577,7 +577,7 @@ instance A.FromJSON (Reference m) where
                            <$> o .: "name"
                            <*> (Git.RefObj . Git.ByOid . go <$> o .: "target")
       where
-        go = return . Oid . unsafePerformIO . strToOid
+        go = return . mkOid . unsafePerformIO . strToOid
 
 instance Git.MonadGit m => A.ToJSON (Reference m) where
   toJSON (Git.Reference name (Git.RefSymbolic target)) =

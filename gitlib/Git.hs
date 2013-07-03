@@ -37,21 +37,23 @@ data RepositoryFacts = RepositoryFacts
 type MonadGit m = (Failure Git.GitException m, Applicative m,
                    MonadIO m, MonadBaseControl IO m)
 
+class (Eq o, Ord o, Show o) => IsOid o where
+    renderOid :: o -> Text
+    renderOid = renderObjOid . Tagged
+    renderObjOid :: Tagged a o -> Text
+    renderObjOid = renderOid . unTagged
+
 -- | 'Repository' is the central point of contact between user code and
 -- Git data objects.  Every object must belong to some repository.
-class (Applicative m, Monad m, Failure GitException m,
-       Eq (Oid m), Ord (Oid m), Show (Oid m)) => Repository m where
-    data Oid m
+class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
+      => Repository m where
+    type Oid m
     data TreeData m
     data Options m
 
     facts :: m RepositoryFacts
 
     parseOid  :: Text -> m (Oid m)
-    renderOid :: Oid m -> Text
-    renderOid = renderObjOid . Tagged
-    renderObjOid :: Tagged a (Oid m) -> Text
-    renderObjOid = renderOid . unTagged
 
     -- References
     createRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))

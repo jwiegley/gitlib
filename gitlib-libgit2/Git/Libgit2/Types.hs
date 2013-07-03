@@ -88,8 +88,6 @@ instance (MonadIO m, MonadBaseControl IO m)
     liftBaseWith = defaultLiftBaseWith StMT
     restoreM     = defaultRestoreM unStMT
 
-type Oid m        = Git.Oid (LgRepository m)
-
 type BlobOid m    = Git.BlobOid (LgRepository m)
 type TreeOid m    = Git.TreeOid (LgRepository m)
 type CommitOid m  = Git.CommitOid (LgRepository m)

@@ -19,17 +19,37 @@ import qualified Data.Conduit.List as CList
 import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
+import           Data.Hex
 import           Data.List
 import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as T
 import           Data.Traversable hiding (mapM, forM, sequence)
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null, concat)
 import           Git
 import           Prelude hiding (FilePath)
+
+data OidBytestring = OidBytestring { getOidBS :: ByteString }
+                   deriving (Eq, Ord, Show)
+
+instance IsOid OidBytestring where
+    renderOid (OidBytestring x) = T.toLower (T.decodeUtf8 (hex x))
+
+parseOidBytestring :: Monad m => Text -> m OidBytestring
+parseOidBytestring x = OidBytestring `liftM` unhex (T.encodeUtf8 x)
+
+data OidTextL = OidTextL { getOidTL :: TL.Text }
+              deriving (Eq, Ord, Show)
+
+instance IsOid OidTextL where
+    renderOid (OidTextL x) = TL.toStrict x
+
+parseOidTextL :: Monad m => Text -> m OidTextL
+parseOidTextL = return . OidTextL . TL.fromStrict
 
 treeOid :: Repository m => Tree m -> m Text
 treeOid t = renderObjOid <$> writeTree t

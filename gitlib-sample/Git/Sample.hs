@@ -13,7 +13,7 @@
 
 module Git.Sample
        ( SampleRepository(..), Repository(..)
-       , Git.Oid(..), BlobOid(), TreeOid(), CommitOid()
+       , Git.Oid, BlobOid(), TreeOid(), CommitOid()
        , Tree(), Commit()
        , TreeRef(), CommitRef(), Reference()
        , sampleFactory
@@ -30,8 +30,20 @@ import qualified Git
 
 data Void
 
+instance Show Void where
+    show _ = undefined
+
+instance Ord Void where
+    _ `compare` _ = undefined
+
+instance Eq Void where
+    _ == _ = undefined
+
+instance Git.IsOid Void where
+    renderOid _ = undefined
+
 instance Git.MonadGit m => Git.Repository (SampleRepository m) where
-    data Oid (SampleRepository m)      = Oid Void
+    type Oid (SampleRepository m)      = Void
     data TreeData (SampleRepository m) = Void
     data Options (SampleRepository m)  = Options
 
@@ -39,7 +51,6 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
         { Git.hasSymbolicReferences = True }
 
     parseOid         = undefined
-    renderOid        = undefined
     lookupRef        = undefined
     createRef        = undefined
     updateRef        = undefined
@@ -63,15 +74,6 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     createTag        = undefined
     deleteRepository = undefined
     remoteFetch      = undefined
-
-instance Show (Git.Oid (SampleRepository m)) where
-    show (Oid _coid) = undefined
-
-instance Ord (Git.Oid (SampleRepository m)) where
-    Oid _coid1 `compare` Oid _coid2 = undefined
-
-instance Eq (Git.Oid (SampleRepository m)) where
-    oid1 == oid2 = oid1 `compare` oid2 == EQ
 
 -- type TreeEntry m = Git.TreeEntry (SampleRepository m)
 
