@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -17,13 +18,32 @@ import           Data.List
 import           Data.Maybe
 import           Data.Tagged
 import qualified Data.Text as T
+#if MIN_VERSION_shelly(1, 0, 0)
+import           Data.Text (Text)
+import qualified Data.Text as TL hiding (tails)
+#else
 import           Data.Text.Lazy (Text)
 import qualified Data.Text.Lazy as TL hiding (tails)
+#endif
 import           Git hiding (Options)
 import           Git.Libgit2 (lgFactory, withLibGitDo)
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
 import           Shelly
+
+toStrict :: TL.Text -> T.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+toStrict = id
+#else
+toStrict = TL.toStrict
+#endif
+
+fromStrict :: T.Text -> TL.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+fromStrict = id
+#else
+fromStrict = TL.fromStrict
+#endif
 
 instance Read FilePath
 
@@ -77,7 +97,7 @@ pushToGitHub opts = do
     withRepository lgFactory gd $ do
         cref <- fromJust <$> resolveRef "HEAD"
         hc   <- resolveCommitRef cref
-        rcoid <- Tagged <$> parseOid (TL.toStrict remoteHead)
+        rcoid <- Tagged <$> parseOid (toStrict remoteHead)
         objs <- missingObjects
                     (Just (CommitObjectId rcoid))
                     (CommitObjectId (commitOid hc))
@@ -97,7 +117,7 @@ getRemoteName gd = do
         Nothing -> error "Could not find HEAD"
         Just (Reference _ (RefObj _)) ->
             error "Cannot push from a detached HEAD"
-        Just (Reference _ (RefSymbolic (TL.fromStrict -> branch)))
+        Just (Reference _ (RefSymbolic (fromStrict -> branch)))
             | "refs/heads/" `TL.isPrefixOf` branch ->
                 TL.init <$> git [ "config"
                                 , "branch." <> base branch <> ".remote" ]
@@ -130,7 +150,7 @@ findTags = concatMap go . tails . map norm . TL.words
 
 processCommitTags :: T.Text -> Sh ()
 processCommitTags msg =
-    for_ (findTags (TL.fromStrict msg)) $ \tag -> case tag of
+    for_ (findTags (fromStrict msg)) $ \tag -> case tag of
         ConfirmTag issue mreport -> do
             mreport' <- case mreport of
                 x@(Just _) -> return x
