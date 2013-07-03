@@ -73,12 +73,8 @@ type Reference m  = Git.Reference (CmdLineRepository m) (Commit m)
 type Object m     = Git.Object (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
-    type Oid (CmdLineRepository m) = Git.OidTextL
-
-    data TreeData (CmdLineRepository m) = TreeData
-        { cliTreeOid      :: IORef (Maybe (TreeOid m))
-        , cliTreeContents :: IORef (HashMap Text (TreeEntry m))
-        }
+    type Oid (CmdLineRepository m)  = Git.OidTextL
+    type Tree (CmdLineRepository m) = MutableTree m
 
     data Options (CmdLineRepository m) = Options
 
@@ -87,27 +83,31 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
 
     parseOid = Git.parseOidTextL
 
-    lookupRef       = cliLookupRef
-    createRef       = cliUpdateRef
-    updateRef       = cliUpdateRef
-    deleteRef       = cliDeleteRef
-    resolveRef      = cliResolveRef
-    allRefs         = cliAllRefs
-    lookupCommit    = cliLookupCommit
-    lookupTree      = cliLookupTree
-    lookupBlob      = cliLookupBlob
-    lookupTag       = error "Not defined CmdLineRepository.cliLookupTag"
-    lookupObject    = error "Not defined CmdLineRepository.cliLookupObject"
-    existsObject    = cliExistsObject
-    pushCommit      = \name _ rrefname -> Git.genericPushCommit name rrefname
-    traverseCommits = cliTraverseCommits
-    missingObjects  = cliMissingObjects
-    traverseObjects = error "Not defined: CmdLineRepository.traverseObjects"
-    newTree         = cliNewTree
-    hashContents    = cliHashContents
-    createBlob      = cliCreateBlob
-    createCommit    = cliCreateCommit
-    createTag       = cliCreateTag
+    lookupRef        = cliLookupRef
+    createRef        = cliUpdateRef
+    updateRef        = cliUpdateRef
+    deleteRef        = cliDeleteRef
+    resolveRef       = cliResolveRef
+    allRefs          = cliAllRefs
+    lookupCommit     = cliLookupCommit
+    lookupTree       = cliLookupTree
+    lookupBlob       = cliLookupBlob
+    lookupTag        = error "Not defined CmdLineRepository.cliLookupTag"
+    lookupObject     = error "Not defined CmdLineRepository.cliLookupObject"
+    existsObject     = cliExistsObject
+    pushCommit       = \name _ rrefname -> Git.genericPushCommit name rrefname
+    traverseCommits  = cliTraverseCommits
+    missingObjects   = cliMissingObjects
+    traverseObjects  = error "Not defined: CmdLineRepository.traverseObjects"
+    newTree          = cliNewTree
+    cloneTree        = cliCloneTree
+    traverseEntries  = cliTraverseEntries
+    unsafeUpdateTree = cliModifyTree
+    writeTree        = cliWriteTree
+    hashContents     = cliHashContents
+    createBlob       = cliCreateBlob
+    createCommit     = cliCreateCommit
+    createTag        = cliCreateTag
 
     remoteFetch     = error "Not defined: CmdLineRepository.remoteFetch"
 
@@ -405,17 +405,113 @@ cliMissingObjects mhave need = do
     go x = failure (Git.BackendError $
                     "Unexpected output from git-log: " <> T.pack (show x))
 
-cliMakeTree :: Git.MonadGit m
-            => IORef (Maybe (TreeOid m))
+data MutableTree m = MutableTree
+    { cliTreeOid      :: IORef (Maybe (TreeOid m))
+    , cliTreeContents :: IORef (HashMap Text (TreeEntry m))
+    }
+
+cliMakeTree :: IORef (Maybe (TreeOid m))
             -> IORef (HashMap Text (TreeEntry m))
             -> Tree m
-cliMakeTree oid contents =
-    Git.mkTree cliModifyTree cliWriteTree cliTraverseEntries $
-        TreeData oid contents
+cliMakeTree oid contents = MutableTree oid contents
 
-cliNewTree :: Git.MonadGit m => CmdLineRepository m (Tree m)
+cliNewTree :: Git.MonadGit m
+           => CmdLineRepository m (Tree m)
 cliNewTree = cliMakeTree <$> liftIO (newIORef Nothing)
                          <*> liftIO (newIORef HashMap.empty)
+
+cliCloneTree :: Git.MonadGit m
+             => Tree m
+             -> CmdLineRepository m (Tree m)
+cliCloneTree (MutableTree oid contents) =
+    cliMakeTree <$> liftIO (newIORef =<< readIORef oid)
+                <*> liftIO (newIORef =<< readIORef contents)
+
+cliModifyTree :: Git.MonadGit m
+              => Tree m
+              -> FilePath
+              -> Bool
+              -> (Maybe (TreeEntry m)
+                  -> Git.ModifyTreeResult (CmdLineRepository m))
+              -> CmdLineRepository m (Tree m, Maybe (TreeEntry m))
+cliModifyTree t path createIfNotExist f =
+    fmap Git.fromModifyTreeResult
+        <$> doModifyTree t (Git.splitPath path) createIfNotExist
+  where
+    -- Lookup the current name in this tree.  If it doesn't exist, and there
+    -- are more names in the path and 'createIfNotExist' is True, create a new
+    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
+    -- (TreeEntry {})@, and if not we'll have Nothing.
+    doModifyTree tr [] _ =
+        return (tr, Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ tr)
+    doModifyTree tr (name:names) createIfNotExist = do
+        y' <- doLookupTreeEntry tr [name]
+        y  <- if isNothing y' && createIfNotExist && not (null names)
+              then Just . Git.TreeEntry . Git.Known <$> Git.newTree
+              else return y'
+        go tr name names y
+
+    -- If there are no further names in the path, call the transformer
+    -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there was
+    -- a previous entry at this path.  It should return a 'Left' value to
+    -- propagate out a user-defined error, or a @Maybe TreeEntry@ to indicate
+    -- whether the entry at this path should be deleted or replaced with
+    -- something new.
+    --
+    -- NOTE: There is no provision for leaving the entry unchanged!  It is
+    -- assumed to always be changed, as we have no reliable method of testing
+    -- object equality that is not O(n).
+    go tr name [] y = do
+        let ze = f y
+        liftIO $ modifyIORef (cliTreeContents tr) $ case ze of
+            Git.TreeEntryNotFound     -> id
+            Git.TreeEntryPersistent _ -> id
+            Git.TreeEntryDeleted      -> HashMap.delete name
+            Git.TreeEntryMutated z'   -> HashMap.insert name z'
+        return (tr, ze)
+
+    go tr _ _ Nothing                  = return (tr, Git.TreeEntryNotFound)
+    go _ _ _ (Just Git.BlobEntry {})   = failure Git.TreeCannotTraverseBlob
+    go _ _ _ (Just Git.CommitEntry {}) = failure Git.TreeCannotTraverseCommit
+
+    -- If there are further names in the path, descend them now.  If
+    -- 'createIfNotExist' was False and there is no 'Tree' under the current
+    -- name, or if we encountered a 'Blob' when a 'Tree' was required, throw
+    -- an exception to avoid colliding with user-defined 'Left' values.
+    go tr name names (Just (Git.TreeEntry st')) = do
+        st <- Git.resolveTreeRef st'
+        (st'', ze) <- doModifyTree st names createIfNotExist
+        case ze of
+            Git.TreeEntryNotFound     -> return ()
+            Git.TreeEntryPersistent _ -> return ()
+            Git.TreeEntryDeleted      -> postUpdate tr st'' name
+            Git.TreeEntryMutated _    -> postUpdate tr st'' name
+        return (tr, ze)
+
+    -- Lookup the current name in this tree.  If it doesn't exist, and there
+    -- are more names in the path and 'createIfNotExist' is True, create a new
+    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
+    -- (TreeEntry {})@, and if not we'll have Nothing.
+    doLookupTreeEntry tr [] = return (Just (Git.treeEntry tr))
+    doLookupTreeEntry tr (name:names) = do
+      y <- liftIO $ HashMap.lookup name <$> readIORef (cliTreeContents tr)
+      if null names
+          then return y
+          else case y of
+              Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+              Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+              Just (Git.TreeEntry st)   -> do
+                  st' <- Git.resolveTreeRef st
+                  doLookupTreeEntry st' names
+              _ -> return Nothing
+
+    postUpdate tr st name = liftIO $ do
+        modifyIORef (cliTreeOid tr) (const Nothing)
+        stc <- readIORef (cliTreeContents st)
+        modifyIORef (cliTreeContents tr) $
+            if HashMap.null stc
+            then HashMap.delete name
+            else HashMap.insert name (Git.treeEntry st)
 
 cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
 cliLookupTree oid@(Tagged (getOid -> sha)) = do
@@ -442,118 +538,10 @@ cliLookupTree oid@(Tagged (getOid -> sha)) = do
             "tree"   -> Git.TreeEntry (Git.ByOid (Tagged (mkOid sha)))
             _ -> error "This cannot happen")
 
-doLookupTreeEntry :: Git.MonadGit m => Tree m -> [Text]
-                  -> CmdLineRepository m (Maybe (TreeEntry m))
-doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
-doLookupTreeEntry t (name:names) = do
-  -- Lookup the current name in this tree.  If it doesn't exist, and there are
-  -- more names in the path and 'createIfNotExist' is True, create a new Tree
-  -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
-  -- {})@, and if not we'll have Nothing.
-
-  y <- liftIO $ HashMap.lookup name
-           <$> readIORef (cliTreeContents (Git.getTreeData t))
-  if null names
-      then return y
-      else case y of
-          Just (Git.BlobEntry {})   ->
-              failure Git.TreeCannotTraverseBlob
-          Just (Git.CommitEntry {}) ->
-              failure Git.TreeCannotTraverseCommit
-          Just (Git.TreeEntry t')   -> do
-              t'' <- Git.resolveTreeRef t'
-              doLookupTreeEntry t'' names
-          _ -> return Nothing
-
-doModifyTree :: Git.MonadGit m
-             => Tree m
-             -> [Text]
-             -> Bool
-             -> (Maybe (TreeEntry m)
-                 -> CmdLineRepository m
-                     (Git.ModifyTreeResult (CmdLineRepository m)))
-             -> CmdLineRepository m (Git.ModifyTreeResult (CmdLineRepository m))
-doModifyTree t [] _ _ =
-    return . Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ t
-doModifyTree t (name:names) createIfNotExist f = do
-    -- Lookup the current name in this tree.  If it doesn't exist, and there
-    -- are more names in the path and 'createIfNotExist' is True, create a new
-    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
-    -- (TreeEntry {})@, and if not we'll have Nothing.
-    y' <- doLookupTreeEntry t [name]
-    y  <- if isNothing y' && createIfNotExist && not (null names)
-          then Just . Git.TreeEntry . Git.Known <$> Git.newTree
-          else return y'
-
-    if null names
-        then do
-        -- If there are no further names in the path, call the transformer
-        -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there
-        -- was a previous entry at this path.  It should return a 'Left' value
-        -- to propagate out a user-defined error, or a @Maybe TreeEntry@ to
-        -- indicate whether the entry at this path should be deleted or
-        -- replaced with something new.
-        --
-        -- NOTE: There is no provision for leaving the entry unchanged!  It is
-        -- assumed to always be changed, as we have no reliable method of
-        -- testing object equality that is not O(n).
-        ze <- f y
-        liftIO $ modifyIORef (cliTreeContents (Git.getTreeData t)) $
-            case ze of
-                Git.TreeEntryNotFound     -> id
-                Git.TreeEntryPersistent _ -> id
-                Git.TreeEntryDeleted      -> HashMap.delete name
-                Git.TreeEntryMutated z'   -> HashMap.insert name z'
-        return ze
-
-        else
-        -- If there are further names in the path, descend them now.  If
-        -- 'createIfNotExist' was False and there is no 'Tree' under the
-        -- current name, or if we encountered a 'Blob' when a 'Tree' was
-        -- required, throw an exception to avoid colliding with user-defined
-        -- 'Left' values.
-        case y of
-            Nothing -> return Git.TreeEntryNotFound
-            Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
-            Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-            Just (Git.TreeEntry st')  -> do
-                st <- Git.resolveTreeRef st'
-                ze <- doModifyTree st names createIfNotExist f
-                case ze of
-                    Git.TreeEntryNotFound     -> return ()
-                    Git.TreeEntryPersistent _ -> return ()
-                    Git.TreeEntryDeleted      -> postUpdate st
-                    Git.TreeEntryMutated _    -> postUpdate st
-                return ze
-  where
-    postUpdate st = liftIO $ do
-        modifyIORef (cliTreeOid (Git.getTreeData t)) (const Nothing)
-        stc <- readIORef (cliTreeContents (Git.getTreeData st))
-        modifyIORef (cliTreeContents (Git.getTreeData t)) $
-            if HashMap.null stc
-            then HashMap.delete name
-            else HashMap.insert name (Git.treeEntry st)
-
-cliModifyTree :: Git.MonadGit m
-              => Tree m -> FilePath -> Bool
-              -> (Maybe (TreeEntry m)
-                  -> CmdLineRepository m
-                      (Git.ModifyTreeResult (CmdLineRepository m)))
-              -> CmdLineRepository m (Maybe (TreeEntry m))
-cliModifyTree t path createIfNotExist f =
-    Git.fromModifyTreeResult <$>
-        doModifyTree t (splitPath path) createIfNotExist f
-
-splitPath :: FilePath -> [Text]
-splitPath path = T.splitOn "/" text
-  where text = case F.toText path of
-                 Left x  -> error $ "Invalid path: " ++ T.unpack x
-                 Right y -> y
-
 cliWriteTree :: Git.MonadGit m
              => Tree m -> CmdLineRepository m (TreeOid m)
 cliWriteTree tree = do
-    contents <- liftIO $ readIORef (cliTreeContents (Git.getTreeData tree))
+    contents <- liftIO $ readIORef (cliTreeContents tree)
     rendered <- mapM renderLine (HashMap.toList contents)
     oid      <- doRunGit run ["mktree", "-z", "--missing"]
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
@@ -578,10 +566,10 @@ cliWriteTree tree = do
             , TL.fromStrict path ]
 
 cliTraverseEntries :: Git.MonadGit m
-                   => Tree m
-                   -> (FilePath -> TreeEntry m -> CmdLineRepository m b)
+                   => (FilePath -> TreeEntry m -> CmdLineRepository m b)
+                   -> Tree m
                    -> CmdLineRepository m [b]
-cliTraverseEntries tree f = do
+cliTraverseEntries f tree = do
     Tagged (getOid -> sha) <- Git.writeTree tree
     contents <- runGit ["ls-tree", "-t", "-r", "-z", sha]
     -- Even though the tree entries are separated by \NUL, for whatever reason

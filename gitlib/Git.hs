@@ -2,19 +2,109 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Interface for working with Git repositories.
-module Git where
+module Git
+       ( RepositoryFacts(..)
+       , Repository(..)
+       , RepositoryFactory(..)
+       , RepositoryOptions(..)
+       , withBackendDo
+       , withRepository
+       , withRepository'
+       , MonadGit
+
+       , IsOid(..)
+       , copyOid
+       , Object(..)
+       , ObjRef(..)
+       , objectOid
+
+       , Blob(..)
+       , BlobOid
+       , BlobContents(..)
+       , BlobKind(..)
+       , ByteSource
+       , BlobRef
+       , blobEntry
+       , blobRefOid
+       , resolveBlobRef
+
+       , TreeT
+       , TreeEntry(..)
+       , TreeOid
+       , TreeRef
+       , createTree
+       , withNewTree
+       , mutateTree
+       , withTree
+       , unsafeMutateTree
+       , unsafeMutateTree_
+       , unsafeWithTree
+       , unsafeGetTree
+       , unsafePutTree
+       , dropEntry
+       , getEntry
+       , getTreeEntry
+       , putBlob
+       , putBlob'
+       , putCommit
+       , putEntry
+       , putTree
+       , resolveTreeRef
+       , treeEntry
+       , treeEntryOid
+       , treeRef
+       , treeRefOid
+       , ModifyTreeResult(..)
+       , fromModifyTreeResult
+       , toModifyTreeResult
+
+       , Commit(..)
+       , CommitOid
+       , CommitName(..)
+       , CommitRef
+       , Signature(..)
+       , commitEntry
+       , commitNameToRef
+       , commitRef
+       , commitRefOid
+       , commitRefTarget
+       , copyCommitName
+       , copyCommitOid
+       , nameOfCommit
+       , renderCommitName
+       , resolveCommitRef
+
+       , Tag(..)
+       , TagOid
+       , TagRef
+       , tagRefOid
+
+       , RefTarget(..)
+       , Reference(..)
+       , referenceToRef
+
+       , GitException(..)
+       , ModificationKind(..)
+       , MergeStatus(..)
+       , MergeResult(..)
+       , mergeStatus
+       , copyConflict
+       ) where
 
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
+import           Control.Monad.Fix
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import           Data.Conduit
 import           Data.Default
@@ -48,7 +138,8 @@ class (Eq o, Ord o, Show o) => IsOid o where
 class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
       => Repository m where
     type Oid m
-    data TreeData m
+    type Tree m
+
     data Options m
 
     facts :: m RepositoryFacts
@@ -104,6 +195,19 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
 
     -- Object creation
     newTree :: m (Tree m)
+    cloneTree :: Tree m -> m (Tree m)
+    traverseEntries :: (FilePath -> TreeEntry m -> m a) -> Tree m -> m [a]
+    traverseEntries_ :: (FilePath -> TreeEntry m -> m a) -> Tree m -> m ()
+    traverseEntries_ = (void .) . traverseEntries
+    writeTree :: Tree m -> m (TreeOid m)
+
+    unsafeUpdateTree
+        :: Tree m
+        -> FilePath    -- path within the tree
+        -> Bool        -- create subtree's leading up to path?
+        -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
+        -> m (Tree m, Maybe (TreeEntry m))
+
     hashContents :: BlobContents m -> m (BlobOid m)
     createBlob   :: BlobContents m -> m (BlobOid m)
     createCommit :: [CommitRef m] -> TreeRef m
@@ -271,6 +375,98 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
+newtype TreeT m a = TreeT { runTreeT :: StateT (Tree m) m a }
+
+instance Functor m => Functor (TreeT m) where
+    fmap f (TreeT t) = TreeT (fmap f t)
+
+instance Monad m => Monad (TreeT m) where
+    return x = TreeT (return x)
+    TreeT x >>= f = TreeT (x >>= runTreeT . f)
+
+instance (Functor m, Monad m) => Applicative (TreeT m) where
+    pure = return
+    (<*>) = ap
+
+instance (Functor m, MonadPlus m) => Alternative (TreeT m) where
+    empty = mzero
+    (<|>) = mplus
+
+instance (MonadPlus m) => MonadPlus (TreeT m) where
+    mzero       = TreeT $ mzero
+    m `mplus` n = TreeT $ runTreeT m `mplus` runTreeT n
+
+instance (MonadFix m) => MonadFix (TreeT m) where
+    mfix f = TreeT $ mfix $ \ ~a -> runTreeT (f a)
+
+instance MonadTrans TreeT where
+    lift m = TreeT $ lift m
+
+instance (MonadIO m) => MonadIO (TreeT m) where
+    liftIO = lift . liftIO
+
+unsafeGetTree :: Monad m => TreeT m (Tree m)
+unsafeGetTree = TreeT get
+
+unsafePutTree :: Monad m => Tree m -> TreeT m ()
+unsafePutTree = TreeT . put
+
+getEntry :: Repository m => FilePath -> TreeT m (Maybe (TreeEntry m))
+getEntry path = do
+    tr <- unsafeGetTree
+    snd <$> lift (unsafeUpdateTree tr path False
+                  (toModifyTreeResult TreeEntryPersistent))
+
+getTreeEntry :: Repository m => Tree m -> FilePath -> m (Maybe (TreeEntry m))
+getTreeEntry tree path = fst <$> unsafeWithTree tree (getEntry path)
+
+putEntry :: Repository m => FilePath -> TreeEntry m -> TreeT m ()
+putEntry path ent = do
+    tr <- unsafeGetTree
+    tr' <- fst <$> lift (unsafeUpdateTree tr path True
+                         (const (TreeEntryMutated ent)))
+    unsafePutTree tr'
+
+dropEntry :: Repository m => FilePath -> TreeT m ()
+dropEntry path = do
+    tr <- unsafeGetTree
+    tr' <- fst <$> lift (unsafeUpdateTree tr path False
+                         (const TreeEntryDeleted))
+    unsafePutTree tr'
+
+putBlob' :: Repository m => FilePath -> BlobOid m -> BlobKind -> TreeT m ()
+putBlob' path b kind = putEntry path (BlobEntry b kind)
+
+putBlob :: Repository m => FilePath -> BlobOid m -> TreeT m ()
+putBlob path b = putBlob' path b PlainBlob
+
+putTree :: Repository m => FilePath -> TreeRef m -> TreeT m ()
+putTree path ent = putEntry path (TreeEntry ent)
+
+putCommit :: Repository m => FilePath -> CommitOid m -> TreeT m ()
+putCommit path c = putEntry path (CommitEntry c)
+
+withNewTree :: Repository m => TreeT m a -> m (a, Tree m)
+withNewTree (TreeT action) = runStateT action =<< newTree
+
+createTree :: Repository m => TreeT m a -> m (Tree m)
+createTree (TreeT action) = execStateT action =<< newTree
+
+withTree :: Repository m => Tree m -> TreeT m a -> m (a, Tree m)
+withTree tr (TreeT action) = runStateT action =<< cloneTree tr
+
+unsafeWithTree :: Repository m => Tree m -> TreeT m a -> m (a, Tree m)
+unsafeWithTree tr (TreeT action) = runStateT action tr
+
+mutateTree :: Repository m => Tree m -> TreeT m a -> m (Tree m)
+mutateTree tr (TreeT action) = execStateT action =<< cloneTree tr
+
+unsafeMutateTree :: Repository m => Tree m -> TreeT m a -> m (Tree m)
+unsafeMutateTree tr (TreeT action) = execStateT action tr
+
+unsafeMutateTree_ :: Repository m => Tree m -> TreeT m a -> m ()
+unsafeMutateTree_ = (void .) . unsafeMutateTree
+
 data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
                                , blobEntryKind  :: !BlobKind }
                  | TreeEntry   { treeEntryRef   :: !(TreeRef m) }
@@ -296,10 +492,10 @@ data ModifyTreeResult m = TreeEntryNotFound
                         | TreeEntryMutated (TreeEntry m)
 
 fromModifyTreeResult :: ModifyTreeResult m -> Maybe (TreeEntry m)
-fromModifyTreeResult TreeEntryNotFound = Nothing
-fromModifyTreeResult TreeEntryDeleted = Nothing
+fromModifyTreeResult TreeEntryNotFound       = Nothing
+fromModifyTreeResult TreeEntryDeleted        = Nothing
 fromModifyTreeResult (TreeEntryPersistent x) = Just x
-fromModifyTreeResult (TreeEntryMutated x) = Just x
+fromModifyTreeResult (TreeEntryMutated x)    = Just x
 
 toModifyTreeResult :: (TreeEntry m -> ModifyTreeResult m)
                    -> Maybe (TreeEntry m)
@@ -308,63 +504,6 @@ toModifyTreeResult _ Nothing  = TreeEntryNotFound
 toModifyTreeResult f (Just x) = f x
 
 -- | A 'Tree' is anything that is "treeish".
---
--- Minimal complete definition: 'modifyTree'.  Note that for some treeish
--- things, like Tags, it should always be an error to attempt to modify the
--- tree in any way.
-data Tree m = Tree
-    { modifyTree :: FilePath    -- path within the tree
-                 -> Bool        -- create subtree's leading up to path?
-                 -> (Maybe (TreeEntry m) -> m (ModifyTreeResult m))
-                 -> m (Maybe (TreeEntry m))
-
-    , lookupEntry      :: FilePath -> m (Maybe (TreeEntry m))
-    , putTreeEntry     :: FilePath -> TreeEntry m -> m ()
-    , putBlob'         :: FilePath -> BlobOid m -> BlobKind -> m ()
-    , putBlob          :: FilePath -> BlobOid m -> m ()
-    , putTree          :: FilePath -> TreeRef m -> m ()
-    , putCommit        :: FilePath -> CommitOid m -> m ()
-    , dropFromTree     :: FilePath -> m ()
-    , writeTree        :: m (TreeOid m)
-    , traverseEntries  :: forall a. (FilePath -> TreeEntry m -> m a) -> m [a]
-    , traverseEntries_ :: (FilePath -> TreeEntry m -> m ()) -> m ()
-    , getTreeData      :: !(TreeData m)
-    }
-
-mkTree :: Repository m
-       => (Tree m
-           -> FilePath           -- path within the tree
-           -> Bool               -- create subtree's leading up to path?
-           -> (Maybe (TreeEntry m) -> m (ModifyTreeResult m))
-           -> m (Maybe (TreeEntry m)))
-       -> (Tree m -> m (TreeOid m))
-       -> (forall a. Tree m -> (FilePath -> TreeEntry m -> m a) -> m [a])
-       -> TreeData m
-       -> Tree m
-mkTree modifyTree' writeTree' traverseEntries' treeData = tr
-  where
-    tr = Tree
-        { modifyTree       = modifyTree' tr
-        , lookupEntry      =
-            \path -> modifyTree' tr path False
-                     (return . toModifyTreeResult TreeEntryPersistent)
-        , putTreeEntry     = \path ent ->
-                                 void $ modifyTree' tr path True
-                                     (const (return (TreeEntryMutated ent)))
-        , putBlob'         = \path b kind ->
-                                 putTreeEntry tr path (BlobEntry b kind)
-        , putBlob          = \path b   -> putBlob' tr path b PlainBlob
-        , putTree          = \path tr' -> putTreeEntry tr path (TreeEntry tr')
-        , putCommit        = \path c   -> putTreeEntry tr path (CommitEntry c)
-        , dropFromTree     = \path ->
-                                 void $ modifyTree' tr path False
-                                     (const (return TreeEntryDeleted))
-        , writeTree        = writeTree' tr
-        , traverseEntries  = traverseEntries' tr
-        , traverseEntries_ = void . traverseEntries' tr
-        , getTreeData      = treeData
-        }
-
 treeRef :: Tree m -> TreeRef m
 treeRef = Known
 

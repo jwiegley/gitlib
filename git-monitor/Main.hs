@@ -210,7 +210,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     scanOldEntry str ft fp _ = case Map.lookup fp ft of
         Nothing -> do
             infoL $ "Removed: " ++ fileStr fp
-            dropFromTree str fp
+            void $ unsafeMutateTree str $ dropEntry fp
         _ -> return ()
 
     scanNewEntry :: (Repository m, MonadIO m)
@@ -221,18 +221,18 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
         case Map.lookup fp ft of
             Nothing -> do
                 infoL $ "Added to snapshot: " ++ fileStr fp
-                putBlob' str fp oid exe
+                void $ unsafeMutateTree str $ putBlob' fp oid exe
             Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
                 | oid /= oldOid || exe /= oldExe -> do
                     infoL $ "Changed: " ++ fileStr fp
-                    putBlob' str fp oid exe
+                    void $ unsafeMutateTree str $ putBlob' fp oid exe
                 | mt /= oldMt || oid /= fileOid -> do
                     path <- fileStr <$>
                             liftIO (canonicalizePath (wd </> fp))
                     infoL $ "Changed: " ++ fileStr fp
                     contents <- liftIO $ B.readFile path
                     newOid   <- createBlob (BlobString contents)
-                    putBlob' str fp newOid exe
+                    void $ unsafeMutateTree str $ putBlob' fp newOid exe
                 | otherwise -> return ()
             _ -> return ()
     scanNewEntry _str _ft _fp (FileEntry _mt _ _foid) = return ()

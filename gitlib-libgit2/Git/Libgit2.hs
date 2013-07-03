@@ -99,7 +99,7 @@ import qualified System.IO.Unsafe as SU
 debug :: MonadIO m => String -> m ()
 --debug = liftIO . putStrLn
 debug = const (return ())
-
+
 type Oid = OidPtr
 
 data OidPtr = OidPtr { getOid :: ForeignPtr C'git_oid }
@@ -146,13 +146,15 @@ instance Ord OidPtr where
 
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
+
+data TreeBuilder m = TreeBuilder
+    { lgPendingUpdates :: IORef (HashMap Text (Tree m))
+    , lgTreeContents   :: ForeignPtr C'git_treebuilder
+    }
 
 instance Git.MonadGit m => Git.Repository (LgRepository m) where
-    type Oid (LgRepository m) = OidPtr
-    data TreeData (LgRepository m) = TreeData
-        { lgPendingUpdates :: IORef (HashMap Text (Tree m))
-        , lgTreeContents   :: ForeignPtr C'git_treebuilder
-        }
+    type Oid (LgRepository m)  = OidPtr
+    type Tree (LgRepository m) = TreeBuilder m
 
     data Options (LgRepository m) = Options
 
@@ -160,27 +162,31 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
         { Git.hasSymbolicReferences = True
         }
 
-    parseOid        = lgParseOid
-    lookupRef       = lgLookupRef
-    createRef       = lgUpdateRef
-    updateRef       = lgUpdateRef
-    deleteRef       = lgDeleteRef
-    resolveRef      = lgResolveRef
-    allRefNames     = lgAllRefNames
-    lookupCommit    = lgLookupCommit 40
-    lookupTree      = lgLookupTree 40
-    lookupBlob      = lgLookupBlob
-    lookupTag       = undefined
-    lookupObject    = lgLookupObject
-    existsObject    = lgExistsObject
-    pushCommit      = \name _ rrefname -> Git.genericPushCommit name rrefname
-    traverseCommits = lgTraverseCommits
-    missingObjects  = lgMissingObjects
-    traverseObjects = error "Not defined: LgRepository.traverseObjects"
-    newTree         = lgNewTree
-    hashContents    = lgHashContents
-    createBlob      = lgWrap . lgCreateBlob
-    createTag       = undefined
+    parseOid         = lgParseOid
+    lookupRef        = lgLookupRef
+    createRef        = lgUpdateRef
+    updateRef        = lgUpdateRef
+    deleteRef        = lgDeleteRef
+    resolveRef       = lgResolveRef
+    allRefNames      = lgAllRefNames
+    lookupCommit     = lgLookupCommit 40
+    lookupTree       = lgLookupTree 40
+    lookupBlob       = lgLookupBlob
+    lookupTag        = undefined
+    lookupObject     = lgLookupObject
+    existsObject     = lgExistsObject
+    pushCommit       = \name _ rrefname -> Git.genericPushCommit name rrefname
+    traverseCommits  = lgTraverseCommits
+    missingObjects   = lgMissingObjects
+    traverseObjects  = error "Not defined: LgRepository.traverseObjects"
+    newTree          = lgNewTree
+    cloneTree        = lgCloneTree
+    traverseEntries  = lgTraverseEntries
+    unsafeUpdateTree = lgModifyTree
+    writeTree        = lgWriteTree
+    hashContents     = lgHashContents
+    createBlob       = lgWrap . lgCreateBlob
+    createTag        = undefined
 
     createCommit p t a c l r = lgWrap $ lgCreateCommit p t a c l r
 
@@ -256,43 +262,40 @@ lgLookupBlob oid =
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
 lgTraverseEntries :: Git.MonadGit m
-                  => Tree m
-                  -> (FilePath -> TreeEntry m -> LgRepository m a)
+                  =>(FilePath -> TreeEntry m -> LgRepository m a)
+                  -> Tree m
                   -> LgRepository m [a]
-lgTraverseEntries initialTree f = go "" initialTree
-      where
-        go fp tree = do
-            entries <- liftIO $ withForeignPtr
-                           (lgTreeContents (Git.getTreeData tree)) $ \tb -> do
-                ior <- newIORef []
-                bracket
-                    (mk'git_treebuilder_filter_cb (callback fp ior))
-                    freeHaskellFunPtr
-                    (flip (c'git_treebuilder_filter tb) nullPtr)
-                readIORef ior
-            concat <$> mapM (uncurry handler) entries
+lgTraverseEntries f initialTree = go "" initialTree
+  where
+    go fp tree = do
+        entries <- liftIO $ withForeignPtr (lgTreeContents tree) $ \tb -> do
+            ior <- newIORef []
+            bracket
+                (mk'git_treebuilder_filter_cb (callback fp ior))
+                freeHaskellFunPtr
+                (flip (c'git_treebuilder_filter tb) nullPtr)
+            readIORef ior
+        concat <$> mapM (uncurry handler) entries
 
-        handler path entry@(Git.TreeEntry tref) = do
-            x  <- f path entry
-            xs <- Git.resolveTreeRef tref >>= go path
-            return (x:xs)
-        handler path entry = liftM2 (:) (f path entry) (return [])
+    handler path entry@(Git.TreeEntry tref) = do
+        x  <- f path entry
+        xs <- Git.resolveTreeRef tref >>= go path
+        return (x:xs)
+    handler path entry = liftM2 (:) (f path entry) (return [])
 
-        callback fp ior te _ = do
-            cname <- c'git_tree_entry_name te
-            name  <- (fp </>) . F.decodeString <$> peekCString cname
-            entry <- entryToTreeEntry te
-            modifyIORef ior $
-                seq name $ seq entry (\xs -> (name,entry):xs)
-            return 0
+    callback fp ior te _ = do
+        cname <- c'git_tree_entry_name te
+        name  <- (fp </>) . F.decodeString <$> peekCString cname
+        entry <- entryToTreeEntry te
+        modifyIORef ior $
+            seq name $ seq entry (\xs -> (name,entry):xs)
+        return 0
 
 lgMakeTree :: Git.MonadGit m
            => IORef (HashMap Text (Tree m))
            -> ForeignPtr C'git_treebuilder
-           -> Tree m
-lgMakeTree updates contents =
-    Git.mkTree lgModifyTree lgWriteTree lgTraverseEntries $
-        TreeData updates contents
+           -> LgRepository m (Tree m)
+lgMakeTree contents builder = return $ TreeBuilder contents builder
 
 -- | Create a new, empty tree.
 --
@@ -310,8 +313,39 @@ lgNewTree = do
 
     if r < 0
         then failure (Git.TreeCreateFailed "Failed to create new tree builder")
-        else lgMakeTree <$> liftIO (newIORef HashMap.empty)
-                        <*> pure fptr
+        else do
+             contents <- liftIO (newIORef HashMap.empty)
+             lgMakeTree contents fptr
+
+lgCloneTree :: Git.MonadGit m => Tree m -> LgRepository m (Tree m)
+lgCloneTree (TreeBuilder pending contents) =
+    TreeBuilder <$> liftIO (newIORef =<< readIORef pending)
+                <*> liftIO (copyBuilder contents)
+  where
+    copyBuilder fptr = withForeignPtr fptr $ \builder -> alloca $ \pptr -> do
+        r <- c'git_treebuilder_create pptr nullPtr
+        when (r < 0) $
+            failure (Git.BackendError "Could not create new treebuilder")
+        builder' <- peek pptr
+        bracket
+            (mk'git_treebuilder_filter_cb (callback builder'))
+            freeHaskellFunPtr
+            (flip (c'git_treebuilder_filter builder) nullPtr)
+        FC.newForeignPtr builder'(c'git_treebuilder_free builder')
+
+    callback builder te _ = do
+        cname <- c'git_tree_entry_name te
+        coid  <- c'git_tree_entry_id te
+        fmode <- c'git_tree_entry_filemode te
+        r <- c'git_treebuilder_insert
+            nullPtr
+            builder
+            cname
+            coid
+            fmode
+        when (r < 0) $
+            failure (Git.BackendError "Could not insert entry in treebuilder")
+        return 0
 
 lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
              -> LgRepository m (Tree m)
@@ -333,7 +367,7 @@ lgLookupTree len oid = do
                       else do
                       upds <- liftIO $ newIORef HashMap.empty
                       return (upds,fptr)
-    return $ lgMakeTree upds fptr
+    lgMakeTree upds fptr
 
 entryToTreeEntry :: Git.MonadGit m => Ptr C'git_tree_entry -> IO (TreeEntry m)
 entryToTreeEntry entry = do
@@ -355,37 +389,6 @@ entryToTreeEntry entry = do
              return $ Git.CommitEntry (Tagged (mkOid oid))
            | otherwise -> error "Unexpected"
 
-doLookupTreeEntry :: Git.MonadGit m
-                  => Tree m
-                  -> [Text]
-                  -> LgRepository m (Maybe (TreeEntry m))
-doLookupTreeEntry t [] = return (Just (Git.treeEntry t))
-doLookupTreeEntry t (name:names) = do
-  -- Lookup the current name in this tree.  If it doesn't exist, and there are
-  -- more names in the path and 'createIfNotExist' is True, create a new Tree
-  -- and descend into it.  Otherwise, if it exists we'll have @Just (TreeEntry
-  -- {})@, and if not we'll have Nothing.
-  upds <- liftIO $ readIORef (lgPendingUpdates (Git.getTreeData t))
-  y <- case HashMap.lookup name upds of
-      Just m -> return . Just . Git.TreeEntry . Git.Known $ m
-      Nothing ->
-          liftIO $ withForeignPtr
-              (lgTreeContents (Git.getTreeData t)) $ \builder -> do
-                  entry <- withCString (T.unpack name)
-                               (c'git_treebuilder_get builder)
-                  if entry == nullPtr
-                      then return Nothing
-                      else Just <$> entryToTreeEntry entry
-  if null names
-      then return y
-      else case y of
-          Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
-          Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-          Just (Git.TreeEntry t')   -> do
-              t'' <- Git.resolveTreeRef t'
-              doLookupTreeEntry t'' names
-          _ -> return Nothing
-
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 lgWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (TreeOid m)
@@ -394,51 +397,24 @@ lgWriteTree t = do
     emptyTreeOid <- Git.parseOid "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
     doWriteTree t
         >>= return . Tagged . fromMaybe emptyTreeOid
-
-lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
-lgTreeEntryCount t = do
-    let tdata    = Git.getTreeData t
-        contents = lgTreeContents tdata
-    fromIntegral
-        <$> liftIO (withForeignPtr contents c'git_treebuilder_entrycount)
-
-insertEntry :: Git.MonadGit m
-            => ForeignPtr C'git_treebuilder -> String -> Oid -> CUInt
-            -> LgRepository m ()
-insertEntry builder key oid attrs = do
-  r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
-      withForeignPtr builder $ \ptr ->
-      withCString key $ \name ->
-          c'git_treebuilder_insert nullPtr ptr name coid attrs
-  when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed (T.pack key))
-
-dropEntry :: Git.MonadGit m
-          => ForeignPtr C'git_treebuilder -> String -> LgRepository m ()
-dropEntry builder key = do
-  r2 <- liftIO $ withForeignPtr builder $ \ptr ->
-      withCString key $ \name ->
-          c'git_treebuilder_remove ptr name
-  when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed (T.pack key))
-
-doWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (Maybe Oid)
-doWriteTree t = do
-    repo <- lgGet
-    let tdata    = Git.getTreeData t
-        contents = lgTreeContents tdata
-
-    upds <- liftIO $ readIORef (lgPendingUpdates tdata)
-    forM_ (HashMap.toList upds) $ \(k,v) -> do
-        oid <- doWriteTree v
-        case oid of
-            Nothing   -> dropEntry contents (T.unpack k)
-            Just oid' -> insertEntry contents (T.unpack k) oid' 0o040000
-    liftIO $ writeIORef (lgPendingUpdates tdata) HashMap.empty
-
-    cnt <- liftIO $ withForeignPtr contents c'git_treebuilder_entrycount
-    if cnt == 0
-        then return Nothing
-        else go contents (repoObj repo)
   where
+    doWriteTree tr = do
+        repo <- lgGet
+        let contents = lgTreeContents tr
+
+        upds <- liftIO $ readIORef (lgPendingUpdates tr)
+        forM_ (HashMap.toList upds) $ \(k,v) -> do
+            oid <- doWriteTree v
+            case oid of
+                Nothing   -> dropEntry contents (T.unpack k)
+                Just oid' -> insertEntry contents (T.unpack k) oid' 0o040000
+        liftIO $ writeIORef (lgPendingUpdates tr) HashMap.empty
+
+        cnt <- liftIO $ withForeignPtr contents c'git_treebuilder_entrycount
+        if cnt == 0
+            then return Nothing
+            else go contents (repoObj repo)
+
     go :: Git.MonadGit m
        => ForeignPtr C'git_treebuilder
        -> ForeignPtr C'git_repository
@@ -460,64 +436,84 @@ doWriteTree t = do
                      ++ ": " ++ errStr)
         return (Just (mkOid coid))
 
-doModifyTree :: Git.MonadGit m
-             => Tree m
-             -> [Text]
-             -> Bool
-             -> (Maybe (TreeEntry m)
-                 -> LgRepository m (Git.ModifyTreeResult (LgRepository m)))
-             -> LgRepository m (Git.ModifyTreeResult (LgRepository m))
-doModifyTree t [] _ _ =
-    return . Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ t
-doModifyTree t (name:names) createIfNotExist f = do
+lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
+lgTreeEntryCount t = do
+    let contents = lgTreeContents t
+    fromIntegral
+        <$> liftIO (withForeignPtr contents c'git_treebuilder_entrycount)
+
+insertEntry :: Git.MonadGit m
+            => ForeignPtr C'git_treebuilder -> String -> Oid -> CUInt
+            -> LgRepository m ()
+insertEntry builder key oid attrs = do
+  r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
+      withForeignPtr builder $ \ptr ->
+      withCString key $ \name ->
+          c'git_treebuilder_insert nullPtr ptr name coid attrs
+  when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed (T.pack key))
+
+dropEntry :: Git.MonadGit m
+          => ForeignPtr C'git_treebuilder -> String -> LgRepository m ()
+dropEntry builder key = do
+  r2 <- liftIO $ withForeignPtr builder $ \ptr ->
+      withCString key $ \name ->
+          c'git_treebuilder_remove ptr name
+  when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed (T.pack key))
+
+lgModifyTree :: Git.MonadGit m
+             => Tree m -> FilePath -> Bool
+             -> (Maybe (TreeEntry m) -> Git.ModifyTreeResult (LgRepository m))
+             -> LgRepository m (Tree m, Maybe (TreeEntry m))
+lgModifyTree t path createIfNotExist f =
+    fmap Git.fromModifyTreeResult
+        <$> doModifyTree t (splitPath path) createIfNotExist
+  where
     -- Lookup the current name in this tree.  If it doesn't exist, and there
     -- are more names in the path and 'createIfNotExist' is True, create a new
     -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
     -- (TreeEntry {})@, and if not we'll have Nothing.
-    y' <- doLookupTreeEntry t [name]
-    y  <- if isNothing y' && createIfNotExist && not (null names)
-          then Just . Git.TreeEntry . Git.Known <$> Git.newTree
-          else return y'
+    doModifyTree tr [] _ =
+        return (tr, Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ tr)
+    doModifyTree tr (name:names) createIfNotExist = do
+        y' <- doLookupTreeEntry tr [name]
+        y  <- if isNothing y' && createIfNotExist && not (null names)
+              then Just . Git.TreeEntry . Git.Known <$> Git.newTree
+              else return y'
+        go tr name names y
 
-    if null names
-        then do
-        -- If there are no further names in the path, call the transformer
-        -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there
-        -- was a previous entry at this path.  It should return a 'Left' value
-        -- to propagate out a user-defined error, or a @Maybe TreeEntry@ to
-        -- indicate whether the entry at this path should be deleted or
-        -- replaced with something new.
-        --
-        -- NOTE: There is no provision for leaving the entry unchanged!  It is
-        -- assumed to always be changed, as we have no reliable method of
-        -- testing object equality that is not O(n).
-        ze <- f y
-        returnTree (Git.getTreeData t) (T.unpack name) ze
+    -- If there are no further names in the path, call the transformer
+    -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there was
+    -- a previous entry at this path.  It should return a 'Left' value to
+    -- propagate out a user-defined error, or a @Maybe TreeEntry@ to indicate
+    -- whether the entry at this path should be deleted or replaced with
+    -- something new.
+    --
+    -- NOTE: There is no provision for leaving the entry unchanged!  It is
+    -- assumed to always be changed, as we have no reliable method of testing
+    -- object equality that is not O(n).
+    go tr name [] y = returnTree tr (T.unpack name) (f y)
 
-        else
-          -- If there are further names in the path, descend them now.  If
-          -- 'createIfNotExist' was False and there is no 'Tree' under the
-          -- current name, or if we encountered a 'Blob' when a 'Tree' was
-          -- required, throw an exception to avoid colliding with user-defined
-          -- 'Left' values.
-          case y of
-              Nothing -> return Git.TreeEntryNotFound
-              Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
-              Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-              Just (Git.TreeEntry st')  -> do
-                  st <- Git.resolveTreeRef st'
-                  ze <- doModifyTree st names createIfNotExist f
-                  case ze of
-                      Git.TreeEntryNotFound     -> return ze
-                      Git.TreeEntryPersistent _ -> return ze
-                      Git.TreeEntryDeleted      -> postUpdate st ze
-                      Git.TreeEntryMutated _    -> postUpdate st ze
-  where
-    postUpdate st ze = do
-        liftIO $ modifyIORef
-            (lgPendingUpdates (Git.getTreeData t))
-            (HashMap.insert name st)
-        return ze
+    go tr _ _ Nothing                  = return (tr, Git.TreeEntryNotFound)
+    go _ _ _ (Just Git.BlobEntry {})   = failure Git.TreeCannotTraverseBlob
+    go _ _ _ (Just Git.CommitEntry {}) = failure Git.TreeCannotTraverseCommit
+
+    -- If there are further names in the path, descend them now.  If
+    -- 'createIfNotExist' was False and there is no 'Tree' under the current
+    -- name, or if we encountered a 'Blob' when a 'Tree' was required, throw
+    -- an exception to avoid colliding with user-defined 'Left' values.
+    go tr name names (Just (Git.TreeEntry st')) = do
+        st <- Git.resolveTreeRef st'
+        (st'', ze) <- doModifyTree st names createIfNotExist
+        case ze of
+            Git.TreeEntryNotFound     -> return ()
+            Git.TreeEntryPersistent _ -> return ()
+            Git.TreeEntryDeleted      -> postUpdate tr st'' name
+            Git.TreeEntryMutated _    -> postUpdate tr st'' name
+        return (tr, ze)
+
+    postUpdate tr st name =
+        liftIO $ modifyIORef (lgPendingUpdates tr) $
+            HashMap.insert name st
 
     returnTree tr n z = do
         let contents = lgTreeContents tr
@@ -528,7 +524,7 @@ doModifyTree t (name:names) createIfNotExist f = do
             Git.TreeEntryMutated z'   -> do
                 (oid,mode) <- treeEntryToOid z'
                 insertEntry contents n oid mode
-        return z
+        return (tr, z)
 
     treeEntryToOid (Git.BlobEntry oid kind) =
         return (unTagged oid,
@@ -543,15 +539,31 @@ doModifyTree t (name:names) createIfNotExist f = do
         oid <- Git.treeRefOid tr
         return (unTagged oid, 0o040000)
 
-lgModifyTree
-  :: Git.MonadGit m
-  => Tree m -> FilePath -> Bool
-     -> (Maybe (TreeEntry m)
-         -> LgRepository m (Git.ModifyTreeResult (LgRepository m)))
-     -> LgRepository m (Maybe (TreeEntry m))
-lgModifyTree t path createIfNotExist f =
-    Git.fromModifyTreeResult <$>
-        doModifyTree t (splitPath path) createIfNotExist f
+    -- Lookup the current name in this tree.  If it doesn't exist, and there
+    -- are more names in the path and 'createIfNotExist' is True, create a new
+    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
+    -- (TreeEntry {})@, and if not we'll have Nothing.
+    doLookupTreeEntry tr [] = return (Just (Git.treeEntry tr))
+    doLookupTreeEntry tr (name:names) = do
+      upds <- liftIO $ readIORef (lgPendingUpdates tr)
+      y <- case HashMap.lookup name upds of
+          Just m -> return . Just . Git.TreeEntry . Git.Known $ m
+          Nothing ->
+              liftIO $ withForeignPtr (lgTreeContents tr) $ \builder -> do
+                  entry <- withCString (T.unpack name)
+                               (c'git_treebuilder_get builder)
+                  if entry == nullPtr
+                      then return Nothing
+                      else Just <$> entryToTreeEntry entry
+      if null names
+          then return y
+          else case y of
+              Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
+              Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
+              Just (Git.TreeEntry st)   -> do
+                  st' <- Git.resolveTreeRef st
+                  doLookupTreeEntry st' names
+              _ -> return Nothing
 
 splitPath :: FilePath -> [Text]
 splitPath path = T.splitOn "/" text

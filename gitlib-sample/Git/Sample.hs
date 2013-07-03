@@ -43,9 +43,9 @@ instance Git.IsOid Void where
     renderOid _ = undefined
 
 instance Git.MonadGit m => Git.Repository (SampleRepository m) where
-    type Oid (SampleRepository m)      = Void
-    data TreeData (SampleRepository m) = Void
-    data Options (SampleRepository m)  = Options
+    type Oid (SampleRepository m)     = Void
+    type Tree (SampleRepository m)    = Void
+    data Options (SampleRepository m) = Options
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
@@ -68,6 +68,10 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     missingObjects   = undefined
     traverseObjects  = undefined
     newTree          = undefined
+    cloneTree        = undefined
+    traverseEntries  = undefined
+    unsafeUpdateTree = undefined
+    writeTree        = undefined
     hashContents     = undefined
     createBlob       = undefined
     createCommit     = undefined

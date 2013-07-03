@@ -21,12 +21,13 @@ import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Hex
 import           Data.List
+import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as T
+import qualified Data.Text.Lazy as TL
 import           Data.Traversable hiding (mapM, forM, sequence)
 import           Filesystem (removeTree, isDirectory)
 import           Filesystem.Path.CurrentOS hiding (null, concat)
@@ -88,9 +89,15 @@ blobContentsToByteString (BlobSizedStream bs _) = do
 blobToByteString :: Repository m => Blob m -> m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
 
+splitPath :: FilePath -> [Text]
+splitPath path = T.splitOn "/" text
+  where text = case toText path of
+                 Left x  -> error $ "Invalid path: " ++ T.unpack x
+                 Right y -> y
+
 treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
 treeBlobEntries tree =
-    mconcat <$> traverseEntries tree go
+    mconcat <$> traverseEntries go tree
   where
     go fp e@(BlobEntry _ PlainBlob) = return [(fp,e)]
     go fp e@(BlobEntry _ ExecutableBlob) = return [(fp,e)]
@@ -101,7 +108,7 @@ commitTreeEntry :: Repository m
                 -> FilePath
                 -> m (Maybe (TreeEntry m))
 commitTreeEntry c path =
-    flip lookupEntry path =<< resolveTreeRef (commitTree c)
+    flip getTreeEntry path =<< resolveTreeRef (commitTree c)
 
 copyOid :: (Repository m, Repository (t m), MonadTrans t)
         => Oid m -> t m (Oid (t m))
@@ -148,11 +155,10 @@ copyTree tr needed = do
     oid2 <- parseOid (renderOid oid)
     if HashSet.member sha needed
         then do
-        tree    <- lift $ resolveTreeRef tr
-        entries <- lift $ traverseEntries tree (curry return)
-        tree2   <- newTree
-        needed' <- foldM (doCopyTreeEntry tree2) needed entries
-        toid    <- writeTree tree2
+        tree             <- lift $ resolveTreeRef tr
+        entries          <- lift $ traverseEntries (curry return) tree
+        (needed', tree2) <- withNewTree $ foldM doCopyTreeEntry needed entries
+        toid             <- writeTree tree2
 
         let tref = ByOid toid
             x    = HashSet.delete sha needed'
@@ -160,10 +166,13 @@ copyTree tr needed = do
 
         else return (ByOid (Tagged oid2), needed)
   where
-    doCopyTreeEntry _ needed' (_,TreeEntry {}) = return needed'
-    doCopyTreeEntry tree2 needed' (fp,ent) = do
-        (ent2,needed'') <- copyTreeEntry ent needed'
-        putTreeEntry tree2 fp ent2
+    doCopyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
+                    => HashSet Text -> (FilePath, TreeEntry m)
+                    -> TreeT (t m) (HashSet Text)
+    doCopyTreeEntry needed' (_,TreeEntry {}) = return needed'
+    doCopyTreeEntry needed' (fp,ent) = do
+        (ent2,needed'') <- lift $ copyTreeEntry ent needed'
+        putEntry fp ent2
         return needed''
 
 copyCommit :: (Repository m, Repository (t m), MonadTrans t)
@@ -207,7 +216,7 @@ allMissingObjects objs =
     fmap concat . forM objs $ \obj -> case obj of
         TreeObj ref -> do
             tr       <- resolveTreeRef ref
-            subobjss <- traverseEntries tr $ \_ ent ->
+            subobjss <- flip traverseEntries tr $ \_ ent ->
                 return $ case ent of
                     Git.BlobEntry oid _ -> [Git.BlobObj (Git.ByOid oid)]
                     Git.TreeEntry tr'   -> [Git.TreeObj tr']

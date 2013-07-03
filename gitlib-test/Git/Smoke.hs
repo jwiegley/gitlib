@@ -48,8 +48,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
   it "create a single tree" $ withNewRepository pr "singleTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
+      tr <- createTree $ putBlob "hello/world.txt" hello
       x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
@@ -60,42 +59,40 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
   it "create two trees" $ withNewRepository pr "twoTrees.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
+      tr <- createTree $ putBlob "hello/world.txt" hello
       x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlob tr "goodbye/files/world.txt" goodbye
+      tr <- mutateTree tr $ putBlob "goodbye/files/world.txt" goodbye
       x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   it "delete an item from a tree" $ withNewRepository pr "deleteTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
+      tr <- createTree $ putBlob "hello/world.txt" hello
       x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-      putBlob tr "goodbye/files/world.txt"
-          =<< createBlobUtf8 "Goodbye, world!\n"
+      tr <- mutateTree tr $
+          putBlob "goodbye/files/world.txt"
+              =<< lift (createBlobUtf8 "Goodbye, world!\n")
       x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- Confirm that deleting world.txt also deletes the now-empty
       -- subtree goodbye/files, which also deletes the then-empty subtree
       -- goodbye, returning us back the original tree.
-      dropFromTree tr "goodbye/files/world.txt"
+      tr <- mutateTree tr $ dropEntry "goodbye/files/world.txt"
       x <- treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   it "create a single commit" $ withNewRepository pr "createCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
+      tr <- createTree $ putBlob "hello/world.txt" hello
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlob tr "goodbye/files/world.txt" goodbye
+      tr <- mutateTree tr $ putBlob "goodbye/files/world.txt" goodbye
       x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
@@ -117,8 +114,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
   it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
+      tr <- createTree $ putBlob "hello/world.txt" hello
       oid <- Git.writeTree tr
       let x = renderObjOid oid
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
@@ -134,7 +130,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
       tr' <- Git.resolveTreeRef (Git.commitTree c)
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlob tr' "hello/goodbye.txt" goodbye
+      tr' <- mutateTree tr' $ putBlob "hello/goodbye.txt" goodbye
 
       oid <- Git.writeTree tr'
       let x = renderObjOid oid
@@ -152,11 +148,10 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
   it "create two commits" $ withNewRepository pr "createTwoCommits.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- newTree
-      putBlob tr "hello/world.txt" hello
+      tr <- createTree $ putBlob "hello/world.txt" hello
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      putBlob tr "goodbye/files/world.txt" goodbye
+      tr <- mutateTree tr $ putBlob "goodbye/files/world.txt" goodbye
       x <- treeOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
@@ -171,7 +166,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
       goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
-      putBlob tr "goodbye/files/world.txt" goodbye2
+      tr <- mutateTree tr $ putBlob "goodbye/files/world.txt" goodbye2
       x <- treeOid tr
       liftIO $ x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
@@ -214,17 +209,16 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       return ()
 
   it "another small test" $ withNewRepository pr "smallTest1.git" $ do
-      blob <- createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
       let masterRef = "refs/heads/master"
           sig = Signature { signatureName   = "First Name"
                           , signatureEmail = "user1@email.org"
                           , signatureWhen  = fakeTime 1348981883 }
-      tree <- newTree
-      putBlob tree "README.md" blob
+      blob <- createBlobUtf8 "# Auto-createdsitory for tutorial contents\n"
+      tree <- createTree $ putBlob "README.md" blob
       commit <- createCommit [] (treeRef tree) sig sig "Initial commit" Nothing
 
       blob <- createBlobUtf8 "This is some content."
-      putBlob tree "foo.txt" blob
+      tree <- mutateTree tree $ putBlob "foo.txt" blob
       createCommit [commitRef commit] (treeRef tree) sig sig
           "This is another log message." (Just masterRef)
 
@@ -236,15 +230,15 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
               { signatureName  = "First Name"
               , signatureEmail = "user1@email.org"
               , signatureWhen  = fakeTime 1348981883 }
-      tree <- newTree
-      putBlob tree "One"         =<< createBlobUtf8 "One\n"
-      putBlob tree "Two"         =<< createBlobUtf8 "Two\n"
-      putBlob tree "Files/Three" =<< createBlobUtf8 "Three\n"
-      putBlob tree "More/Four"   =<< createBlobUtf8 "Four\n"
+      tree <- createTree $ do
+          putBlob "One"         =<< lift (createBlobUtf8 "One\n")
+          putBlob "Two"         =<< lift (createBlobUtf8 "Two\n")
+          putBlob "Files/Three" =<< lift (createBlobUtf8 "Three\n")
+          putBlob "More/Four"   =<< lift (createBlobUtf8 "Four\n")
       createCommit [] (treeRef tree) sig sig "Initial commit"
           (Just masterRef)
 
-      paths <- traverseEntries tree $ \fp _ -> return fp
+      paths <- flip traverseEntries tree $ \fp _ -> return fp
       liftIO $ sort paths @?= [ "Files", "More", "One", "Two"
                               , "Files/Three", "More/Four" ]
 
