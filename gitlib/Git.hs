@@ -1,5 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -35,6 +36,12 @@ module Git
        , resolveBlobRef
 
        , TreeT
+       , RepositoryTree
+       , RepositoryTreeT
+       , MutableTree
+       , MutableTreeT
+       , PersistentTree
+       , PersistentTreeT
        , TreeEntry(..)
        , TreeOid
        , TreeRef
@@ -137,8 +144,9 @@ class (Eq o, Ord o, Show o) => IsOid o where
 -- Git data objects.  Every object must belong to some repository.
 class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
       => Repository m where
-    type Oid m
-    type Tree m
+    type Oid m :: *
+    type TreeKind m :: *
+    type Tree m :: * -> *
 
     data Options m
 
@@ -167,7 +175,7 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
 
     -- Lookup
     lookupCommit :: CommitOid m -> m (Commit m)
-    lookupTree   :: TreeOid m -> m (Tree m)
+    lookupTree   :: TreeOid m -> m (RepositoryTree m)
     lookupBlob   :: BlobOid m -> m (Blob m)
     lookupTag    :: TagOid m -> m (Tag m)
 
@@ -194,19 +202,19 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
                    -> m [Object m]         -- ^ All the objects in between
 
     -- Object creation
-    newTree :: m (Tree m)
-    cloneTree :: Tree m -> m (Tree m)
-    traverseEntries :: (FilePath -> TreeEntry m -> m a) -> Tree m -> m [a]
-    traverseEntries_ :: (FilePath -> TreeEntry m -> m a) -> Tree m -> m ()
+    newTree :: m (RepositoryTree m)
+    cloneTree :: RepositoryTree m -> m (RepositoryTree m)
+    traverseEntries :: (FilePath -> TreeEntry m -> m a) -> RepositoryTree m -> m [a]
+    traverseEntries_ :: (FilePath -> TreeEntry m -> m a) -> RepositoryTree m -> m ()
     traverseEntries_ = (void .) . traverseEntries
-    writeTree :: Tree m -> m (TreeOid m)
+    writeTree :: RepositoryTree m -> m (TreeOid m)
 
     unsafeUpdateTree
-        :: Tree m
+        :: RepositoryTree m
         -> FilePath    -- path within the tree
         -> Bool        -- create subtree's leading up to path?
         -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
-        -> m (Tree m, Maybe (TreeEntry m))
+        -> m (RepositoryTree m, Maybe (TreeEntry m))
 
     hashContents :: BlobContents m -> m (BlobOid m)
     createBlob   :: BlobContents m -> m (BlobOid m)
@@ -279,7 +287,7 @@ instance Exc.Exception GitException
 
 {- $oids -}
 type BlobOid m   = Tagged (Blob m) (Oid m)
-type TreeOid m   = Tagged (Tree m) (Oid m)
+type TreeOid m   = Tagged (RepositoryTree m) (Oid m)
 type CommitOid m = Tagged (Commit m) (Oid m)
 type TagOid m    = Tagged (Tag m) (Oid m)
 
@@ -334,7 +342,7 @@ copyCommitName (CommitReference ref) =
 data ObjRef m a = ByOid !(Tagged a (Oid m)) | Known !a
 
 type BlobRef m   = ObjRef m (Blob m)
-type TreeRef m   = ObjRef m (Tree m)
+type TreeRef m   = ObjRef m (RepositoryTree m)
 type CommitRef m = ObjRef m (Commit m)
 type TagRef m    = ObjRef m (Tag m)
 
@@ -375,96 +383,116 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
-newtype TreeT m a = TreeT { runTreeT :: StateT (Tree m) m a }
+newtype TreeT t m a = TreeT { runTreeT :: StateT t m a }
 
-instance Functor m => Functor (TreeT m) where
+data MutableTree
+type MutableTreeT m a = TreeT (Tree m MutableTree) m a
+
+data PersistentTree
+type PersistentTreeT m a = TreeT (Tree m PersistentTree) m a
+
+type RepositoryTree m = Tree m (TreeKind m)
+type RepositoryTreeT m a = TreeT (RepositoryTree m) m a
+
+instance Functor m => Functor (TreeT t m) where
     fmap f (TreeT t) = TreeT (fmap f t)
 
-instance Monad m => Monad (TreeT m) where
+instance Monad m => Monad (TreeT t m) where
     return x = TreeT (return x)
     TreeT x >>= f = TreeT (x >>= runTreeT . f)
 
-instance (Functor m, Monad m) => Applicative (TreeT m) where
+instance (Functor m, Monad m) => Applicative (TreeT t m) where
     pure = return
     (<*>) = ap
 
-instance (Functor m, MonadPlus m) => Alternative (TreeT m) where
+instance (Functor m, MonadPlus m) => Alternative (TreeT t m) where
     empty = mzero
     (<|>) = mplus
 
-instance (MonadPlus m) => MonadPlus (TreeT m) where
+instance (MonadPlus m) => MonadPlus (TreeT t m) where
     mzero       = TreeT $ mzero
     m `mplus` n = TreeT $ runTreeT m `mplus` runTreeT n
 
-instance (MonadFix m) => MonadFix (TreeT m) where
+instance (MonadFix m) => MonadFix (TreeT t m) where
     mfix f = TreeT $ mfix $ \ ~a -> runTreeT (f a)
 
-instance MonadTrans TreeT where
+instance MonadTrans (TreeT t) where
     lift m = TreeT $ lift m
 
-instance (MonadIO m) => MonadIO (TreeT m) where
+instance (MonadIO m) => MonadIO (TreeT t m) where
     liftIO = lift . liftIO
 
-unsafeGetTree :: Monad m => TreeT m (Tree m)
+unsafeGetTree :: Monad m => RepositoryTreeT m (RepositoryTree m)
 unsafeGetTree = TreeT get
 
-unsafePutTree :: Monad m => Tree m -> TreeT m ()
+unsafePutTree :: Monad m => RepositoryTree m -> RepositoryTreeT m ()
 unsafePutTree = TreeT . put
 
-getEntry :: Repository m => FilePath -> TreeT m (Maybe (TreeEntry m))
+getEntry :: Repository m => FilePath -> RepositoryTreeT m (Maybe (TreeEntry m))
 getEntry path = do
     tr <- unsafeGetTree
     snd <$> lift (unsafeUpdateTree tr path False
                   (toModifyTreeResult TreeEntryPersistent))
 
-getTreeEntry :: Repository m => Tree m -> FilePath -> m (Maybe (TreeEntry m))
-getTreeEntry tree path = fst <$> unsafeWithTree tree (getEntry path)
+getTreeEntry :: Repository m => RepositoryTree m -> FilePath -> m (Maybe (TreeEntry m))
+getTreeEntry tree path =
+    fst <$> (flip runStateT tree $ runTreeT (getEntry path))
 
-putEntry :: Repository m => FilePath -> TreeEntry m -> TreeT m ()
+putEntry :: Repository m => FilePath -> TreeEntry m -> RepositoryTreeT m ()
 putEntry path ent = do
     tr <- unsafeGetTree
     tr' <- fst <$> lift (unsafeUpdateTree tr path True
                          (const (TreeEntryMutated ent)))
     unsafePutTree tr'
 
-dropEntry :: Repository m => FilePath -> TreeT m ()
+dropEntry :: Repository m => FilePath -> RepositoryTreeT m ()
 dropEntry path = do
     tr <- unsafeGetTree
     tr' <- fst <$> lift (unsafeUpdateTree tr path False
                          (const TreeEntryDeleted))
     unsafePutTree tr'
 
-putBlob' :: Repository m => FilePath -> BlobOid m -> BlobKind -> TreeT m ()
+putBlob' :: Repository m => FilePath -> BlobOid m -> BlobKind -> RepositoryTreeT m ()
 putBlob' path b kind = putEntry path (BlobEntry b kind)
 
-putBlob :: Repository m => FilePath -> BlobOid m -> TreeT m ()
+putBlob :: Repository m => FilePath -> BlobOid m -> RepositoryTreeT m ()
 putBlob path b = putBlob' path b PlainBlob
 
-putTree :: Repository m => FilePath -> TreeRef m -> TreeT m ()
+putTree :: Repository m => FilePath -> TreeRef m -> RepositoryTreeT m ()
 putTree path ent = putEntry path (TreeEntry ent)
 
-putCommit :: Repository m => FilePath -> CommitOid m -> TreeT m ()
+putCommit :: Repository m => FilePath -> CommitOid m -> RepositoryTreeT m ()
 putCommit path c = putEntry path (CommitEntry c)
 
-withNewTree :: Repository m => TreeT m a -> m (a, Tree m)
+withNewTree :: Repository m => RepositoryTreeT m a -> m (a, RepositoryTree m)
 withNewTree (TreeT action) = runStateT action =<< newTree
 
-createTree :: Repository m => TreeT m a -> m (Tree m)
+createTree :: Repository m => RepositoryTreeT m a -> m (RepositoryTree m)
 createTree (TreeT action) = execStateT action =<< newTree
 
-withTree :: Repository m => Tree m -> TreeT m a -> m (a, Tree m)
+withTree :: Repository m
+         => RepositoryTree m
+         -> RepositoryTreeT m a
+         -> m (a, RepositoryTree m)
 withTree tr (TreeT action) = runStateT action =<< cloneTree tr
 
-unsafeWithTree :: Repository m => Tree m -> TreeT m a -> m (a, Tree m)
+unsafeWithTree :: Repository m
+               => Tree m MutableTree -> MutableTreeT m a
+               -> m (a, Tree m MutableTree)
 unsafeWithTree tr (TreeT action) = runStateT action tr
 
-mutateTree :: Repository m => Tree m -> TreeT m a -> m (Tree m)
+mutateTree :: Repository m
+           => RepositoryTree m -> RepositoryTreeT m a
+           -> m (RepositoryTree m)
 mutateTree tr (TreeT action) = execStateT action =<< cloneTree tr
 
-unsafeMutateTree :: Repository m => Tree m -> TreeT m a -> m (Tree m)
+unsafeMutateTree :: Repository m
+                 => Tree m MutableTree -> MutableTreeT m a
+                 -> m (Tree m MutableTree)
 unsafeMutateTree tr (TreeT action) = execStateT action tr
 
-unsafeMutateTree_ :: Repository m => Tree m -> TreeT m a -> m ()
+unsafeMutateTree_ :: Repository m
+                  => Tree m MutableTree -> MutableTreeT m a -> m ()
 unsafeMutateTree_ = (void .) . unsafeMutateTree
 
 data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
@@ -480,7 +508,7 @@ treeEntryOid (CommitEntry coid) = return $ unTagged coid
 blobEntry :: Repository m => BlobOid m -> BlobKind -> TreeEntry m
 blobEntry = BlobEntry
 
-treeEntry :: Repository m => Tree m -> TreeEntry m
+treeEntry :: Repository m => RepositoryTree m -> TreeEntry m
 treeEntry = TreeEntry . treeRef
 
 commitEntry :: Repository m => Commit m -> TreeEntry m
@@ -504,14 +532,14 @@ toModifyTreeResult _ Nothing  = TreeEntryNotFound
 toModifyTreeResult f (Just x) = f x
 
 -- | A 'Tree' is anything that is "treeish".
-treeRef :: Tree m -> TreeRef m
+treeRef :: RepositoryTree m -> TreeRef m
 treeRef = Known
 
 treeRefOid :: Repository m => TreeRef m -> m (TreeOid m)
 treeRefOid (ByOid x) = return x
 treeRefOid (Known x) = writeTree x
 
-resolveTreeRef :: Repository m => TreeRef m -> m (Tree m)
+resolveTreeRef :: Repository m => TreeRef m -> m (RepositoryTree m)
 resolveTreeRef (ByOid oid) = lookupTree oid
 resolveTreeRef (Known obj) = return obj
 

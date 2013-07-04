@@ -61,7 +61,7 @@ instance IsOid OidTextL where
 parseOidTextL :: Monad m => Text -> m OidTextL
 parseOidTextL = return . OidTextL . TL.fromStrict
 
-treeOid :: Repository m => Tree m -> m Text
+treeOid :: Repository m => Tree m (TreeKind m) -> m Text
 treeOid t = renderObjOid <$> writeTree t
 
 createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
@@ -104,7 +104,8 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
-treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
+treeBlobEntries :: Repository m
+                => Tree m (TreeKind m) -> m [(FilePath,TreeEntry m)]
 treeBlobEntries tree =
     mconcat <$> traverseEntries go tree
   where
@@ -177,7 +178,7 @@ copyTree tr needed = do
   where
     doCopyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
                     => HashSet Text -> (FilePath, TreeEntry m)
-                    -> TreeT (t m) (HashSet Text)
+                    -> RepositoryTreeT (t m) (HashSet Text)
     doCopyTreeEntry needed' (_,TreeEntry {}) = return needed'
     doCopyTreeEntry needed' (fp,ent) = do
         (ent2,needed'') <- lift $ copyTreeEntry ent needed'
@@ -320,7 +321,7 @@ commitEntryHistory c path =
 getCommitParents :: Repository m => Commit m -> m [Commit m]
 getCommitParents = traverse resolveCommitRef . commitParents
 
-resolveRefTree :: Repository m => Text -> m (Tree m)
+resolveRefTree :: Repository m => Text -> m (Tree m (TreeKind m))
 resolveRefTree refName = do
     c <- resolveRef refName
     case c of

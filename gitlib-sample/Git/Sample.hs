@@ -29,6 +29,7 @@ import           Prelude hiding (FilePath)
 import qualified Git
 
 data Void
+data VoidP p
 
 instance Show Void where
     show _ = undefined
@@ -43,9 +44,10 @@ instance Git.IsOid Void where
     renderOid _ = undefined
 
 instance Git.MonadGit m => Git.Repository (SampleRepository m) where
-    type Oid (SampleRepository m)     = Void
-    type Tree (SampleRepository m)    = Void
-    data Options (SampleRepository m) = Options
+    type Oid (SampleRepository m)      = Void
+    type TreeKind (SampleRepository m) = Git.PersistentTree
+    type Tree (SampleRepository m)     = VoidP
+    data Options (SampleRepository m)  = Options
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }

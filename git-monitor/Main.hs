@@ -14,23 +14,19 @@ import           Control.Concurrent (threadDelay)
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import qualified Data.ByteString as B (readFile)
-import           Data.Function (fix)
 import           Data.Foldable (foldlM)
+import           Data.Function (fix)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
 import qualified Data.Text as T (Text, pack, unpack)
-#if MIN_VERSION_shelly(1, 0, 0)
-import qualified Data.Text as TL (Text, pack, unpack, init)
-#else
 import qualified Data.Text.Lazy as TL (Text, pack, unpack, toStrict, init)
-#endif
 import           Data.Time
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git hiding (Options)
-import           Git.Libgit2 (lgFactory, withLibGitDo)
+import           Git.Libgit2 (LgRepository, lgFactory, withLibGitDo)
 import           Git.Utils (treeBlobEntries)
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
@@ -43,11 +39,7 @@ import           System.Log.Handler.Simple (streamHandler)
 import           System.Log.Logger
 
 toStrict :: TL.Text -> T.Text
-#if MIN_VERSION_shelly(1, 0, 0)
-toStrict = id
-#else
 toStrict = TL.toStrict
-#endif
 
 instance Read FilePath
 
@@ -154,12 +146,14 @@ doMain opts = do
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots
 --   any changes that have occurred in them.
-snapshotTree :: (Repository m, MonadIO m)
+snapshotTree :: MonadGit m
              => Options -> FilePath
              -> Text -> Text -> Text -> Text
-             -> Commit m -> Tree m -> TreeOid m
-             -> Map FilePath (FileEntry m)
-             -> m ()
+             -> Commit (LgRepository m)
+             -> Tree (LgRepository m) MutableTree
+             -> TreeOid (LgRepository m)
+             -> Map FilePath (FileEntry (LgRepository m))
+             -> LgRepository m ()
 snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     -- Read the current working tree's state on disk
     ft' <- readFileTree ref wd False
@@ -203,20 +197,24 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
         else loop sc' str toid' ft'
 
   where
-    scanOldEntry :: (Repository m, MonadIO m)
-                 => Tree m
-                 -> Map FilePath (FileEntry m)
-                 -> FilePath -> FileEntry m -> m ()
+    scanOldEntry :: MonadGit m
+                 => Tree (LgRepository m) MutableTree
+                 -> Map FilePath (FileEntry (LgRepository m))
+                 -> FilePath
+                 -> FileEntry (LgRepository m)
+                 -> LgRepository m ()
     scanOldEntry str ft fp _ = case Map.lookup fp ft of
         Nothing -> do
             infoL $ "Removed: " ++ fileStr fp
             void $ unsafeMutateTree str $ dropEntry fp
         _ -> return ()
 
-    scanNewEntry :: (Repository m, MonadIO m)
-                 => Tree m
-                 -> Map FilePath (FileEntry m)
-                 -> FilePath -> FileEntry m -> m ()
+    scanNewEntry :: MonadGit m
+                 => Tree (LgRepository m) MutableTree
+                 -> Map FilePath (FileEntry (LgRepository m))
+                 -> FilePath
+                 -> FileEntry (LgRepository m)
+                 -> LgRepository m ()
     scanNewEntry str ft fp (FileEntry mt (BlobEntry oid exe) _) =
         case Map.lookup fp ft of
             Nothing -> do
@@ -245,8 +243,11 @@ data FileEntry m = FileEntry
 
 type FileTree m = Map FilePath (FileEntry m)
 
-readFileTree :: (Repository m, MonadIO m)
-             => Text -> FilePath -> Bool -> m (FileTree m)
+readFileTree :: MonadGit m
+             => Text
+             -> FilePath
+             -> Bool
+             -> LgRepository m (FileTree (LgRepository m))
 readFileTree ref wdir getHash = do
     h <- resolveRef ref
     case h of
@@ -255,8 +256,9 @@ readFileTree ref wdir getHash = do
             tr <- resolveTreeRef . commitTree =<< resolveCommitRef h'
             readFileTree' tr wdir getHash
 
-readFileTree' :: (Repository m, MonadIO m)
-              => Tree m -> FilePath -> Bool -> m (FileTree m)
+readFileTree' :: MonadGit m
+              => Tree (LgRepository m) MutableTree -> FilePath -> Bool
+              -> LgRepository m (FileTree (LgRepository m))
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
     foldlM (\m (fp,ent) -> do
@@ -264,9 +266,12 @@ readFileTree' tr wdir getHash = do
                  return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
-readModTime :: (Repository m, MonadIO m)
-            => FilePath -> Bool -> FilePath -> TreeEntry m
-            -> m (Maybe (FileEntry m))
+readModTime :: MonadGit m
+            => FilePath
+            -> Bool
+            -> FilePath
+            -> TreeEntry (LgRepository m)
+            -> LgRepository m (Maybe (FileEntry (LgRepository m)))
 readModTime wdir getHash fp ent = do
     let path = wdir </> fp
     debugL $ "Checking file: " ++ fileStr path

@@ -36,11 +36,7 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-#if MIN_VERSION_shelly(1, 0, 0)
-import qualified Data.Text as TL
-#else
 import qualified Data.Text.Lazy as TL
-#endif
 import           Data.Time
 import           Data.Tuple
 import qualified Filesystem as F
@@ -60,18 +56,10 @@ import           Text.Parsec.Prim
 import           Text.Parsec.Token
 
 toStrict :: TL.Text -> T.Text
-#if MIN_VERSION_shelly(1, 0, 0)
-toStrict = id
-#else
 toStrict = TL.toStrict
-#endif
 
 fromStrict :: T.Text -> TL.Text
-#if MIN_VERSION_shelly(1, 0, 0)
-fromStrict = id
-#else
 fromStrict = TL.fromStrict
-#endif
 
 type BlobOid m    = Git.BlobOid (CmdLineRepository m)
 type TreeOid m    = Git.TreeOid (CmdLineRepository m)
@@ -93,23 +81,16 @@ type Object m     = Git.Object (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     type Oid (CmdLineRepository m)  =
-#if MIN_VERSION_shelly(1, 0, 0)
-        Git.OidText
-#else
         Git.OidTextL
-#endif
-    type Tree (CmdLineRepository m) = MutableTree m
+    type TreeKind (CmdLineRepository m) = Git.PersistentTree
+    type Tree (CmdLineRepository m) = HashMapTree m
 
     data Options (CmdLineRepository m) = Options
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
-#if MIN_VERSION_shelly(1, 0, 0)
-    parseOid = Git.parseOidText
-#else
     parseOid = Git.parseOidTextL
-#endif
 
     lookupRef        = cliLookupRef
     createRef        = cliUpdateRef
@@ -340,15 +321,6 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
         (Just x, Just y)     -> (x, y)
         (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
-#if MIN_VERSION_shelly(1, 0, 0)
-type Oid = Git.OidText
-
-mkOid :: T.Text -> Git.OidText
-mkOid = Git.OidText
-
-getOid :: Git.OidText -> T.Text
-getOid = Git.getOidT
-#else
 type Oid = Git.OidTextL
 
 mkOid :: TL.Text -> Git.OidTextL
@@ -356,7 +328,6 @@ mkOid = Git.OidTextL
 
 getOid :: Git.OidTextL -> TL.Text
 getOid = Git.getOidTL
-#endif
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)
@@ -443,35 +414,35 @@ cliMissingObjects mhave need = do
     go x = failure (Git.BackendError $
                     "Unexpected output from git-log: " <> T.pack (show x))
 
-data MutableTree m = MutableTree
+data HashMapTree m t = HashMapTree
     { cliTreeOid      :: IORef (Maybe (TreeOid m))
     , cliTreeContents :: IORef (HashMap Text (TreeEntry m))
     }
 
 cliMakeTree :: IORef (Maybe (TreeOid m))
             -> IORef (HashMap Text (TreeEntry m))
-            -> Tree m
-cliMakeTree oid contents = MutableTree oid contents
+            -> Tree m Git.PersistentTree
+cliMakeTree oid contents = HashMapTree oid contents
 
 cliNewTree :: Git.MonadGit m
-           => CmdLineRepository m (Tree m)
+           => CmdLineRepository m (Tree m Git.PersistentTree)
 cliNewTree = cliMakeTree <$> liftIO (newIORef Nothing)
                          <*> liftIO (newIORef HashMap.empty)
 
 cliCloneTree :: Git.MonadGit m
-             => Tree m
-             -> CmdLineRepository m (Tree m)
-cliCloneTree (MutableTree oid contents) =
+             => Tree m Git.PersistentTree
+             -> CmdLineRepository m (Tree m Git.PersistentTree)
+cliCloneTree (HashMapTree oid contents) =
     cliMakeTree <$> liftIO (newIORef =<< readIORef oid)
                 <*> liftIO (newIORef =<< readIORef contents)
 
 cliModifyTree :: Git.MonadGit m
-              => Tree m
+              => Tree m Git.PersistentTree
               -> FilePath
               -> Bool
               -> (Maybe (TreeEntry m)
                   -> Git.ModifyTreeResult (CmdLineRepository m))
-              -> CmdLineRepository m (Tree m, Maybe (TreeEntry m))
+              -> CmdLineRepository m (Tree m Git.PersistentTree, Maybe (TreeEntry m))
 cliModifyTree t path createIfNotExist f =
     fmap Git.fromModifyTreeResult
         <$> doModifyTree t (Git.splitPath path) createIfNotExist
@@ -551,7 +522,8 @@ cliModifyTree t path createIfNotExist f =
             then HashMap.delete name
             else HashMap.insert name (Git.treeEntry st)
 
-cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
+cliLookupTree :: Git.MonadGit m
+              => TreeOid m -> CmdLineRepository m (Tree m Git.PersistentTree)
 cliLookupTree oid@(Tagged (getOid -> sha)) = do
     contents <- runGit ["ls-tree", "-z", sha]
     oidRef   <- liftIO $ newIORef (Just oid)
@@ -577,7 +549,7 @@ cliLookupTree oid@(Tagged (getOid -> sha)) = do
             _ -> error "This cannot happen")
 
 cliWriteTree :: Git.MonadGit m
-             => Tree m -> CmdLineRepository m (TreeOid m)
+             => Tree m Git.PersistentTree -> CmdLineRepository m (TreeOid m)
 cliWriteTree tree = do
     contents <- liftIO $ readIORef (cliTreeContents tree)
     rendered <- mapM renderLine (HashMap.toList contents)
@@ -605,7 +577,7 @@ cliWriteTree tree = do
 
 cliTraverseEntries :: Git.MonadGit m
                    => (FilePath -> TreeEntry m -> CmdLineRepository m b)
-                   -> Tree m
+                   -> Tree m Git.PersistentTree
                    -> CmdLineRepository m [b]
 cliTraverseEntries f tree = do
     Tagged (getOid -> sha) <- Git.writeTree tree

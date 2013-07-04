@@ -147,14 +147,15 @@ instance Ord OidPtr where
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
-data TreeBuilder m = TreeBuilder
-    { lgPendingUpdates :: IORef (HashMap Text (Tree m))
+data TreeBuilder m t = TreeBuilder
+    { lgPendingUpdates :: IORef (HashMap Text (Tree m t))
     , lgTreeContents   :: ForeignPtr C'git_treebuilder
     }
 
 instance Git.MonadGit m => Git.Repository (LgRepository m) where
-    type Oid (LgRepository m)  = OidPtr
-    type Tree (LgRepository m) = TreeBuilder m
+    type Oid (LgRepository m)      = OidPtr
+    type TreeKind (LgRepository m) = Git.MutableTree
+    type Tree (LgRepository m)     = TreeBuilder m
 
     data Options (LgRepository m) = Options
 
@@ -263,7 +264,7 @@ type TreeEntry m = Git.TreeEntry (LgRepository m)
 
 lgTraverseEntries :: Git.MonadGit m
                   =>(FilePath -> TreeEntry m -> LgRepository m a)
-                  -> Tree m
+                  -> Tree m Git.MutableTree
                   -> LgRepository m [a]
 lgTraverseEntries f initialTree = go "" initialTree
   where
@@ -292,16 +293,16 @@ lgTraverseEntries f initialTree = go "" initialTree
         return 0
 
 lgMakeTree :: Git.MonadGit m
-           => IORef (HashMap Text (Tree m))
+           => IORef (HashMap Text (Tree m Git.MutableTree))
            -> ForeignPtr C'git_treebuilder
-           -> LgRepository m (Tree m)
+           -> LgRepository m (Tree m Git.MutableTree)
 lgMakeTree contents builder = return $ TreeBuilder contents builder
 
 -- | Create a new, empty tree.
 --
 --   Since empty trees cannot exist in Git, attempting to write out an empty
 --   tree is a no-op.
-lgNewTree :: Git.MonadGit m => LgRepository m (Tree m)
+lgNewTree :: Git.MonadGit m => LgRepository m (Tree m Git.MutableTree)
 lgNewTree = do
     -- size <- liftIO $ newIORef 0
 
@@ -317,7 +318,7 @@ lgNewTree = do
              contents <- liftIO (newIORef HashMap.empty)
              lgMakeTree contents fptr
 
-lgCloneTree :: Git.MonadGit m => Tree m -> LgRepository m (Tree m)
+lgCloneTree :: Git.MonadGit m => Tree m Git.MutableTree -> LgRepository m (Tree m Git.MutableTree)
 lgCloneTree (TreeBuilder pending contents) =
     TreeBuilder <$> liftIO (newIORef =<< readIORef pending)
                 <*> liftIO (copyBuilder contents)
@@ -347,8 +348,8 @@ lgCloneTree (TreeBuilder pending contents) =
             failure (Git.BackendError "Could not insert entry in treebuilder")
         return 0
 
-lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
-             -> LgRepository m (Tree m)
+lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m Git.MutableTree) Oid
+             -> LgRepository m (Tree m Git.MutableTree)
 lgLookupTree len oid = do
     -- jww (2013-01-28): Verify the oid here
     (upds,fptr) <- lookupObject' (getOid (unTagged oid)) len
@@ -391,7 +392,7 @@ entryToTreeEntry entry = do
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
-lgWriteTree :: Git.MonadGit m => Tree m -> LgRepository m (TreeOid m)
+lgWriteTree :: Git.MonadGit m => Tree m Git.MutableTree -> LgRepository m (TreeOid m)
 lgWriteTree t = do
     -- This is the Oid of every empty tree
     emptyTreeOid <- Git.parseOid "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -436,7 +437,7 @@ lgWriteTree t = do
                      ++ ": " ++ errStr)
         return (Just (mkOid coid))
 
-lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
+lgTreeEntryCount :: Git.MonadGit m => Tree m Git.MutableTree -> LgRepository m Int
 lgTreeEntryCount t = do
     let contents = lgTreeContents t
     fromIntegral
@@ -461,9 +462,9 @@ dropEntry builder key = do
   when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed (T.pack key))
 
 lgModifyTree :: Git.MonadGit m
-             => Tree m -> FilePath -> Bool
+             => Tree m Git.MutableTree -> FilePath -> Bool
              -> (Maybe (TreeEntry m) -> Git.ModifyTreeResult (LgRepository m))
-             -> LgRepository m (Tree m, Maybe (TreeEntry m))
+             -> LgRepository m (Tree m Git.MutableTree, Maybe (TreeEntry m))
 lgModifyTree t path createIfNotExist f =
     fmap Git.fromModifyTreeResult
         <$> doModifyTree t (splitPath path) createIfNotExist

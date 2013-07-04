@@ -25,7 +25,7 @@ import Test.HUnit
 import Test.Hspec (Spec, describe, it)
 import Test.Hspec.HUnit ()
 
-sampleCommit :: Repository m => Tree m -> Signature -> m (Commit m)
+sampleCommit :: Repository m => Tree m (TreeKind m) -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] (treeRef tr) sig sig "Sample log message.\n" Nothing
 
