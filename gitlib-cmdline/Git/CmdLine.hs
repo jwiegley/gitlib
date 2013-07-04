@@ -36,7 +36,11 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+#if MIN_VERSION_shelly(1, 0, 0)
+import qualified Data.Text as TL
+#else
 import qualified Data.Text.Lazy as TL
+#endif
 import           Data.Time
 import           Data.Tuple
 import qualified Filesystem as F
@@ -56,10 +60,18 @@ import           Text.Parsec.Prim
 import           Text.Parsec.Token
 
 toStrict :: TL.Text -> T.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+toStrict = id
+#else
 toStrict = TL.toStrict
+#endif
 
 fromStrict :: T.Text -> TL.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+fromStrict = id
+#else
 fromStrict = TL.fromStrict
+#endif
 
 type BlobOid m    = Git.BlobOid (CmdLineRepository m)
 type TreeOid m    = Git.TreeOid (CmdLineRepository m)
@@ -81,7 +93,11 @@ type Object m     = Git.Object (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     type Oid (CmdLineRepository m)  =
+#if MIN_VERSION_shelly(1, 0, 0)
+        Git.OidText
+#else
         Git.OidTextL
+#endif
     type TreeKind (CmdLineRepository m) = Git.PersistentTree
     type Tree (CmdLineRepository m) = HashMapTree m
 
@@ -90,7 +106,11 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
+#if MIN_VERSION_shelly(1, 0, 0)
+    parseOid = Git.parseOidText
+#else
     parseOid = Git.parseOidTextL
+#endif
 
     lookupRef        = cliLookupRef
     createRef        = cliUpdateRef
@@ -321,6 +341,15 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
         (Just x, Just y)     -> (x, y)
         (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
+#if MIN_VERSION_shelly(1, 0, 0)
+type Oid = Git.OidText
+
+mkOid :: T.Text -> Git.OidText
+mkOid = Git.OidText
+
+getOid :: Git.OidText -> T.Text
+getOid = Git.getOidT
+#else
 type Oid = Git.OidTextL
 
 mkOid :: TL.Text -> Git.OidTextL
@@ -328,6 +357,7 @@ mkOid = Git.OidTextL
 
 getOid :: Git.OidTextL -> TL.Text
 getOid = Git.getOidTL
+#endif
 
 cliLookupBlob :: Git.MonadGit m
               => BlobOid m -> CmdLineRepository m (Blob m)

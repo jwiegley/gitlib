@@ -21,7 +21,11 @@ import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
 import qualified Data.Text as T (Text, pack, unpack)
+#if MIN_VERSION_shelly(1, 0, 0)
+import qualified Data.Text as TL (Text, pack, unpack, init)
+#else
 import qualified Data.Text.Lazy as TL (Text, pack, unpack, toStrict, init)
+#endif
 import           Data.Time
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
@@ -39,7 +43,11 @@ import           System.Log.Handler.Simple (streamHandler)
 import           System.Log.Logger
 
 toStrict :: TL.Text -> T.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+toStrict = id
+#else
 toStrict = TL.toStrict
+#endif
 
 instance Read FilePath
 
