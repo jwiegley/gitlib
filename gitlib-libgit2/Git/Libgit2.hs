@@ -41,7 +41,10 @@ module Git.Libgit2
        , lgLoadPackFileInMemory
        , lgReadFromPack
        , lgWithPackFile
+       , SHA
        , oidToSha
+       , shaToOid
+       , shaToText
        , openLgRepository
        , runLgRepository
        , strToOid
@@ -60,6 +63,7 @@ import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
 import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Unsafe as BU
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -1114,7 +1118,7 @@ lgBuildPackIndex dir bytes = do
         debug "Discovering the hash used to identify the pack file"
         sha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
         debug $ "The hash used is: " ++ show sha
-        return sha
+        return (shaToText sha)
 
 strToOid :: String -> IO (ForeignPtr C'git_oid)
 strToOid oidStr = do
@@ -1125,9 +1129,21 @@ strToOid oidStr = do
         when (r < 0) $ throwIO Git.OidCopyFailed
         return ptr
 
-oidToSha :: Ptr C'git_oid -> IO Text
-oidToSha oidPtr = allocaBytes 42 $ \oidStr ->
-    T.decodeUtf8 <$> (B.packCString =<< c'git_oid_tostr oidStr 41 oidPtr)
+type SHA = B.ByteString
+
+oidToSha :: Ptr C'git_oid -> IO B.ByteString
+oidToSha oidPtr =
+    B.packCStringLen (castPtr oidPtr, sizeOf (undefined :: C'git_oid))
+
+shaToOid :: B.ByteString -> IO (ForeignPtr C'git_oid)
+shaToOid bs = BU.unsafeUseAsCString bs $ \bytes -> do
+    ptr <- mallocForeignPtr
+    withForeignPtr ptr $ \ptr' -> do
+        c'git_oid_fromraw ptr' (castPtr bytes)
+        return ptr
+
+shaToText :: B.ByteString -> Text
+shaToText = T.decodeUtf8 . B16.encode
 
 lgWritePackFile :: Git.MonadGit m => FilePath -> LgRepository m ()
 lgWritePackFile packFile = do
@@ -1231,12 +1247,12 @@ lgWithPackFile idxPath f = alloca $ \odbPtrPtr ->
         debug "Calling function using in-memory odb"
         f odbPtr
 
-lgReadFromPack :: FilePath -> Text -> Bool
+lgReadFromPack :: FilePath -> B.ByteString -> Bool
                -> IO (Maybe (C'git_otype, CSize, B.ByteString))
 lgReadFromPack idxPath sha metadataOnly =
     alloca $ \objectPtrPtr ->
     lgWithPackFile idxPath $ \odbPtr -> do
-        foid <- liftIO $ strToOid (T.unpack sha)
+        foid <- liftIO $ shaToOid sha
         if metadataOnly
             then liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
                 r <- withForeignPtr foid $

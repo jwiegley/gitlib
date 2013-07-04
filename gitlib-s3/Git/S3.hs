@@ -108,6 +108,9 @@ data ObjectInfo = ObjectInfo
       , infoData   :: Maybe ByteString
       } deriving (Eq, Show)
 
+fromSha :: SHA -> FilePath
+fromSha = fromText . shaToText
+
 data ObjectStatus = ObjectLoose
                   | ObjectLooseMetaKnown ObjectLength ObjectType
                   | ObjectInPack Text
@@ -133,24 +136,20 @@ data BackendCallbacks = BackendCallbacks
       -- 'checkQuota' gives the backend a chance to reject the upload of
       -- objects that may exceed per-user quotas.
 
-    , registerObject :: Text -> Maybe (ObjectLength, ObjectType) -> IO ()
+    , registerObject :: SHA -> Maybe (ObjectLength, ObjectType) -> IO ()
       -- 'registerObject' reports that a SHA has been written as a loose
       -- object to the S3 repository.  The for tracking it is that sometimes
       -- calling 'locateObject' can be much faster than querying Amazon.
 
-    , registerPackFile :: Text -> [Text] -> ObjectLength -> IO ()
+    , registerPackFile :: Text -> [SHA] -> ObjectLength -> IO ()
       -- 'registerPackFile' takes the basename of a pack file, and a list of
       -- SHAs which are contained with the pack.  It must register this in an
       -- index, for the sake of the next function.
 
-    , lookupObject :: Text -> IO (Maybe ObjectStatus)
+    , lookupObject :: SHA -> IO (Maybe ObjectStatus)
       -- 'locateObject' takes a SHA, and returns: Nothing if the object is
-      -- "loose", or Just Text identifying the basename of the packfile that
+      -- "loose", or Just SHA identifying the basename of the packfile that
       -- the object is located within.
-
-    , lookupPackFile :: Text -> IO (Maybe Bool)
-      -- 'locatePackFile' indicates whether a pack file with the given sha is
-      -- present on the remote, regardless of which objects it contains.
 
     , getBucket  :: (MonadIO m, MonadBaseControl IO m)
                  => Text -> Text -> ResourceT m (Maybe [Text])
@@ -205,7 +204,6 @@ instance Default BackendCallbacks where
         , registerObject   = \_ _     -> return ()
         , registerPackFile = \_ _ _   -> return ()
         , lookupObject     = \_       -> return Nothing
-        , lookupPackFile   = \_       -> return Nothing
         , getBucket        = \_ _     -> return Nothing
         , headObject       = \_ _     -> return Nothing
         , getObject        = \_ _ _   -> return Nothing
@@ -263,7 +261,7 @@ data OdbS3Details = OdbS3Details
       -- In the 'knownObjects' map, if the object is not present, we must query
       -- via the 'lookupObject' callback above.  If it is present, it can be
       -- one of the CacheEntry's possible states.
-    , knownObjects    :: TVar (HashMap Text CacheEntry)
+    , knownObjects    :: TVar (HashMap SHA CacheEntry)
     , tempDirectory   :: FilePath
     }
 
@@ -340,12 +338,12 @@ pokeByteString bytes data_p (fromIntegral . getObjectLength -> len) = do
     poke data_p (castPtr content)
 
 unpackDetails :: Ptr C'git_odb_backend -> Ptr C'git_oid
-              -> IO (OdbS3Details, String, Text)
+              -> IO (OdbS3Details, ByteString)
 unpackDetails be oid = do
-    odbS3  <- peek (castPtr be :: Ptr OdbS3Backend)
-    dets   <- deRefStablePtr (details odbS3)
-    oidStr <- oidToStr oid
-    return (dets, oidStr, T.pack oidStr)
+    odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
+    dets  <- deRefStablePtr (details odbS3)
+    sha   <- oidToSha oid
+    return (dets, sha)
 
 wrapCheckQuota :: (ObjectLength -> IO (Maybe QuotaStatus))
                -> ObjectLength
@@ -355,8 +353,8 @@ wrapCheckQuota f len =
         (f len)
         (return Nothing)
 
-wrapRegisterObject :: (Text -> Maybe (ObjectLength, ObjectType) -> IO ())
-                   -> Text
+wrapRegisterObject :: (SHA -> Maybe (ObjectLength, ObjectType) -> IO ())
+                   -> SHA
                    -> Maybe (ObjectLength, ObjectType)
                    -> IO ()
 wrapRegisterObject f name metadata =
@@ -364,25 +362,19 @@ wrapRegisterObject f name metadata =
         (f name metadata)
         (return ())
 
-wrapRegisterPackFile :: (Text -> [Text] -> ObjectLength -> IO ())
-                     -> Text -> [Text] -> ObjectLength
+wrapRegisterPackFile :: (Text -> [SHA] -> ObjectLength -> IO ())
+                     -> Text -> [SHA] -> ObjectLength
                      -> IO ()
 wrapRegisterPackFile f name shas len =
     wrap ("registerPackFile: " ++ show name)
         (f name shas len)
         (return ())
 
-wrapLookupObject :: (Text -> IO (Maybe ObjectStatus))
-                 -> Text
+wrapLookupObject :: (SHA -> IO (Maybe ObjectStatus))
+                 -> SHA
                  -> IO (Maybe ObjectStatus)
 wrapLookupObject f name =
     wrap ("lookupObject: " ++ show name)
-        (f name)
-        (return Nothing)
-
-wrapLookupPackFile :: (Text -> IO (Maybe Bool)) -> Text -> IO (Maybe Bool)
-wrapLookupPackFile f name =
-    wrap ("lookupPackFile: " ++ show name)
         (f name)
         (return Nothing)
 
@@ -645,7 +637,7 @@ mirrorRefsToS3 be = do
     liftIO $ writeRefs be (M.fromList (L.zip names refs))
 
 observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
-                   -> IO [Text]
+                   -> IO [SHA]
 observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
     debug $ "observePackObjects: " ++ show idxFile
 
@@ -671,7 +663,7 @@ observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
         ++ show (Prelude.length shas) ++ " objects"
     return shas
 
-catalogPackFile :: OdbS3Details -> Text -> FilePath -> IO [Text]
+catalogPackFile :: OdbS3Details -> Text -> FilePath -> IO [SHA]
 catalogPackFile dets packSha idxPath = do
     -- Load the pack file, and iterate over the objects within it to determine
     -- what it contains.  When 'withPackFile' returns, the pack file will be
@@ -680,7 +672,7 @@ catalogPackFile dets packSha idxPath = do
     lgWithPackFile idxPath $
         liftIO . observePackObjects dets packSha idxPath True
 
-cacheLookupEntry :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
+cacheLookupEntry :: OdbS3Details -> SHA -> IO (Maybe CacheEntry)
 cacheLookupEntry dets sha =
     wrap ("cacheLookupEntry " ++ show sha)
         go
@@ -690,12 +682,12 @@ cacheLookupEntry dets sha =
         objs <- readTVarIO (knownObjects dets)
         return $ M.lookup sha objs
 
-cacheUpdateEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
+cacheUpdateEntry :: OdbS3Details -> SHA -> CacheEntry -> IO ()
 cacheUpdateEntry dets sha ce = do
     debug $ "cacheUpdateEntry " ++ show sha ++ " " ++ show ce
     atomically $ modifyTVar (knownObjects dets) $ M.insert sha ce
 
-cacheLoadObject :: OdbS3Details -> Text -> CacheEntry -> Bool
+cacheLoadObject :: OdbS3Details -> SHA -> CacheEntry -> Bool
                 -> IO (Maybe ObjectInfo)
 cacheLoadObject dets sha ce metadataOnly = do
     debug $ "cacheLoadObject " ++ show sha ++ " " ++ show metadataOnly
@@ -751,7 +743,7 @@ cacheLoadObject dets sha ce metadataOnly = do
                         Nothing (Just bytes)
             else go (PackedRemote packSha)
 
-cacheStoreObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
+cacheStoreObject :: OdbS3Details -> SHA -> ObjectInfo -> IO ()
 cacheStoreObject dets sha info@ObjectInfo {..} = do
     debug $ "cacheStoreObject " ++ show sha ++ " " ++ show info
     go >>= cacheUpdateEntry dets sha
@@ -761,7 +753,7 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
            return $ LooseCached infoLength infoType now path
 
        | Just bytes <- infoData = do
-           let path = tempDirectory dets </> fromText sha
+           let path = tempDirectory dets </> fromSha sha
            B.writeFile (pathStr path) bytes
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
@@ -769,7 +761,7 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
        | otherwise =
            return $ LooseRemoteMetaKnown infoLength infoType
 
-callbackLocateObject :: OdbS3Details -> Text -> IO (Maybe CacheEntry)
+callbackLocateObject :: OdbS3Details -> SHA -> IO (Maybe CacheEntry)
 callbackLocateObject dets sha = do
     location <- wrapLookupObject (lookupObject (callbacks dets))
                     sha `orElse` return Nothing
@@ -779,13 +771,13 @@ callbackLocateObject dets sha = do
         Just ObjectLoose         -> Just LooseRemote
         _                        -> Nothing
 
-callbackRegisterObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
+callbackRegisterObject :: OdbS3Details -> SHA -> ObjectInfo -> IO ()
 callbackRegisterObject dets sha info@ObjectInfo {..} = do
     debug $ "callbackRegisterObject " ++ show sha ++ " " ++ show info
     wrapRegisterObject (registerObject (callbacks dets)) sha
         (Just (infoLength, infoType))`orElse` return ()
 
-callbackRegisterPackFile :: OdbS3Details -> Text -> [Text] -> ObjectLength
+callbackRegisterPackFile :: OdbS3Details -> Text -> [SHA] -> ObjectLength
                          -> IO ()
 callbackRegisterPackFile dets packSha shas len = do
     debug $ "callbackRegisterPackFile " ++ show packSha
@@ -794,7 +786,7 @@ callbackRegisterPackFile dets packSha shas len = do
     wrapRegisterPackFile (registerPackFile (callbacks dets))
         packSha shas len `orElse` return ()
 
-callbackRegisterCacheEntry :: OdbS3Details -> Text -> CacheEntry -> IO ()
+callbackRegisterCacheEntry :: OdbS3Details -> SHA -> CacheEntry -> IO ()
 callbackRegisterCacheEntry dets sha ce =
     wrap ("callbackRegisterCacheEntry " ++ show sha ++ " " ++ show ce)
         (go ce)
@@ -813,10 +805,10 @@ callbackRegisterCacheEntry dets sha ce =
     err = throwIO (Git.BackendError $
                    "callbackRecordInfo called with " <> T.pack (show ce))
 
-remoteObjectExists :: OdbS3Details -> Text -> ResourceT IO Bool
+remoteObjectExists :: OdbS3Details -> SHA -> ResourceT IO Bool
 remoteObjectExists dets sha =
     wrap "remoteObjectExists"
-        (testFileS3 dets sha)
+        (testFileS3 dets (shaToText sha))
         (return False)
 
 remoteReadFile :: OdbS3Details -> FilePath -> ResourceT IO (Maybe ObjectInfo)
@@ -913,15 +905,15 @@ remoteWriteFile dets path typ bytes = do
             payload = BL.append hdr (BL.fromChunks [bytes])
         putFileS3 dets path (sourceLbs payload)
 
-remoteLoadObject :: OdbS3Details -> Text -> ResourceT IO (Maybe ObjectInfo)
+remoteLoadObject :: OdbS3Details -> SHA -> ResourceT IO (Maybe ObjectInfo)
 remoteLoadObject dets sha = do
     let tmpDir = tempDirectory dets
-        path   = tmpDir </> fromText sha
+        path   = tmpDir </> fromSha sha
     remoteReadFile dets path
 
-remoteStoreObject :: OdbS3Details -> Text -> ObjectInfo -> ResourceT IO ()
+remoteStoreObject :: OdbS3Details -> SHA -> ObjectInfo -> ResourceT IO ()
 remoteStoreObject dets sha (ObjectInfo _ typ _ (Just bytes)) =
-    remoteWriteFile dets sha typ bytes
+    remoteWriteFile dets (shaToText sha) typ bytes
 remoteStoreObject _ _ _ =
     throw (Git.BackendError "remoteStoreObject was not given any data")
 
@@ -939,7 +931,7 @@ remoteCatalogContents dets = do
                 liftIO $ catalogPackFile dets packSha idxPath
 
 accessObject :: OdbS3Details
-             -> Text
+             -> SHA
              -> Bool
              -> IO (Maybe CacheEntry)
 accessObject dets sha remote =
@@ -995,12 +987,12 @@ expectingJust :: (MonadIO m, MonadBaseControl IO m) => Text -> Maybe a -> m a
 expectingJust msg Nothing   = throw (Git.BackendError msg)
 expectingJust _msg (Just x) = return x
 
-objectExists :: OdbS3Details -> Text -> Bool -> IO CacheEntry
+objectExists :: OdbS3Details -> SHA -> Bool -> IO CacheEntry
 objectExists dets sha remote = do
     mce <- accessObject dets sha remote
     return $ fromMaybe DoesNotExist mce
 
-readObject :: OdbS3Details -> Text -> Bool -> IO (Maybe ObjectInfo)
+readObject :: OdbS3Details -> SHA -> Bool -> IO (Maybe ObjectInfo)
 readObject dets sha metadataOnly = do
     ce <- objectExists dets sha False
 
@@ -1013,10 +1005,10 @@ readObject dets sha metadataOnly = do
     cacheLoadObject dets sha ce' metadataOnly
         `catch` \(_ :: SomeException) -> return Nothing
 
-readObjectMetadata :: OdbS3Details -> Text -> IO (Maybe ObjectInfo)
+readObjectMetadata :: OdbS3Details -> SHA -> IO (Maybe ObjectInfo)
 readObjectMetadata dets sha = readObject dets sha True
 
-writeObject :: OdbS3Details -> Text -> ObjectInfo -> IO ()
+writeObject :: OdbS3Details -> SHA -> ObjectInfo -> IO ()
 writeObject dets sha info = do
     runResourceT $ remoteStoreObject dets sha info
     callbackRegisterObject dets sha info
@@ -1042,8 +1034,8 @@ writePackFile dets bytes = do
 
 readCallback :: F'git_odb_backend_read_callback
 readCallback data_p len_p type_p be oid = do
-    (dets, _, sha) <- unpackDetails be oid
-    wrap (T.unpack $ "S3.readCallback " <> sha)
+    (dets, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.readCallback " <> shaToText sha)
         (maybe c'GIT_ENOTFOUND (const c'GIT_OK) <$> go dets sha)
         (return c'GIT_ERROR)
   where
@@ -1065,8 +1057,8 @@ readPrefixCallback _out_oid _oid_p _len_p _type_p _be _oid _len =
 
 readHeaderCallback :: F'git_odb_backend_read_header_callback
 readHeaderCallback len_p type_p be oid = do
-    (dets, _, sha) <- unpackDetails be oid
-    wrap (T.unpack $ "S3.readHeaderCallback " <> sha)
+    (dets, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.readHeaderCallback " <> shaToText sha)
         (maybe c'GIT_ENOTFOUND (const c'GIT_OK) <$> go dets sha)
         (return c'GIT_ERROR)
   where
@@ -1081,8 +1073,8 @@ writeCallback oid be obj_data len obj_type = do
     r <- c'git_odb_hash oid obj_data len obj_type
     case r of
         0 -> do
-            (dets, _, sha) <- unpackDetails be oid
-            wrap (T.unpack $ "S3.writeCallback " <> sha)
+            (dets, sha) <- unpackDetails be oid
+            wrap (T.unpack $ "S3.writeCallback " <> shaToText sha)
                 (go dets sha >> return c'GIT_OK)
                 (return c'GIT_ERROR)
         n -> do
@@ -1098,9 +1090,9 @@ writeCallback oid be obj_data len obj_type = do
 
 existsCallback :: F'git_odb_backend_exists_callback
 existsCallback be oid confirmNotExists = do
-    (dets, _, sha) <- unpackDetails be oid
-    wrap (T.unpack $ "S3.existsCallback "
-                  <> sha <> " " <> T.pack (show confirmNotExists))
+    (dets, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.existsCallback " <> shaToText sha
+                  <> " " <> T.pack (show confirmNotExists))
         (do ce <- objectExists dets sha (confirmNotExists == 0)
             return $ if ce == DoesNotExist then 0 else 1)
         (return c'GIT_ERROR)
