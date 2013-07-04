@@ -1132,7 +1132,10 @@ strToOid oidStr = do
         when (r < 0) $ throwIO Git.OidCopyFailed
         return ptr
 
-newtype SHA = SHA B.ByteString deriving (Eq, Ord, Read, Show)
+newtype SHA = SHA B.ByteString deriving (Eq, Ord, Read)
+
+instance Show SHA where
+    show = T.unpack . shaToText
 
 instance Bin.Binary SHA where
     put (SHA t) = Bin.put t
