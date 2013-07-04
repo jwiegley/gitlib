@@ -52,6 +52,7 @@ import           Control.Retry
 import           Data.Aeson as A
 import           Data.Attempt
 import           Data.Bifunctor
+import qualified Data.Binary as Bin
 import           Data.Binary as Bin
 import           Data.ByteString as B hiding (putStrLn, foldr, map)
 import qualified Data.ByteString.Lazy as BL
@@ -63,8 +64,8 @@ import           Data.Default
 import           Data.Foldable (for_)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as M
-import           Data.Int (Int64)
 import           Data.IORef
+import           Data.Int (Int64)
 import qualified Data.List as L
 import           Data.Maybe
 import           Data.Monoid
@@ -93,10 +94,17 @@ import           Network.HTTP.Conduit hiding (Response)
 import           Prelude hiding (FilePath, mapM_, catch)
 import           System.IO.Unsafe
 
-data ObjectLength = ObjectLength { getObjectLength :: Int64 }
-                  deriving (Eq, Show, Generic)
-data ObjectType   = ObjectType { getObjectType :: Int }
-                  deriving (Eq, Show, Generic)
+newtype ObjectLength = ObjectLength { getObjectLength :: Int64 }
+                     deriving (Eq, Show, Generic)
+newtype ObjectType   = ObjectType { getObjectType :: Int }
+                     deriving (Eq, Show, Generic)
+
+instance Bin.Binary ObjectLength where
+    put (ObjectLength x) = Bin.put x
+    get = ObjectLength <$> Bin.get
+instance Bin.Binary ObjectType where
+    put (ObjectType x) = Bin.put x
+    get = ObjectType <$> Bin.get
 
 plainFile :: ObjectType
 plainFile = ObjectType 0
@@ -338,7 +346,7 @@ pokeByteString bytes data_p (fromIntegral . getObjectLength -> len) = do
     poke data_p (castPtr content)
 
 unpackDetails :: Ptr C'git_odb_backend -> Ptr C'git_oid
-              -> IO (OdbS3Details, ByteString)
+              -> IO (OdbS3Details, SHA)
 unpackDetails be oid = do
     odbS3 <- peek (castPtr be :: Ptr OdbS3Backend)
     dets  <- deRefStablePtr (details odbS3)
@@ -358,7 +366,7 @@ wrapRegisterObject :: (SHA -> Maybe (ObjectLength, ObjectType) -> IO ())
                    -> Maybe (ObjectLength, ObjectType)
                    -> IO ()
 wrapRegisterObject f name metadata =
-    wrap ("registerObject " ++ show name ++ " " ++ show metadata)
+    wrap ("registerObject " ++ show (shaToText name) ++ " " ++ show metadata)
         (f name metadata)
         (return ())
 
@@ -374,7 +382,7 @@ wrapLookupObject :: (SHA -> IO (Maybe ObjectStatus))
                  -> SHA
                  -> IO (Maybe ObjectStatus)
 wrapLookupObject f name =
-    wrap ("lookupObject: " ++ show name)
+    wrap ("lookupObject: " ++ show (shaToText name))
         (f name)
         (return Nothing)
 
@@ -674,7 +682,7 @@ catalogPackFile dets packSha idxPath = do
 
 cacheLookupEntry :: OdbS3Details -> SHA -> IO (Maybe CacheEntry)
 cacheLookupEntry dets sha =
-    wrap ("cacheLookupEntry " ++ show sha)
+    wrap ("cacheLookupEntry " ++ show (shaToText sha))
         go
         (return Nothing)
   where
@@ -684,7 +692,7 @@ cacheLookupEntry dets sha =
 
 cacheUpdateEntry :: OdbS3Details -> SHA -> CacheEntry -> IO ()
 cacheUpdateEntry dets sha ce = do
-    debug $ "cacheUpdateEntry " ++ show sha ++ " " ++ show ce
+    debug $ "cacheUpdateEntry " ++ show (shaToText sha) ++ " " ++ show ce
     atomically $ modifyTVar (knownObjects dets) $ M.insert sha ce
 
 cacheLoadObject :: OdbS3Details -> SHA -> CacheEntry -> Bool
@@ -788,7 +796,8 @@ callbackRegisterPackFile dets packSha shas len = do
 
 callbackRegisterCacheEntry :: OdbS3Details -> SHA -> CacheEntry -> IO ()
 callbackRegisterCacheEntry dets sha ce =
-    wrap ("callbackRegisterCacheEntry " ++ show sha ++ " " ++ show ce)
+    wrap ("callbackRegisterCacheEntry "
+              ++ show (shaToText sha) ++ " " ++ show ce)
         (go ce)
         (return ())
   where

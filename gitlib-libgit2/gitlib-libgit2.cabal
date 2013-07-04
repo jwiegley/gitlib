@@ -40,6 +40,7 @@ Library
         , gitlib-utils         >= 1.1.0
         , hlibgit2             >= 0.18.0.7
         , attempt              >= 0.4.0
+        , binary               >= 0.5.1.0
         , bytestring           >= 0.9.2.1
         , base16-bytestring    >= 0.1.1.5
         , conduit              >= 0.5.5
@@ -47,6 +48,7 @@ Library
         , data-default         >= 0.5.0
         , directory            >= 1.1.0.2
         , failure              >= 0.2.0.1
+        , hashable             >= 1.2.0.5
         , hex                  >= 0.1.2
         , lifted-base          >= 0.2.0.2
         , missing-foreign      >= 0.1.1

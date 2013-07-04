@@ -41,10 +41,11 @@ module Git.Libgit2
        , lgLoadPackFileInMemory
        , lgReadFromPack
        , lgWithPackFile
-       , SHA
+       , SHA(..)
        , oidToSha
        , shaToOid
        , shaToText
+       , textToSha
        , openLgRepository
        , runLgRepository
        , strToOid
@@ -61,12 +62,14 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Loops
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
+import qualified Data.Binary as Bin
 import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Unsafe as BU
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import           Data.Hashable
 import           Data.IORef
 import           Data.List as L
 import           Data.Maybe
@@ -1117,7 +1120,7 @@ lgBuildPackIndex dir bytes = do
 
         debug "Discovering the hash used to identify the pack file"
         sha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
-        debug $ "The hash used is: " ++ show sha
+        debug $ "The hash used is: " ++ show (shaToText sha)
         return (shaToText sha)
 
 strToOid :: String -> IO (ForeignPtr C'git_oid)
@@ -1129,21 +1132,34 @@ strToOid oidStr = do
         when (r < 0) $ throwIO Git.OidCopyFailed
         return ptr
 
-type SHA = B.ByteString
+newtype SHA = SHA B.ByteString deriving (Eq, Ord, Read, Show)
 
-oidToSha :: Ptr C'git_oid -> IO B.ByteString
+instance Bin.Binary SHA where
+    put (SHA t) = Bin.put t
+    get = SHA <$> Bin.get
+
+instance Hashable SHA where
+    hashWithSalt salt (SHA bs) = hashWithSalt salt bs
+
+oidToSha :: Ptr C'git_oid -> IO SHA
 oidToSha oidPtr =
-    B.packCStringLen (castPtr oidPtr, sizeOf (undefined :: C'git_oid))
+    SHA <$> B.packCStringLen (castPtr oidPtr, sizeOf (undefined :: C'git_oid))
 
-shaToOid :: B.ByteString -> IO (ForeignPtr C'git_oid)
-shaToOid bs = BU.unsafeUseAsCString bs $ \bytes -> do
+shaToOid :: SHA -> IO (ForeignPtr C'git_oid)
+shaToOid (SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
     ptr <- mallocForeignPtr
     withForeignPtr ptr $ \ptr' -> do
         c'git_oid_fromraw ptr' (castPtr bytes)
         return ptr
 
-shaToText :: B.ByteString -> Text
-shaToText = T.decodeUtf8 . B16.encode
+shaToText :: SHA -> Text
+shaToText (SHA bs) = T.decodeUtf8 (B16.encode bs)
+
+textToSha :: Monad m => Text -> m SHA
+textToSha t =
+    case B16.decode $ T.encodeUtf8 t of
+        (bs, "") -> return (SHA bs)
+        _ -> fail "Invalid base16 encoding"
 
 lgWritePackFile :: Git.MonadGit m => FilePath -> LgRepository m ()
 lgWritePackFile packFile = do
@@ -1247,7 +1263,7 @@ lgWithPackFile idxPath f = alloca $ \odbPtrPtr ->
         debug "Calling function using in-memory odb"
         f odbPtr
 
-lgReadFromPack :: FilePath -> B.ByteString -> Bool
+lgReadFromPack :: FilePath -> SHA -> Bool
                -> IO (Maybe (C'git_otype, CSize, B.ByteString))
 lgReadFromPack idxPath sha metadataOnly =
     alloca $ \objectPtrPtr ->
