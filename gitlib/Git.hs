@@ -152,7 +152,9 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
 
     facts :: m RepositoryFacts
 
-    parseOid  :: Text -> m (Oid m)
+    parseOid :: Text -> m (Oid m)
+    parseObjOid :: forall o. Text -> m (Tagged o (Oid m))
+    parseObjOid sha = Tagged <$> parseOid sha
 
     -- References
     createRef  :: Text -> RefTarget m (Commit m) -> m (Reference m (Commit m))
