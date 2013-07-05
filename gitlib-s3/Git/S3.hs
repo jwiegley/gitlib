@@ -627,12 +627,13 @@ mirrorRefsFromS3 be = do
   where
     go repoPtr namePtr ref ptr = do
         r <- case ref of
-            Just Git.Reference { Git.refTarget = Git.RefSymbolic target } ->
+            Just Git.Reference
+                { Git.referenceTarget = Git.RefSymbolic target } ->
                 withCString (T.unpack target) $ \targetPtr ->
                     c'git_reference_symbolic_create ptr repoPtr namePtr
                         targetPtr 1
             Just Git.Reference {
-                Git.refTarget = Git.RefObj (Git.ByOid (Tagged coid)) } ->
+                Git.referenceTarget = Git.RefObj (Git.ByOid (Tagged coid)) } ->
                 withForeignPtr (getOid coid) $ \coidPtr ->
                     c'git_reference_create ptr repoPtr namePtr coidPtr 1
             _ -> return 0
@@ -640,8 +641,8 @@ mirrorRefsFromS3 be = do
 
 mirrorRefsToS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsToS3 be = do
-    names <- Git.allRefNames
-    refs  <- mapM Git.lookupRef names
+    names <- Git.allReferenceNames
+    refs  <- mapM Git.lookupReference names
     liftIO $ writeRefs be (M.fromList (L.zip names refs))
 
 observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb

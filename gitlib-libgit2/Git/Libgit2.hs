@@ -60,6 +60,7 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Loops
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
 import qualified Data.Binary as Bin
@@ -67,8 +68,6 @@ import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Unsafe as BU
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
 import           Data.Hashable
 import           Data.IORef
 import           Data.List as L
@@ -154,15 +153,12 @@ instance Ord OidPtr where
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
-data TreeBuilder m t = TreeBuilder
-    { lgPendingUpdates :: IORef (HashMap Text (Tree m t))
-    , lgTreeContents   :: ForeignPtr C'git_treebuilder
-    }
-
 instance Git.MonadGit m => Git.Repository (LgRepository m) where
-    type Oid (LgRepository m)      = OidPtr
-    type TreeKind (LgRepository m) = Git.MutableTree
-    type Tree (LgRepository m)     = TreeBuilder m
+    type Oid (LgRepository m)         = OidPtr
+    data Tree (LgRepository m)        = LgTree
+        { lgTreePtr :: ForeignPtr C'git_tree
+        }
+    type TreeBuilder (LgRepository m) = TreeBuilder m
 
     data Options (LgRepository m) = Options
 
@@ -170,31 +166,33 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
         { Git.hasSymbolicReferences = True
         }
 
-    parseOid         = lgParseOid
-    lookupRef        = lgLookupRef
-    createRef        = lgUpdateRef
-    updateRef        = lgUpdateRef
-    deleteRef        = lgDeleteRef
-    resolveRef       = lgResolveRef
-    allRefNames      = lgAllRefNames
-    lookupCommit     = lgLookupCommit 40
-    lookupTree       = lgLookupTree 40
-    lookupBlob       = lgLookupBlob
-    lookupTag        = undefined
-    lookupObject     = lgLookupObject
-    existsObject     = lgExistsObject
-    pushCommit       = \name _ rrefname -> Git.genericPushCommit name rrefname
-    traverseCommits  = lgTraverseCommits
-    missingObjects   = lgMissingObjects
-    traverseObjects  = error "Not defined: LgRepository.traverseObjects"
-    newTree          = lgNewTree
-    cloneTree        = lgCloneTree
-    traverseEntries  = lgTraverseEntries
-    unsafeUpdateTree = lgModifyTree
-    writeTree        = lgWriteTree
-    hashContents     = lgHashContents
-    createBlob       = lgWrap . lgCreateBlob
-    createTag        = undefined
+    parseOid          = lgParseOid
+    lookupReference   = lgLookupRef
+    createReference   = lgUpdateRef
+    updateReference   = lgUpdateRef
+    deleteReference   = lgDeleteRef
+    resolveReference  = lgResolveRef
+    allReferenceNames = lgAllRefNames
+    lookupCommit      = lgLookupCommit 40
+    lookupTree        = lgLookupTree 40
+    lookupBlob        = lgLookupBlob
+    lookupTag         = undefined
+    lookupObject      = lgLookupObject
+    existsObject      = lgExistsObject
+    pushCommit        = \name _ rrefname -> Git.genericPushCommit name rrefname
+    traverseCommits   = lgTraverseCommits
+    missingObjects    = lgMissingObjects
+    traverseObjects   = error "Not defined: LgRepository.traverseObjects"
+    newTreeBuilder    = lgNewTreeBuilder
+    writeTree         = lift . Git.writeMutatedTree
+    getTreeEntry      = lgTreeEntry
+    treeOid           = lgTreeOid
+    traverseEntries   = lgTraverseEntries
+    hashContents      = lgHashContents
+    createBlob        = lgWrap . lgCreateBlob
+    createTag         = undefined
+
+    unsafeUpdateTreeBuilder = Git.updateMutableTreeBuilder
 
     createCommit p t a c l r = lgWrap $ lgCreateCommit p t a c l r
 
@@ -254,7 +252,7 @@ lgCreateBlob b = do
 lgLookupBlob :: Git.MonadGit m => BlobOid m
              -> LgRepository m (Git.Blob (LgRepository m))
 lgLookupBlob oid =
-    lookupObject' (getOid (unTagged oid)) 40
+    lookupObject' (getOid (untag oid)) 40
         c'git_blob_lookup c'git_blob_lookup_prefix
         $ \_ obj _ ->
         withForeignPtr obj $ \ptr -> do
@@ -269,115 +267,194 @@ lgLookupBlob oid =
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
-lgTraverseEntries :: Git.MonadGit m
-                  =>(FilePath -> TreeEntry m -> LgRepository m a)
-                  -> Tree m Git.MutableTree
-                  -> LgRepository m [a]
-lgTraverseEntries f initialTree = go "" initialTree
-  where
-    go fp tree = do
-        entries <- liftIO $ withForeignPtr (lgTreeContents tree) $ \tb -> do
-            ior <- newIORef []
-            bracket
-                (mk'git_treebuilder_filter_cb (callback fp ior))
-                freeHaskellFunPtr
-                (flip (c'git_treebuilder_filter tb) nullPtr)
-            readIORef ior
-        concat <$> mapM (uncurry handler) entries
+lgTreeEntry :: Git.MonadGit m => Tree m -> FilePath
+            -> LgRepository m (Maybe (TreeEntry m))
+lgTreeEntry tree fp = liftIO $ alloca $ \entryPtr ->
+    withFilePath fp $ \pathStr ->
+        withForeignPtr (lgTreePtr tree) $ \treePtr -> do
+            r <- c'git_tree_entry_bypath entryPtr treePtr pathStr
+            if r < 0
+                then return Nothing
+                else Just <$> (entryToTreeEntry =<< peek entryPtr)
 
-    handler path entry@(Git.TreeEntry tref) = do
-        x  <- f path entry
-        xs <- Git.resolveTreeRef tref >>= go path
-        return (x:xs)
+lgTreeOid :: Git.MonadGit m => Tree m -> TreeOid m
+lgTreeOid tree = SU.unsafePerformIO $ liftIO $ do
+    toid  <- withForeignPtr (lgTreePtr tree) $ c'git_tree_id
+    ftoid <- coidPtrToOid toid
+    return $ Tagged (mkOid ftoid)
+
+lgTraverseEntries :: Git.MonadGit m
+                  => (FilePath -> TreeEntry m -> LgRepository m a)
+                  -> Tree m
+                  -> LgRepository m [a]
+lgTraverseEntries f tree = do
+    entries <- liftIO $ withForeignPtr (lgTreePtr tree) $ \tr -> do
+        ior <- newIORef []
+        r <- bracket
+                (mk'git_treewalk_cb (callback ior))
+                freeHaskellFunPtr
+                (flip (c'git_tree_walk tr c'GIT_TREEWALK_PRE) nullPtr)
+        when (r < 0) $ failure Git.TreeWalkFailed
+        readIORef ior
+    concat <$> mapM (uncurry handler) entries
+
+  where
     handler path entry = liftM2 (:) (f path entry) (return [])
 
-    callback fp ior te _ = do
+    callback ior root te _ = do
+        fp    <- F.decodeString <$> peekCString root
         cname <- c'git_tree_entry_name te
         name  <- (fp </>) . F.decodeString <$> peekCString cname
         entry <- entryToTreeEntry te
-        modifyIORef ior $
-            seq name $ seq entry (\xs -> (name,entry):xs)
+        seq name $ seq entry $ modifyIORef ior $ \xs -> (name,entry):xs
         return 0
 
 lgMakeTree :: Git.MonadGit m
-           => IORef (HashMap Text (Tree m Git.MutableTree))
-           -> ForeignPtr C'git_treebuilder
-           -> LgRepository m (Tree m Git.MutableTree)
-lgMakeTree contents builder = return $ TreeBuilder contents builder
+           => ForeignPtr C'git_treebuilder
+           -> LgRepository m (TreeBuilder m)
+lgMakeTree builder = do
+    tb <- Git.makeMutableTreeBuilder
+    return tb
+        { Git.mtbNewBuilder    = lgNewTreeBuilder
+        , Git.mtbWriteContents = lgWriteBuilder builder
+        , Git.mtbLookupEntry   = lgLookupBuilderEntry builder
+        , Git.mtbEntryCount    = lgBuilderEntryCount builder
+        , Git.mtbPutEntry      = lgPutEntry builder
+        , Git.mtbDropEntry     = lgDropEntry builder
+        }
 
 -- | Create a new, empty tree.
 --
 --   Since empty trees cannot exist in Git, attempting to write out an empty
 --   tree is a no-op.
-lgNewTree :: Git.MonadGit m => LgRepository m (Tree m Git.MutableTree)
-lgNewTree = do
-    -- size <- liftIO $ newIORef 0
-
+lgNewTreeBuilder :: Git.MonadGit m
+                 => Maybe (Tree m) -> LgRepository m (TreeBuilder m)
+lgNewTreeBuilder mtree = do
     (r,fptr) <- liftIO $ alloca $ \pptr -> do
-        r <- c'git_treebuilder_create pptr nullPtr
+        r <- case mtree of
+            Nothing -> c'git_treebuilder_create pptr nullPtr
+            Just tree -> withForeignPtr (lgTreePtr tree) $ \treePtr ->
+                c'git_treebuilder_create pptr treePtr
         builder <- peek pptr
         fptr <- FC.newForeignPtr builder (c'git_treebuilder_free builder)
         return (r,fptr)
-
     if r < 0
         then failure (Git.TreeCreateFailed "Failed to create new tree builder")
-        else do
-             contents <- liftIO (newIORef HashMap.empty)
-             lgMakeTree contents fptr
+        else lgMakeTree fptr
 
-lgCloneTree :: Git.MonadGit m => Tree m Git.MutableTree -> LgRepository m (Tree m Git.MutableTree)
-lgCloneTree (TreeBuilder pending contents) =
-    TreeBuilder <$> liftIO (newIORef =<< readIORef pending)
-                <*> liftIO (copyBuilder contents)
-  where
-    copyBuilder fptr = withForeignPtr fptr $ \builder -> alloca $ \pptr -> do
-        r <- c'git_treebuilder_create pptr nullPtr
-        when (r < 0) $
-            failure (Git.BackendError "Could not create new treebuilder")
-        builder' <- peek pptr
-        bracket
-            (mk'git_treebuilder_filter_cb (callback builder'))
-            freeHaskellFunPtr
-            (flip (c'git_treebuilder_filter builder) nullPtr)
-        FC.newForeignPtr builder'(c'git_treebuilder_free builder')
+lgPutEntry :: Git.MonadGit m
+           => ForeignPtr C'git_treebuilder -> Text -> TreeEntry m
+           -> LgRepository m ()
+lgPutEntry builder key (treeEntryToOid -> (oid,mode)) = do
+    r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
+        withForeignPtr builder $ \ptr ->
+        withCString (T.unpack key) $ \name ->
+            c'git_treebuilder_insert nullPtr ptr name coid
+                (fromIntegral mode)
+    when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed key)
 
-    callback builder te _ = do
-        cname <- c'git_tree_entry_name te
-        coid  <- c'git_tree_entry_id te
-        fmode <- c'git_tree_entry_filemode te
-        r <- c'git_treebuilder_insert
-            nullPtr
-            builder
-            cname
-            coid
-            fmode
-        when (r < 0) $
-            failure (Git.BackendError "Could not insert entry in treebuilder")
-        return 0
+treeEntryToOid :: TreeEntry m -> (Oid, CUInt)
+treeEntryToOid (Git.BlobEntry oid kind) =
+    (untag oid, case kind of
+          Git.PlainBlob      -> 0o100644
+          Git.ExecutableBlob -> 0o100755
+          Git.SymlinkBlob    -> 0o120000
+          Git.UnknownBlob    -> 0o100000)
+treeEntryToOid (Git.CommitEntry coid) =
+    (untag coid, 0o160000)
+treeEntryToOid (Git.TreeEntry toid) =
+    (untag toid, 0o040000)
 
-lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m Git.MutableTree) Oid
-             -> LgRepository m (Tree m Git.MutableTree)
+lgDropEntry :: Git.MonadGit m
+            => ForeignPtr C'git_treebuilder -> Text -> LgRepository m ()
+lgDropEntry builder key = do
+    r2 <- liftIO $ withForeignPtr builder $ \ptr ->
+        withCString (T.unpack key) $ \name ->
+            c'git_treebuilder_remove ptr name
+    when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed key)
+
+lgLookupBuilderEntry :: Git.MonadGit m
+                     => ForeignPtr C'git_treebuilder
+                     -> Text
+                     -> LgRepository m (Maybe (TreeEntry m))
+lgLookupBuilderEntry builderPtr name = do
+    entry <- liftIO $ withForeignPtr builderPtr $ \builder -> do
+        withCString (T.unpack name) (c'git_treebuilder_get builder)
+    if entry == nullPtr
+        then return Nothing
+        else Just <$> liftIO (entryToTreeEntry entry)
+
+lgBuilderEntryCount :: Git.MonadGit m
+                    => ForeignPtr C'git_treebuilder -> LgRepository m Int
+lgBuilderEntryCount tb = do
+    fromIntegral <$> liftIO (withForeignPtr tb c'git_treebuilder_entrycount)
+
+lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
+lgTreeEntryCount t = do
+    fromIntegral
+        <$> liftIO (withForeignPtr (lgTreePtr t) c'git_tree_entrycount)
+
+lgWriteBuilder :: Git.MonadGit m
+               => ForeignPtr C'git_treebuilder -> LgRepository m (TreeRef m)
+lgWriteBuilder tb = do
+    repo <- lgGet
+    (r3,coid) <- liftIO $ do
+        coid <- mallocForeignPtr
+        withForeignPtr coid $ \coid' ->
+            withForeignPtr tb $ \builder ->
+            withForeignPtr (repoObj repo) $ \repoPtr -> do
+                r3 <- c'git_treebuilder_write coid' repoPtr builder
+                return (r3,coid)
+    when (r3 < 0) $ do
+        errStr <- liftIO $ do
+            errPtr <- c'giterr_last
+            err    <- peek errPtr
+            peekCString (c'git_error'message err)
+        failure (Git.TreeBuilderWriteFailed $ T.pack $
+                 "c'git_treebuilder_write failed with " ++ show r3
+                 ++ ": " ++ errStr)
+    return (Git.ByOid (Tagged (mkOid coid)))
+
+-- lgCloneTree :: Git.MonadGit m => Tree m -> LgRepository m (Tree m)
+-- lgCloneTree (TreeBuilder pending contents) =
+--     TreeBuilder <$> liftIO (newIORef =<< readIORef pending)
+--                 <*> liftIO (copyBuilder contents)
+--   where
+--     copyBuilder fptr = withForeignPtr fptr $ \builder -> alloca $ \pptr -> do
+--         r <- c'git_treebuilder_create pptr nullPtr
+--         when (r < 0) $
+--             failure (Git.BackendError "Could not create new treebuilder")
+--         builder' <- peek pptr
+--         bracket
+--             (mk'git_treebuilder_filter_cb (callback builder'))
+--             freeHaskellFunPtr
+--             (flip (c'git_treebuilder_filter builder) nullPtr)
+--         FC.newForeignPtr builder'(c'git_treebuilder_free builder')
+
+--     callback builder te _ = do
+--         cname <- c'git_tree_entry_name te
+--         coid  <- c'git_tree_entry_id te
+--         fmode <- c'git_tree_entry_filemode te
+--         r <- c'git_treebuilder_insert
+--             nullPtr
+--             builder
+--             cname
+--             coid
+--             fmode
+--         when (r < 0) $
+--             failure (Git.BackendError "Could not insert entry in treebuilder")
+--         return 0
+
+lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
+             -> LgRepository m (Tree m)
 lgLookupTree len oid = do
     -- jww (2013-01-28): Verify the oid here
-    (upds,fptr) <- lookupObject' (getOid (unTagged oid)) len
+    fptr <- lookupObject' (getOid (untag oid)) len
           c'git_tree_lookup c'git_tree_lookup_prefix $
-          \_coid obj _ ->
-              withForeignPtr obj $ \objPtr -> do
-                  (r,fptr) <- alloca $ \pptr -> do
-                      r <- c'git_treebuilder_create pptr objPtr
-                      builder <- peek pptr
-                      fptr <- FC.newForeignPtr builder
-                                  (c'git_treebuilder_free builder)
-                      return (r,fptr)
-                  if r < 0
-                      then failure (Git.TreeCreateFailed
-                                    "Failed to create tree builder")
-                      else do
-                      upds <- liftIO $ newIORef HashMap.empty
-                      return (upds,fptr)
-    lgMakeTree upds fptr
+          \_coid obj _ -> return obj
+    return $ LgTree fptr
 
-entryToTreeEntry :: Git.MonadGit m => Ptr C'git_tree_entry -> IO (TreeEntry m)
+entryToTreeEntry :: Ptr C'git_tree_entry -> IO (TreeEntry m)
 entryToTreeEntry entry = do
     coid <- c'git_tree_entry_id entry
     oid  <- coidPtrToOid coid
@@ -392,197 +469,15 @@ entryToTreeEntry entry = do
                         0o120000 -> Git.SymlinkBlob
                         _        -> Git.UnknownBlob
            | typ == c'GIT_OBJ_TREE ->
-             return $ Git.TreeEntry (Git.ByOid (Tagged (mkOid oid)))
+             return $ Git.TreeEntry (Tagged (mkOid oid))
            | typ == c'GIT_OBJ_COMMIT ->
              return $ Git.CommitEntry (Tagged (mkOid oid))
            | otherwise -> error "Unexpected"
 
--- | Write out a tree to its repository.  If it has already been written,
---   nothing will happen.
-lgWriteTree :: Git.MonadGit m => Tree m Git.MutableTree -> LgRepository m (TreeOid m)
-lgWriteTree t = do
-    -- This is the Oid of every empty tree
-    emptyTreeOid <- Git.parseOid "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-    doWriteTree t
-        >>= return . Tagged . fromMaybe emptyTreeOid
-  where
-    doWriteTree tr = do
-        repo <- lgGet
-        let contents = lgTreeContents tr
-
-        upds <- liftIO $ readIORef (lgPendingUpdates tr)
-        forM_ (HashMap.toList upds) $ \(k,v) -> do
-            oid <- doWriteTree v
-            case oid of
-                Nothing   -> dropEntry contents (T.unpack k)
-                Just oid' -> insertEntry contents (T.unpack k) oid' 0o040000
-        liftIO $ writeIORef (lgPendingUpdates tr) HashMap.empty
-
-        cnt <- liftIO $ withForeignPtr contents c'git_treebuilder_entrycount
-        if cnt == 0
-            then return Nothing
-            else go contents (repoObj repo)
-
-    go :: Git.MonadGit m
-       => ForeignPtr C'git_treebuilder
-       -> ForeignPtr C'git_repository
-       -> LgRepository m (Maybe Oid)
-    go fptr repo = do
-        (r3,coid) <- liftIO $ do
-            coid <- mallocForeignPtr
-            withForeignPtr coid $ \coid' ->
-                withForeignPtr fptr $ \builder ->
-                withForeignPtr repo $ \repoPtr -> do
-                    r3 <- c'git_treebuilder_write coid' repoPtr builder
-                    return (r3,coid)
-        when (r3 < 0) $ do
-            errPtr <- liftIO $ c'giterr_last
-            err    <- liftIO $ peek errPtr
-            errStr <- liftIO $ peekCString (c'git_error'message err)
-            failure (Git.TreeBuilderWriteFailed $ T.pack $
-                     "c'git_treebuilder_write failed with " ++ show r3
-                     ++ ": " ++ errStr)
-        return (Just (mkOid coid))
-
-lgTreeEntryCount :: Git.MonadGit m => Tree m Git.MutableTree -> LgRepository m Int
-lgTreeEntryCount t = do
-    let contents = lgTreeContents t
-    fromIntegral
-        <$> liftIO (withForeignPtr contents c'git_treebuilder_entrycount)
-
-insertEntry :: Git.MonadGit m
-            => ForeignPtr C'git_treebuilder -> String -> Oid -> CUInt
-            -> LgRepository m ()
-insertEntry builder key oid attrs = do
-  r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
-      withForeignPtr builder $ \ptr ->
-      withCString key $ \name ->
-          c'git_treebuilder_insert nullPtr ptr name coid attrs
-  when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed (T.pack key))
-
-dropEntry :: Git.MonadGit m
-          => ForeignPtr C'git_treebuilder -> String -> LgRepository m ()
-dropEntry builder key = do
-  r2 <- liftIO $ withForeignPtr builder $ \ptr ->
-      withCString key $ \name ->
-          c'git_treebuilder_remove ptr name
-  when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed (T.pack key))
-
-lgModifyTree :: Git.MonadGit m
-             => Tree m Git.MutableTree -> FilePath -> Bool
-             -> (Maybe (TreeEntry m) -> Git.ModifyTreeResult (LgRepository m))
-             -> LgRepository m (Tree m Git.MutableTree, Maybe (TreeEntry m))
-lgModifyTree t path createIfNotExist f =
-    fmap Git.fromModifyTreeResult
-        <$> doModifyTree t (splitPath path) createIfNotExist
-  where
-    -- Lookup the current name in this tree.  If it doesn't exist, and there
-    -- are more names in the path and 'createIfNotExist' is True, create a new
-    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
-    -- (TreeEntry {})@, and if not we'll have Nothing.
-    doModifyTree tr [] _ =
-        return (tr, Git.TreeEntryPersistent . Git.TreeEntry . Git.Known $ tr)
-    doModifyTree tr (name:names) createIfNotExist = do
-        y' <- doLookupTreeEntry tr [name]
-        y  <- if isNothing y' && createIfNotExist && not (null names)
-              then Just . Git.TreeEntry . Git.Known <$> Git.newTree
-              else return y'
-        go tr name names y
-
-    -- If there are no further names in the path, call the transformer
-    -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there was
-    -- a previous entry at this path.  It should return a 'Left' value to
-    -- propagate out a user-defined error, or a @Maybe TreeEntry@ to indicate
-    -- whether the entry at this path should be deleted or replaced with
-    -- something new.
-    --
-    -- NOTE: There is no provision for leaving the entry unchanged!  It is
-    -- assumed to always be changed, as we have no reliable method of testing
-    -- object equality that is not O(n).
-    go tr name [] y = returnTree tr (T.unpack name) (f y)
-
-    go tr _ _ Nothing                  = return (tr, Git.TreeEntryNotFound)
-    go _ _ _ (Just Git.BlobEntry {})   = failure Git.TreeCannotTraverseBlob
-    go _ _ _ (Just Git.CommitEntry {}) = failure Git.TreeCannotTraverseCommit
-
-    -- If there are further names in the path, descend them now.  If
-    -- 'createIfNotExist' was False and there is no 'Tree' under the current
-    -- name, or if we encountered a 'Blob' when a 'Tree' was required, throw
-    -- an exception to avoid colliding with user-defined 'Left' values.
-    go tr name names (Just (Git.TreeEntry st')) = do
-        st <- Git.resolveTreeRef st'
-        (st'', ze) <- doModifyTree st names createIfNotExist
-        case ze of
-            Git.TreeEntryNotFound     -> return ()
-            Git.TreeEntryPersistent _ -> return ()
-            Git.TreeEntryDeleted      -> postUpdate tr st'' name
-            Git.TreeEntryMutated _    -> postUpdate tr st'' name
-        return (tr, ze)
-
-    postUpdate tr st name =
-        liftIO $ modifyIORef (lgPendingUpdates tr) $
-            HashMap.insert name st
-
-    returnTree tr n z = do
-        let contents = lgTreeContents tr
-        case z of
-            Git.TreeEntryNotFound     -> return ()
-            Git.TreeEntryPersistent _ -> return ()
-            Git.TreeEntryDeleted      -> dropEntry contents n
-            Git.TreeEntryMutated z'   -> do
-                (oid,mode) <- treeEntryToOid z'
-                insertEntry contents n oid mode
-        return (tr, z)
-
-    treeEntryToOid (Git.BlobEntry oid kind) =
-        return (unTagged oid,
-                case kind of
-                    Git.PlainBlob      -> 0o100644
-                    Git.ExecutableBlob -> 0o100755
-                    Git.SymlinkBlob    -> 0o120000
-                    Git.UnknownBlob    -> 0o100000)
-    treeEntryToOid (Git.CommitEntry coid) =
-        return (unTagged coid, 0o160000)
-    treeEntryToOid (Git.TreeEntry tr) = do
-        oid <- Git.treeRefOid tr
-        return (unTagged oid, 0o040000)
-
-    -- Lookup the current name in this tree.  If it doesn't exist, and there
-    -- are more names in the path and 'createIfNotExist' is True, create a new
-    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
-    -- (TreeEntry {})@, and if not we'll have Nothing.
-    doLookupTreeEntry tr [] = return (Just (Git.treeEntry tr))
-    doLookupTreeEntry tr (name:names) = do
-      upds <- liftIO $ readIORef (lgPendingUpdates tr)
-      y <- case HashMap.lookup name upds of
-          Just m -> return . Just . Git.TreeEntry . Git.Known $ m
-          Nothing ->
-              liftIO $ withForeignPtr (lgTreeContents tr) $ \builder -> do
-                  entry <- withCString (T.unpack name)
-                               (c'git_treebuilder_get builder)
-                  if entry == nullPtr
-                      then return Nothing
-                      else Just <$> entryToTreeEntry entry
-      if null names
-          then return y
-          else case y of
-              Just (Git.BlobEntry {})   -> failure Git.TreeCannotTraverseBlob
-              Just (Git.CommitEntry {}) -> failure Git.TreeCannotTraverseCommit
-              Just (Git.TreeEntry st)   -> do
-                  st' <- Git.resolveTreeRef st
-                  doLookupTreeEntry st' names
-              _ -> return Nothing
-
-splitPath :: FilePath -> [Text]
-splitPath path = T.splitOn "/" text
-  where text = case F.toText path of
-                 Left x  -> error $ "Invalid path: " ++ T.unpack x
-                 Right y -> y
-
 lgLookupCommit :: Git.MonadGit m
                => Int -> CommitOid m -> LgRepository m (Commit m)
 lgLookupCommit len oid =
-  lookupObject' (getOid (unTagged oid)) len c'git_commit_lookup
+  lookupObject' (getOid (untag oid)) len c'git_commit_lookup
                 c'git_commit_lookup_prefix $ \_ obj _ ->
       withForeignPtr obj $ \cobj -> do
         let c = castPtr cobj
@@ -690,12 +585,12 @@ lgRevWalker name moid walker = do
     case name of
         Git.CommitObjectId (Tagged coid) -> pushOid (getOid coid)
         Git.CommitRefName rname -> pushRef (T.unpack rname)
-        Git.CommitReference ref -> pushRef (T.unpack (Git.refName ref))
+        Git.CommitReference ref -> pushRef (T.unpack (Git.referenceName ref))
 
     case moid of
         Nothing -> return ()
         Just oid ->
-            withForeignPtr (getOid (unTagged oid)) $ \coid -> do
+            withForeignPtr (getOid (untag oid)) $ \coid -> do
                 r2 <- c'git_revwalk_hide walker coid
                 when (r2 < 0) $
                     failure (Git.BackendError
@@ -755,8 +650,8 @@ lgMissingObjects mhave need = do
     concat <$> mapM getCommitContents refs
   where
     getCommitContents cref = do
-        c    <- lgLookupCommit 40 (Git.commitRefOid cref)
-        toid <- Git.treeRefOid (Git.commitTree c)
+        c <- lgLookupCommit 40 (Git.commitRefOid cref)
+        let toid = Git.treeRefOid (Git.commitTree c)
         return [Git.CommitObj (Git.Known c), Git.TreeObj (Git.ByOid toid)]
 
 -- | Write out a commit to its repository.  If it has already been written,
@@ -771,14 +666,14 @@ lgCreateCommit :: Git.MonadGit m
                -> LgRepository m (Commit m)
 lgCreateCommit parents tree author committer logText ref = do
     repo <- lgGet
-    toid <- getOid . unTagged <$> Git.treeRefOid tree
-    let pptrs = map Git.commitRefOid parents
+    let toid  = getOid . untag . Git.treeRefOid $ tree
+        pptrs = map Git.commitRefOid parents
     coid <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
         coid <- mallocForeignPtr
         conv <- U.open "utf-8" (Just True)
         withForeignPtr coid $ \coid' ->
             withForeignPtr toid $ \toid' ->
-            withForeignPtrs (map (getOid . unTagged) pptrs) $ \pptrs' ->
+            withForeignPtrs (map (getOid . untag) pptrs) $ \pptrs' ->
             B.useAsCString (U.fromUnicode conv logText) $ \message ->
             withRef ref $ \update_ref ->
             withSignature conv author $ \author' ->
@@ -841,8 +736,8 @@ lgLookupRef name = do
             return (Just targ)
     for targ $ \targ' ->
         return Git.Reference
-            { Git.refName   = name
-            , Git.refTarget = targ' }
+            { Git.referenceName   = name
+            , Git.referenceTarget = targ' }
 
 lgUpdateRef :: Git.MonadGit m
             => Text -> Git.RefTarget (LgRepository m) (Commit m)
@@ -854,13 +749,13 @@ lgUpdateRef name refTarg = do
         withCString (T.unpack name) $ \namePtr -> do
             r <- case refTarg of
                 Git.RefObj (Git.ByOid oid) ->
-                    withForeignPtr (getOid (unTagged oid)) $ \coidPtr ->
+                    withForeignPtr (getOid (untag oid)) $ \coidPtr ->
                         c'git_reference_create ptr repoPtr namePtr
                                                coidPtr (fromBool True)
 
                 Git.RefObj (Git.Known c) ->
                     withForeignPtr
-                        (getOid (unTagged (Git.commitOid c))) $ \coidPtr ->
+                        (getOid (untag (Git.commitOid c))) $ \coidPtr ->
                         c'git_reference_create ptr repoPtr namePtr
                                                coidPtr (fromBool True)
 
@@ -870,8 +765,8 @@ lgUpdateRef name refTarg = do
                                                     symPtr (fromBool True)
             when (r < 0) $ failure Git.ReferenceCreateFailed
 
-    return Git.Reference { Git.refName   = name
-                         , Git.refTarget = refTarg }
+    return Git.Reference { Git.referenceName   = name
+                         , Git.referenceTarget = refTarg }
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
@@ -1059,12 +954,12 @@ lgBuildPackFile dir oids = do
             Left coid ->
                 actOnOid
                     (flip (c'git_packbuilder_insert bPtr) nullPtr)
-                    (unTagged coid)
+                    (untag coid)
                     "c'git_packbuilder_insert failed"
             Right toid ->
                 actOnOid
                     (c'git_packbuilder_insert_tree bPtr)
-                    (unTagged toid)
+                    (untag toid)
                     "c'git_packbuilder_insert_tree failed"
 
         liftIO $ do
@@ -1340,6 +1235,11 @@ lgFactory = Git.RepositoryFactory
     , Git.shutdownBackend = shutdownLgBackend
     }
 
+withFilePath :: FilePath -> (CString -> IO a) -> IO a
+withFilePath fp f = case F.toText fp of
+    Left _  -> error $ "Could not translate path: " ++ show fp
+    Right p -> withCString (T.unpack p) f
+
 openLgRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
 openLgRepository opts = do
     let path = Git.repoPath opts
@@ -1352,15 +1252,12 @@ openLgRepository opts = do
   where
     openRepositoryWith path fn = do
         fptr <- alloca $ \ptr ->
-            case F.toText path of
-                Left p  -> error $ "Could not translate repository path: "
-                                ++ T.unpack p
-                Right p -> withCString (T.unpack p) $ \str -> do
-                    r <- fn ptr str
-                    when (r < 0) $
-                        error $ "Could not open repository " ++ T.unpack p
-                    ptr' <- peek ptr
-                    newForeignPtr p'git_repository_free ptr'
+            withFilePath path $ \str -> do
+                r <- fn ptr str
+                when (r < 0) $
+                    error $ "Could not open repository " ++ show path
+                ptr' <- peek ptr
+                newForeignPtr p'git_repository_free ptr'
         excTrap <- newIORef Nothing
         return Repository { repoOptions = opts
                           , repoObj     = fptr

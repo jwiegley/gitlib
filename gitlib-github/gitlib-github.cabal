@@ -20,8 +20,8 @@ Library
   default-language: Haskell98
   build-depends:
       base >= 3 && < 5
-    , gitlib               >= 1.1.0
-    , gitlib-utils         >= 1.1.0
+    , gitlib               >= 1.3.0
+    , gitlib-utils         >= 1.3.0
     , aeson                >= 0.6.1.0
     , attempt              >= 0.4.0
     , base64-bytestring    >= 1.0.0.0
@@ -58,10 +58,10 @@ Library
 --   hs-source-dirs: test
 --   build-depends:
 --       base >=3
---     , gitlib             >= 1.1.0
---     , gitlib-utils       >= 1.1.0
---     , gitlib-test        >= 1.1.0
---     , gitlib-github      >= 1.1.0
+--     , gitlib             >= 1.3.0
+--     , gitlib-utils       >= 1.3.0
+--     , gitlib-test        >= 1.3.0
+--     , gitlib-github      >= 1.3.0
 --     , HUnit              >= 1.2.5
 --     , hspec              >= 1.4.4
 --     , hspec-expectations >= 0.3

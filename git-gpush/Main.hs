@@ -95,7 +95,7 @@ pushToGitHub opts = do
             <$> sh opts (git [ "ls-remote", remoteName, "HEAD" ])
 
     withRepository lgFactory gd $ do
-        cref <- fromJust <$> resolveRef "HEAD"
+        cref <- fromJust <$> resolveReference "HEAD"
         hc   <- resolveCommitRef cref
         rcoid <- Tagged <$> parseOid (toStrict remoteHead)
         objs <- missingObjects
@@ -112,7 +112,7 @@ pushToGitHub opts = do
 
 getRemoteName :: FilePath -> Sh Text
 getRemoteName gd = do
-    mref <- liftIO $ withRepository lgFactory gd $ lookupRef "HEAD"
+    mref <- liftIO $ withRepository lgFactory gd $ lookupReference "HEAD"
     case mref of
         Nothing -> error "Could not find HEAD"
         Just (Reference _ (RefObj _)) ->

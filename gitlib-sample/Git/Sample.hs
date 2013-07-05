@@ -44,42 +44,44 @@ instance Git.IsOid Void where
     renderOid _ = undefined
 
 instance Git.MonadGit m => Git.Repository (SampleRepository m) where
-    type Oid (SampleRepository m)      = Void
-    type TreeKind (SampleRepository m) = Git.PersistentTree
-    type Tree (SampleRepository m)     = VoidP
-    data Options (SampleRepository m)  = Options
+    type Oid (SampleRepository m)         = Void
+    data Tree (SampleRepository m)        = Void
+    type TreeBuilder (SampleRepository m) = Void
+    data Options (SampleRepository m)     = Options
 
     facts = return Git.RepositoryFacts
         { Git.hasSymbolicReferences = True }
 
-    parseOid         = undefined
-    lookupRef        = undefined
-    createRef        = undefined
-    updateRef        = undefined
-    deleteRef        = undefined
-    resolveRef       = undefined
-    allRefNames      = undefined
-    lookupCommit     = undefined
-    lookupTree       = undefined
-    lookupBlob       = undefined
-    lookupTag        = undefined
-    lookupObject     = undefined
-    existsObject     = undefined
-    pushCommit       = undefined
-    traverseCommits  = undefined
-    missingObjects   = undefined
-    traverseObjects  = undefined
-    newTree          = undefined
-    cloneTree        = undefined
-    traverseEntries  = undefined
-    unsafeUpdateTree = undefined
-    writeTree        = undefined
-    hashContents     = undefined
-    createBlob       = undefined
-    createCommit     = undefined
-    createTag        = undefined
-    deleteRepository = undefined
-    remoteFetch      = undefined
+    parseOid          = undefined
+    lookupReference   = undefined
+    createReference   = undefined
+    updateReference   = undefined
+    deleteReference   = undefined
+    resolveReference  = undefined
+    allReferenceNames = undefined
+    lookupCommit      = undefined
+    lookupTree        = undefined
+    lookupBlob        = undefined
+    lookupTag         = undefined
+    lookupObject      = undefined
+    existsObject      = undefined
+    pushCommit        = undefined
+    traverseCommits   = undefined
+    missingObjects    = undefined
+    traverseObjects   = undefined
+    newTreeBuilder    = undefined
+    treeOid           = undefined
+    getTreeEntry      = undefined
+    traverseEntries   = undefined
+    writeTree         = undefined
+    hashContents      = undefined
+    createBlob        = undefined
+    createCommit      = undefined
+    createTag         = undefined
+    deleteRepository  = undefined
+    remoteFetch       = undefined
+
+    unsafeUpdateTreeBuilder = undefined
 
 -- type TreeEntry m = Git.TreeEntry (SampleRepository m)
 

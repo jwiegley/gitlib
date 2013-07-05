@@ -17,9 +17,12 @@ import qualified Data.ByteString as B
 import           Data.Conduit
 import qualified Data.Conduit.List as CList
 import           Data.Function
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Hex
+import           Data.IORef
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
@@ -61,9 +64,6 @@ instance IsOid OidTextL where
 parseOidTextL :: Monad m => Text -> m OidTextL
 parseOidTextL = return . OidTextL . TL.fromStrict
 
-treeOid :: Repository m => Tree m (TreeKind m) -> m Text
-treeOid t = renderObjOid <$> writeTree t
-
 createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
 createBlobUtf8 = createBlob . BlobString . T.encodeUtf8
 
@@ -104,8 +104,133 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
-treeBlobEntries :: Repository m
-                => Tree m (TreeKind m) -> m [(FilePath,TreeEntry m)]
+data MutableTreeBuilder m = MutableTreeBuilder
+    { mtbPendingUpdates :: IORef (HashMap Text (MutableTreeBuilder m))
+    , mtbNewBuilder     :: Maybe (Tree m) -> m (MutableTreeBuilder m)
+    , mtbWriteContents  :: m (TreeRef m)
+    , mtbLookupEntry    :: Text -> m (Maybe (TreeEntry m))
+    , mtbEntryCount     :: m Int
+    , mtbPutEntry       :: Text -> TreeEntry m -> m ()
+    , mtbDropEntry      :: Text -> m ()
+    }
+
+emptyTreeId :: Text
+emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+makeMutableTreeBuilder :: (Repository m, MonadIO m) => m (MutableTreeBuilder m)
+makeMutableTreeBuilder = do
+    ior <- liftIO (newIORef HashMap.empty)
+    return MutableTreeBuilder
+        { mtbPendingUpdates = ior
+        , mtbNewBuilder     = error "MutableTreeBuilder.mtbNewBuilder"
+        , mtbWriteContents  = error "MutableTreeBuilder.mtbWriteContents"
+        , mtbLookupEntry    = \_ -> return Nothing
+        , mtbEntryCount     = return 0
+        , mtbPutEntry       = \_ _ -> return ()
+        , mtbDropEntry      = \_ -> return ()
+        }
+
+updateMutableTreeBuilder
+    :: (Repository m, MonadIO m)
+    => MutableTreeBuilder m -> FilePath -> Bool
+    -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
+    -> m (MutableTreeBuilder m, Maybe (TreeEntry m))
+updateMutableTreeBuilder tb' path createIfNotExist f =
+    fmap fromModifyTreeResult <$> doModifyTree tb' (splitPath path)
+  where
+    -- Lookup the current name in this tree.  If it doesn't exist, and there
+    -- are more names in the path and 'createIfNotExist' is True, create a new
+    -- Tree and descend into it.  Otherwise, if it exists we'll have @Just
+    -- (TreeEntry {})@, and if not we'll have Nothing.
+    doModifyTree tb [] = do
+        tref <- writeMutatedTree tb
+        return (tb, f . Just . TreeEntry . treeRefOid $ tref)
+
+    doModifyTree tb (name:names) = do
+        upds <- liftIO $ readIORef (mtbPendingUpdates tb)
+        y <- case HashMap.lookup name upds of
+            Just x  -> return $ Left x
+            Nothing -> do
+                mentry <- mtbLookupEntry tb name
+                case mentry of
+                    Nothing
+                        | createIfNotExist && not (null names) ->
+                            Left <$> mtbNewBuilder tb Nothing
+                        | otherwise -> return $ Right Nothing
+                    Just entry -> return $ Right (Just entry)
+        go tb name names y
+
+    -- If there are no further names in the path, call the transformer
+    -- function, f.  It receives a @Maybe TreeEntry@ to indicate if there was
+    -- a previous entry at this path.  It should return a 'Left' value to
+    -- propagate out a user-defined error, or a @Maybe TreeEntry@ to indicate
+    -- whether the entry at this path should be deleted or replaced with
+    -- something new.
+    --
+    -- NOTE: There is no provision for leaving the entry unchanged!  It is
+    -- assumed to always be changed, as we have no reliable method of testing
+    -- object equality that is not O(n).
+    go _  _    [] (Left stb)               = doModifyTree stb []
+    go tb name [] (Right y)                = returnTree tb name (f y)
+    go tb _    _  (Right Nothing)          = return (tb, TreeEntryNotFound)
+    go _ _ _ (Right (Just BlobEntry {}))   = failure TreeCannotTraverseBlob
+    go _ _ _ (Right (Just CommitEntry {})) = failure TreeCannotTraverseCommit
+
+    -- If there are further names in the path, descend them now.  If
+    -- 'createIfNotExist' was False and there is no 'Tree' under the current
+    -- name, or if we encountered a 'Blob' when a 'Tree' was required, throw
+    -- an exception to avoid colliding with user-defined 'Left' values.
+    go tb name names arg = do
+        stb <- case arg of
+            Left stb' -> return stb'
+            Right (Just (TreeEntry st')) -> do
+                tree <- lookupTree st'
+                mtbNewBuilder tb (Just tree)
+            _ -> error "Impossible"
+        (st'', ze) <- doModifyTree stb names
+        case ze of
+            TreeEntryNotFound     -> return ()
+            TreeEntryPersistent _ -> return ()
+            TreeEntryDeleted      -> postUpdate tb st'' name
+            TreeEntryMutated _    -> postUpdate tb st'' name
+        return (tb, ze)
+      where
+        postUpdate tb st name =
+            liftIO $ modifyIORef (mtbPendingUpdates tb) $
+                HashMap.insert name st
+
+    returnTree tb n z = do
+        case z of
+            TreeEntryNotFound     -> return ()
+            TreeEntryPersistent _ -> return ()
+            TreeEntryDeleted      -> mtbDropEntry tb n
+            TreeEntryMutated z'   -> mtbPutEntry tb n z'
+        return (tb, z)
+
+-- | Write out a tree to its repository.  If it has already been written,
+--   nothing will happen.
+writeMutatedTree :: (Repository m, MonadIO m)
+                 => MutableTreeBuilder m -> m (TreeRef m)
+writeMutatedTree t = do
+    -- This is the Oid of every empty tree
+    emptyTreeOid <- parseObjOid emptyTreeId
+    fromMaybe (ByOid emptyTreeOid) <$> doWriteTree t
+  where
+    doWriteTree tb = do
+        upds <- liftIO $ readIORef (mtbPendingUpdates tb)
+        forM_ (HashMap.toList upds) $ \(k,v) -> do
+            mtref <- doWriteTree v
+            case mtref of
+                Nothing   -> mtbDropEntry tb k
+                Just tref -> mtbPutEntry tb k (TreeEntry (treeRefOid tref))
+        liftIO $ writeIORef (mtbPendingUpdates tb) HashMap.empty
+
+        cnt <- mtbEntryCount tb
+        if cnt == 0
+            then return Nothing
+            else Just <$> mtbWriteContents tb
+
+treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
 treeBlobEntries tree =
     mconcat <$> traverseEntries go tree
   where
@@ -129,7 +254,7 @@ copyBlob :: (Repository m, Repository (t m), MonadTrans t)
          -> HashSet Text
          -> t m (BlobOid (t m), HashSet Text)
 copyBlob blobr needed = do
-    let oid = unTagged (blobRefOid blobr)
+    let oid = untag (blobRefOid blobr)
         sha = renderOid oid
     oid2 <- parseOid (renderOid oid)
     if HashSet.member sha needed
@@ -160,25 +285,23 @@ copyTree :: (Repository m, Repository (t m), MonadTrans t)
          -> HashSet Text
          -> t m (TreeRef (t m), HashSet Text)
 copyTree tr needed = do
-    oid <- unTagged <$> lift (treeRefOid tr)
-    let sha = renderOid oid
+    let oid = untag (treeRefOid tr)
+        sha = renderOid oid
     oid2 <- parseOid (renderOid oid)
     if HashSet.member sha needed
         then do
-        tree             <- lift $ resolveTreeRef tr
-        entries          <- lift $ traverseEntries (curry return) tree
-        (needed', tree2) <- withNewTree $ foldM doCopyTreeEntry needed entries
-        toid             <- writeTree tree2
+        tree            <- lift $ resolveTreeRef tr
+        entries         <- lift $ traverseEntries (curry return) tree
+        (needed', tref) <- withNewTree $ foldM doCopyTreeEntry needed entries
 
-        let tref = ByOid toid
-            x    = HashSet.delete sha needed'
+        let x = HashSet.delete sha needed'
         return $ tref `seq` x `seq` (tref, x)
 
         else return (ByOid (Tagged oid2), needed)
   where
     doCopyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
                     => HashSet Text -> (FilePath, TreeEntry m)
-                    -> RepositoryTreeT (t m) (HashSet Text)
+                    -> TreeT (t m) (HashSet Text)
     doCopyTreeEntry needed' (_,TreeEntry {}) = return needed'
     doCopyTreeEntry needed' (fp,ent) = do
         (ent2,needed'') <- lift $ copyTreeEntry ent needed'
@@ -191,7 +314,7 @@ copyCommit :: (Repository m, Repository (t m), MonadTrans t)
            -> HashSet Text
            -> t m (CommitRef (t m), HashSet Text)
 copyCommit cr mref needed = do
-    let oid = unTagged (commitRefOid cr)
+    let oid = untag (commitRefOid cr)
         sha = renderOid oid
     commit <- lift $ resolveCommitRef cr
     oid2   <- parseOid sha
@@ -228,8 +351,8 @@ allMissingObjects objs =
             tr       <- resolveTreeRef ref
             subobjss <- flip traverseEntries tr $ \_ ent ->
                 return $ case ent of
-                    Git.BlobEntry oid _ -> [Git.BlobObj (Git.ByOid oid)]
-                    Git.TreeEntry tr'   -> [Git.TreeObj tr']
+                    BlobEntry oid _ -> [BlobObj (ByOid oid)]
+                    TreeEntry oid   -> [TreeObj (ByOid oid)]
                     _ -> []
             return (obj:concat subobjss)
         _ -> return [obj]
@@ -240,13 +363,13 @@ genericPushCommit :: (Repository m, Repository (t m),
                       MonadTrans t, MonadIO (t m))
                   => CommitName m -> Text -> t m (CommitRef (t m))
 genericPushCommit cname remoteRefName = do
-    mrref    <- lookupRef remoteRefName
+    mrref    <- lookupReference remoteRefName
     commits1 <- lift $ traverseCommits crefToSha cname
     fastForward <- case mrref of
         Just rref -> do
             mrsha <- referenceSha rref
             case mrsha of
-                Nothing -> failure (Git.PushNotFastForward $
+                Nothing -> failure (PushNotFastForward $
                                     "Could not find SHA for " <> remoteRefName)
                 Just rsha
                     | rsha `elem` commits1 -> do
@@ -254,12 +377,12 @@ genericPushCommit cname remoteRefName = do
                         return $ Just (Just (CommitObjectId (Tagged roid)))
                     | otherwise -> do
                         mapM_ (liftIO . putStrLn . T.unpack) commits1
-                        failure (Git.PushNotFastForward $
+                        failure (PushNotFastForward $
                                  "SHA " <> rsha
                                         <> " not found in remote")
         Nothing -> return (Just Nothing)
     case fastForward of
-        Nothing -> failure (Git.PushNotFastForward "unexpected")
+        Nothing -> failure (PushNotFastForward "unexpected")
         Just liftedMrref -> do
             objs <- lift $ allMissingObjects
                         =<< missingObjects liftedMrref cname
@@ -295,10 +418,10 @@ data PinnedEntry m = PinnedEntry
 
 identifyEntry :: Repository m => Commit m -> TreeEntry m -> m (PinnedEntry m)
 identifyEntry co x = do
-    oid <- case x of
-        BlobEntry oid _ -> return (unTagged oid)
-        TreeEntry ref   -> unTagged <$> treeRefOid ref
-        CommitEntry oid -> return (unTagged oid)
+    let oid = case x of
+            BlobEntry oid _ -> untag oid
+            TreeEntry oid   -> untag oid
+            CommitEntry oid -> untag oid
     return (PinnedEntry oid co x)
 
 commitEntryHistory :: Repository m => Commit m -> FilePath -> m [PinnedEntry m]
@@ -321,12 +444,13 @@ commitEntryHistory c path =
 getCommitParents :: Repository m => Commit m -> m [Commit m]
 getCommitParents = traverse resolveCommitRef . commitParents
 
-resolveRefTree :: Repository m => Text -> m (Tree m (TreeKind m))
+resolveRefTree :: Repository m => Text -> m (Maybe (Tree m))
 resolveRefTree refName = do
-    c <- resolveRef refName
+    c <- resolveReference refName
     case c of
-        Nothing -> newTree
-        Just c' -> resolveCommitRef c' >>= resolveTreeRef . commitTree
+        Nothing -> return Nothing
+        Just c' ->
+            Just <$> (resolveCommitRef c' >>= resolveTreeRef . commitTree)
 
 withNewRepository :: (Repository (t m), MonadGit (t m),
                       MonadBaseControl IO m, MonadIO m, MonadTrans t)

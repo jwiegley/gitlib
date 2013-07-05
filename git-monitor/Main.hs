@@ -13,6 +13,7 @@ module Main where
 import           Control.Concurrent (threadDelay)
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
+import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
 import           Data.Foldable (foldlM)
 import           Data.Function (fix)
@@ -106,7 +107,7 @@ doMain opts = do
     forever $ withRepository lgFactory gd $ do
         infoL $ "Saving snapshots under " ++ fileStr gd
         infoL $ "Working tree: " ++ fileStr wd
-        ref <- lookupRef "HEAD"
+        ref <- lookupReference "HEAD"
         void $ case ref of
             Just (Reference _ (RefSymbolic name)) -> do
                 infoL $ "Tracking branch " ++ T.unpack name
@@ -138,41 +139,47 @@ doMain opts = do
         -- commit.  Note that it must be a Just value at this point, see
         -- above.
         scr  <- if resume opts
-                then resolveRef sref
+                then resolveReference sref
                 else return Nothing
-        scr' <- maybe (fromJust <$> resolveRef "HEAD") return scr
+        scr' <- maybe (fromJust <$> resolveReference "HEAD") return scr
         sc   <- resolveCommitRef scr'
-        str  <- resolveTreeRef (commitTree sc)
-        toid <- writeTree str
-        ft   <- readFileTree' str wd (isNothing scr)
+        let tref = commitTree sc
+            toid = treeRefOid tref
+        tree <- resolveTreeRef tref
+        ft   <- readFileTree' tree wd (isNothing scr)
 
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
         -- time, typically using SIGINT (C-c) or even SIGKILL.
-        snapshotTree opts wd userName userEmail ref sref sc str toid ft
+        snapshotTree opts wd userName userEmail ref sref sc tref toid ft
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots
 --   any changes that have occurred in them.
 snapshotTree :: MonadGit m
-             => Options -> FilePath
-             -> Text -> Text -> Text -> Text
+             => Options
+             -> FilePath
+             -> Text
+             -> Text
+             -> Text
+             -> Text
              -> Commit (LgRepository m)
-             -> Tree (LgRepository m) MutableTree
+             -> TreeRef (LgRepository m)
              -> TreeOid (LgRepository m)
              -> Map FilePath (FileEntry (LgRepository m))
              -> LgRepository m ()
-snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
+snapshotTree opts wd name email ref sref = fix $ \loop sc tref toid ft -> do
     -- Read the current working tree's state on disk
     ft' <- readFileTree ref wd False
 
     -- Prune files which have been removed since the last interval, and find
     -- files which have been added or changed
-    Map.foldlWithKey' (\a p e -> a >> scanOldEntry str ft' p e) (return ()) ft
-    Map.foldlWithKey' (\a p e -> a >> scanNewEntry str ft p e) (return ()) ft'
+    tref' <- mutateTreeRef tref $ do
+        Map.foldlWithKey' (\a p e -> a >> scanOldEntry ft' p e) (return ()) ft
+        Map.foldlWithKey' (\a p e -> a >> scanNewEntry ft p e) (return ()) ft'
 
     -- If the snapshot tree changed, create a new commit to reflect it
-    toid' <- writeTree str
+    let toid' = treeRefOid tref'
     sc'   <- if toid /= toid'
             then do
                 now <- liftIO getZonedTime
@@ -184,7 +191,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
                     msg = "Snapshot at "
                        ++ formatTime defaultTimeLocale "%F %T %Z" now
 
-                c <- createCommit [commitRef sc] (treeRef str)
+                c <- createCommit [commitRef sc] tref'
                                   sig sig (T.pack msg) (Just sref)
                 infoL $ "Commit "
                      ++ (T.unpack . renderObjOid . commitOid $ c)
@@ -195,53 +202,51 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc str toid ft -> do
     liftIO $ threadDelay (interval opts * 1000000)
 
     -- Rinse, wash, repeat.
-    ref' <- lookupRef "HEAD"
+    ref' <- lookupReference "HEAD"
     let curRef = case ref' of
             Just (Reference _ (RefSymbolic ref'')) -> ref''
             _ -> ""
     if ref /= curRef
         then infoL $ "Branch changed to " ++ T.unpack curRef
                   ++ ", restarting"
-        else loop sc' str toid' ft'
+        else loop sc' tref' toid' ft'
 
   where
     scanOldEntry :: MonadGit m
-                 => Tree (LgRepository m) MutableTree
-                 -> Map FilePath (FileEntry (LgRepository m))
+                 => Map FilePath (FileEntry (LgRepository m))
                  -> FilePath
                  -> FileEntry (LgRepository m)
-                 -> LgRepository m ()
-    scanOldEntry str ft fp _ = case Map.lookup fp ft of
+                 -> TreeT (LgRepository m) ()
+    scanOldEntry ft fp _ = case Map.lookup fp ft of
         Nothing -> do
-            infoL $ "Removed: " ++ fileStr fp
-            void $ unsafeMutateTree str $ dropEntry fp
+            lift . infoL $ "Removed: " ++ fileStr fp
+            dropEntry fp
         _ -> return ()
 
     scanNewEntry :: MonadGit m
-                 => Tree (LgRepository m) MutableTree
-                 -> Map FilePath (FileEntry (LgRepository m))
+                 => Map FilePath (FileEntry (LgRepository m))
                  -> FilePath
                  -> FileEntry (LgRepository m)
-                 -> LgRepository m ()
-    scanNewEntry str ft fp (FileEntry mt (BlobEntry oid exe) _) =
+                 -> TreeT (LgRepository m) ()
+    scanNewEntry ft fp (FileEntry mt (BlobEntry oid exe) _) =
         case Map.lookup fp ft of
             Nothing -> do
-                infoL $ "Added to snapshot: " ++ fileStr fp
-                void $ unsafeMutateTree str $ putBlob' fp oid exe
+                lift . infoL $ "Added to snapshot: " ++ fileStr fp
+                putBlob' fp oid exe
             Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
                 | oid /= oldOid || exe /= oldExe -> do
-                    infoL $ "Changed: " ++ fileStr fp
-                    void $ unsafeMutateTree str $ putBlob' fp oid exe
+                    lift . infoL $ "Changed: " ++ fileStr fp
+                    putBlob' fp oid exe
                 | mt /= oldMt || oid /= fileOid -> do
                     path <- fileStr <$>
                             liftIO (canonicalizePath (wd </> fp))
-                    infoL $ "Changed: " ++ fileStr fp
+                    lift . infoL $ "Changed: " ++ fileStr fp
                     contents <- liftIO $ B.readFile path
-                    newOid   <- createBlob (BlobString contents)
-                    void $ unsafeMutateTree str $ putBlob' fp newOid exe
+                    newOid   <- lift $ createBlob (BlobString contents)
+                    putBlob' fp newOid exe
                 | otherwise -> return ()
             _ -> return ()
-    scanNewEntry _str _ft _fp (FileEntry _mt _ _foid) = return ()
+    scanNewEntry _ft _fp (FileEntry _mt _ _foid) = return ()
 
 data FileEntry m = FileEntry
     { fileModTime   :: UTCTime
@@ -257,7 +262,7 @@ readFileTree :: MonadGit m
              -> Bool
              -> LgRepository m (FileTree (LgRepository m))
 readFileTree ref wdir getHash = do
-    h <- resolveRef ref
+    h <- resolveReference ref
     case h of
         Nothing -> pure Map.empty
         Just h' -> do
@@ -265,7 +270,7 @@ readFileTree ref wdir getHash = do
             readFileTree' tr wdir getHash
 
 readFileTree' :: MonadGit m
-              => Tree (LgRepository m) MutableTree -> FilePath -> Bool
+              => Tree (LgRepository m) -> FilePath -> Bool
               -> LgRepository m (FileTree (LgRepository m))
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
