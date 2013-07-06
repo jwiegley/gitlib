@@ -1,5 +1,5 @@
 Name:                gitlib-cross
-Version:             1.1.0
+Version:             1.3.1
 Synopsis:            Run tests between repositories
 License-file:        LICENSE
 License:             MIT
@@ -33,10 +33,10 @@ Test-suite smoke
     Hs-source-dirs: test
     Build-depends: 
           base >=3
-        , gitlib             >= 1.3.0
-        , gitlib-test        >= 1.3.0
-        , gitlib-libgit2     >= 1.3.0
-        , gitlib-cmdline     >= 1.3.0
+        , gitlib             >= 1.3.1
+        , gitlib-test        >= 1.3.1
+        , gitlib-libgit2     >= 1.3.1
+        , gitlib-cmdline     >= 1.3.1
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3

@@ -1,5 +1,4 @@
 ./gitlib
-./gitlib-utils
 ./gitlib-sample
 ./gitlib-test
 ./gitlib-libgit2

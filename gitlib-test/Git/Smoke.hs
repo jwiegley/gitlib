@@ -19,7 +19,6 @@ import Data.Tagged
 import Data.Time
 import Data.Time.Clock.POSIX
 import Git
-import Git.Utils
 import Prelude hiding (FilePath, putStr)
 import Test.HUnit
 import Test.Hspec (Spec, describe, it)
