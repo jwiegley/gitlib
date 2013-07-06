@@ -32,7 +32,6 @@ import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git hiding (Options)
 import           Git.Libgit2 (LgRepository, lgFactory, withLibGitDo)
-import           Git.Utils (treeBlobEntries)
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
 import           Shelly (toTextIgnore, fromText, silently, shelly, run)

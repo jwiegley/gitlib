@@ -46,7 +46,6 @@ instance Git.IsOid Void where
 instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     type Oid (SampleRepository m)         = Void
     data Tree (SampleRepository m)        = Void
-    type TreeBuilder (SampleRepository m) = Void
     data Options (SampleRepository m)     = Options
 
     facts = return Git.RepositoryFacts
@@ -73,15 +72,12 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     treeOid           = undefined
     getTreeEntry      = undefined
     traverseEntries   = undefined
-    writeTree         = undefined
     hashContents      = undefined
     createBlob        = undefined
     createCommit      = undefined
     createTag         = undefined
     deleteRepository  = undefined
     remoteFetch       = undefined
-
-    unsafeUpdateTreeBuilder = undefined
 
 -- type TreeEntry m = Git.TreeEntry (SampleRepository m)
 

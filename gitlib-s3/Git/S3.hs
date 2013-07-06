@@ -86,6 +86,7 @@ import           Foreign.StablePtr
 import           Foreign.Storable
 import           GHC.Generics
 import qualified Git
+import           Git (SHA(..), shaToText)
 import           Git.Libgit2
 import           Git.Libgit2.Backend
 import           Git.Libgit2.Internal

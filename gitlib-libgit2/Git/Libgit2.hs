@@ -41,11 +41,8 @@ module Git.Libgit2
        , lgLoadPackFileInMemory
        , lgReadFromPack
        , lgWithPackFile
-       , SHA(..)
        , oidToSha
        , shaToOid
-       , shaToText
-       , textToSha
        , openLgRepository
        , runLgRepository
        , strToOid
@@ -60,15 +57,11 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Loops
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
-import qualified Data.Binary as Bin
 import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Unsafe as BU
-import           Data.Hashable
 import           Data.IORef
 import           Data.List as L
 import           Data.Maybe
@@ -96,7 +89,6 @@ import           Foreign.Storable
 import qualified Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
-import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import           System.Directory (removeFile)
 import           System.IO (openBinaryTempFile, hClose)
@@ -158,8 +150,6 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     data Tree (LgRepository m)        = LgTree
         { lgTreePtr :: ForeignPtr C'git_tree
         }
-    type TreeBuilder (LgRepository m) = TreeBuilder m
-
     data Options (LgRepository m) = Options
 
     facts = return Git.RepositoryFacts
@@ -184,15 +174,12 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     missingObjects    = lgMissingObjects
     traverseObjects   = error "Not defined: LgRepository.traverseObjects"
     newTreeBuilder    = lgNewTreeBuilder
-    writeTree         = lift . Git.writeMutatedTree
     getTreeEntry      = lgTreeEntry
     treeOid           = lgTreeOid
     traverseEntries   = lgTraverseEntries
     hashContents      = lgHashContents
     createBlob        = lgWrap . lgCreateBlob
     createTag         = undefined
-
-    unsafeUpdateTreeBuilder = Git.updateMutableTreeBuilder
 
     createCommit p t a c l r = lgWrap $ lgCreateCommit p t a c l r
 
@@ -310,18 +297,19 @@ lgTraverseEntries f tree = do
         return 0
 
 lgMakeTree :: Git.MonadGit m
-           => ForeignPtr C'git_treebuilder
-           -> LgRepository m (TreeBuilder m)
-lgMakeTree builder = do
-    tb <- Git.makeMutableTreeBuilder
-    return tb
-        { Git.mtbNewBuilder    = lgNewTreeBuilder
-        , Git.mtbWriteContents = lgWriteBuilder builder
-        , Git.mtbLookupEntry   = lgLookupBuilderEntry builder
-        , Git.mtbEntryCount    = lgBuilderEntryCount builder
-        , Git.mtbPutEntry      = lgPutEntry builder
-        , Git.mtbDropEntry     = lgDropEntry builder
-        }
+           => ForeignPtr C'git_treebuilder -> TreeBuilder m
+lgMakeTree builder = mempty <> Git.TreeBuilder
+    { Git.mtbBaseTreeRef    = Nothing
+    , Git.mtbPendingUpdates = mempty
+    , Git.mtbNewBuilder     = lgNewTreeBuilder
+    , Git.mtbWriteContents  = \tb -> (,) <$> pure tb <*> lgWriteBuilder builder
+    , Git.mtbLookupEntry    = lgLookupBuilderEntry builder
+    , Git.mtbEntryCount     = lgBuilderEntryCount builder
+    , Git.mtbPutEntry       = \tb name ent ->
+        lgPutEntry builder name ent >> return tb
+    , Git.mtbDropEntry      = \tb name ->
+        lgDropEntry builder name >> return tb
+    }
 
 -- | Create a new, empty tree.
 --
@@ -330,17 +318,24 @@ lgMakeTree builder = do
 lgNewTreeBuilder :: Git.MonadGit m
                  => Maybe (Tree m) -> LgRepository m (TreeBuilder m)
 lgNewTreeBuilder mtree = do
-    (r,fptr) <- liftIO $ alloca $ \pptr -> do
+    mfptr <- liftIO $ alloca $ \pptr -> do
         r <- case mtree of
             Nothing -> c'git_treebuilder_create pptr nullPtr
             Just tree -> withForeignPtr (lgTreePtr tree) $ \treePtr ->
                 c'git_treebuilder_create pptr treePtr
-        builder <- peek pptr
-        fptr <- FC.newForeignPtr builder (c'git_treebuilder_free builder)
-        return (r,fptr)
-    if r < 0
-        then failure (Git.TreeCreateFailed "Failed to create new tree builder")
-        else lgMakeTree fptr
+        if r < 0
+            then return Nothing
+            else do
+                builder <- peek pptr
+                fptr <- FC.newForeignPtr builder
+                            (c'git_treebuilder_free builder)
+                return $ Just fptr
+    case mfptr of
+        Nothing ->
+            failure (Git.TreeCreateFailed "Failed to create new tree builder")
+        Just fptr ->
+            return (lgMakeTree fptr)
+                { Git.mtbBaseTreeRef = Git.treeRef <$> mtree }
 
 lgPutEntry :: Git.MonadGit m
            => ForeignPtr C'git_treebuilder -> Text -> TreeEntry m
@@ -395,7 +390,8 @@ lgTreeEntryCount t = do
         <$> liftIO (withForeignPtr (lgTreePtr t) c'git_tree_entrycount)
 
 lgWriteBuilder :: Git.MonadGit m
-               => ForeignPtr C'git_treebuilder -> LgRepository m (TreeRef m)
+               => ForeignPtr C'git_treebuilder
+               -> LgRepository m (TreeRef m)
 lgWriteBuilder tb = do
     repo <- lgGet
     (r3,coid) <- liftIO $ do
@@ -413,37 +409,36 @@ lgWriteBuilder tb = do
         failure (Git.TreeBuilderWriteFailed $ T.pack $
                  "c'git_treebuilder_write failed with " ++ show r3
                  ++ ": " ++ errStr)
-    return (Git.ByOid (Tagged (mkOid coid)))
+    return $ Git.ByOid (Tagged (mkOid coid))
 
--- lgCloneTree :: Git.MonadGit m => Tree m -> LgRepository m (Tree m)
--- lgCloneTree (TreeBuilder pending contents) =
---     TreeBuilder <$> liftIO (newIORef =<< readIORef pending)
---                 <*> liftIO (copyBuilder contents)
---   where
---     copyBuilder fptr = withForeignPtr fptr $ \builder -> alloca $ \pptr -> do
---         r <- c'git_treebuilder_create pptr nullPtr
---         when (r < 0) $
---             failure (Git.BackendError "Could not create new treebuilder")
---         builder' <- peek pptr
---         bracket
---             (mk'git_treebuilder_filter_cb (callback builder'))
---             freeHaskellFunPtr
---             (flip (c'git_treebuilder_filter builder) nullPtr)
---         FC.newForeignPtr builder'(c'git_treebuilder_free builder')
-
---     callback builder te _ = do
---         cname <- c'git_tree_entry_name te
---         coid  <- c'git_tree_entry_id te
---         fmode <- c'git_tree_entry_filemode te
---         r <- c'git_treebuilder_insert
---             nullPtr
---             builder
---             cname
---             coid
---             fmode
---         when (r < 0) $
---             failure (Git.BackendError "Could not insert entry in treebuilder")
---         return 0
+lgCloneBuilder :: Git.MonadGit m
+               => ForeignPtr C'git_treebuilder
+               -> LgRepository m (ForeignPtr C'git_treebuilder)
+lgCloneBuilder fptr =
+    liftIO $ withForeignPtr fptr $ \builder -> alloca $ \pptr -> do
+        r <- c'git_treebuilder_create pptr nullPtr
+        when (r < 0) $
+            failure (Git.BackendError "Could not create new treebuilder")
+        builder' <- peek pptr
+        bracket
+            (mk'git_treebuilder_filter_cb (callback builder'))
+            freeHaskellFunPtr
+            (flip (c'git_treebuilder_filter builder) nullPtr)
+        FC.newForeignPtr builder'(c'git_treebuilder_free builder')
+  where
+    callback builder te _ = do
+        cname <- c'git_tree_entry_name te
+        coid  <- c'git_tree_entry_id te
+        fmode <- c'git_tree_entry_filemode te
+        r <- c'git_treebuilder_insert
+            nullPtr
+            builder
+            cname
+            coid
+            fmode
+        when (r < 0) $
+            failure (Git.BackendError "Could not insert entry in treebuilder")
+        return 0
 
 lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
              -> LgRepository m (Tree m)
@@ -1015,8 +1010,8 @@ lgBuildPackIndex dir bytes = do
 
         debug "Discovering the hash used to identify the pack file"
         sha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
-        debug $ "The hash used is: " ++ show (shaToText sha)
-        return (shaToText sha)
+        debug $ "The hash used is: " ++ show (Git.shaToText sha)
+        return (Git.shaToText sha)
 
 strToOid :: String -> IO (ForeignPtr C'git_oid)
 strToOid oidStr = do
@@ -1027,37 +1022,17 @@ strToOid oidStr = do
         when (r < 0) $ throwIO Git.OidCopyFailed
         return ptr
 
-newtype SHA = SHA B.ByteString deriving (Eq, Ord, Read)
-
-instance Show SHA where
-    show = T.unpack . shaToText
-
-instance Bin.Binary SHA where
-    put (SHA t) = Bin.put t
-    get = SHA <$> Bin.get
-
-instance Hashable SHA where
-    hashWithSalt salt (SHA bs) = hashWithSalt salt bs
-
-oidToSha :: Ptr C'git_oid -> IO SHA
+oidToSha :: Ptr C'git_oid -> IO Git.SHA
 oidToSha oidPtr =
-    SHA <$> B.packCStringLen (castPtr oidPtr, sizeOf (undefined :: C'git_oid))
+    Git.SHA <$> B.packCStringLen
+        (castPtr oidPtr, sizeOf (undefined :: C'git_oid))
 
-shaToOid :: SHA -> IO (ForeignPtr C'git_oid)
-shaToOid (SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
+shaToOid :: Git.SHA -> IO (ForeignPtr C'git_oid)
+shaToOid (Git.SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
     ptr <- mallocForeignPtr
     withForeignPtr ptr $ \ptr' -> do
         c'git_oid_fromraw ptr' (castPtr bytes)
         return ptr
-
-shaToText :: SHA -> Text
-shaToText (SHA bs) = T.decodeUtf8 (B16.encode bs)
-
-textToSha :: Monad m => Text -> m SHA
-textToSha t =
-    case B16.decode $ T.encodeUtf8 t of
-        (bs, "") -> return (SHA bs)
-        _ -> fail "Invalid base16 encoding"
 
 lgWritePackFile :: Git.MonadGit m => FilePath -> LgRepository m ()
 lgWritePackFile packFile = do
@@ -1161,7 +1136,7 @@ lgWithPackFile idxPath f = alloca $ \odbPtrPtr ->
         debug "Calling function using in-memory odb"
         f odbPtr
 
-lgReadFromPack :: FilePath -> SHA -> Bool
+lgReadFromPack :: FilePath -> Git.SHA -> Bool
                -> IO (Maybe (C'git_otype, CSize, B.ByteString))
 lgReadFromPack idxPath sha metadataOnly =
     alloca $ \objectPtrPtr ->

@@ -26,7 +26,6 @@ import           Data.Text as T (pack, unpack)
 import           Filesystem.Path.CurrentOS (FilePath, toText)
 import           Foreign.ForeignPtr
 import qualified Git
-import qualified Git.Utils as Git
 import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
@@ -104,7 +103,7 @@ type CommitName m  = Git.CommitName (LgRepository m)
 type Reference m   = Git.Reference (LgRepository m) (Commit m)
 type Object m      = Git.Object (LgRepository m)
 
-type TreeBuilder m = Git.MutableTreeBuilder (LgRepository m)
+type TreeBuilder m = Git.TreeBuilder (LgRepository m)
 type Options m     = Git.Options (LgRepository m)
 
 lgGet :: Monad m => LgRepository m Repository
