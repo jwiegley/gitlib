@@ -894,11 +894,15 @@ queryTreeBuilder builder path kind f = do
                 bm' <- mtbDropEntry tb tb n
                 let tb'   = fromBuilderMod bm'
                     upds' = mtbPendingUpdates tb'
-                return $
-                    if HashMap.member n upds'
-                     then ModifiedBuilder tb'
-                         { mtbPendingUpdates = HashMap.delete n upds' }
-                     else bm'
+                return $ case bm' of
+                    ModifiedBuilder _ ->
+                        ModifiedBuilder tb'
+                            { mtbPendingUpdates = HashMap.delete n upds' }
+                    BuilderUnchanged _ ->
+                        if HashMap.member n upds'
+                        then ModifiedBuilder tb'
+                            { mtbPendingUpdates = HashMap.delete n upds' }
+                        else bm'
             TreeEntryMutated z'   -> mtbPutEntry tb tb n z'
         let bm'' = bm <> bm'
         return $ bm'' `seq` (bm'', z)
