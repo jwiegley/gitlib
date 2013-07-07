@@ -47,7 +47,7 @@ Library
         , containers           >= 0.4.2.1
         , data-default         >= 0.5.0
         , failure              >= 0.2.0.1
-        , hashable             >= 1.2.0.5
+        , hashable             >= 1.1.2.5
         , lifted-base          >= 0.2
         , system-fileio        >= 0.3.11
         , system-filepath      >= 0.4.7
