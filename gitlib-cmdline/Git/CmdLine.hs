@@ -71,24 +71,25 @@ fromStrict = id
 fromStrict = TL.fromStrict
 #endif
 
-type BlobOid m     = Git.BlobOid (CmdLineRepository m)
-type TreeOid m     = Git.TreeOid (CmdLineRepository m)
-type CommitOid m   = Git.CommitOid (CmdLineRepository m)
-type TagOid m      = Git.TagOid (CmdLineRepository m)
+type BlobOid m         = Git.BlobOid (CmdLineRepository m)
+type TreeOid m         = Git.TreeOid (CmdLineRepository m)
+type CommitOid m       = Git.CommitOid (CmdLineRepository m)
+type TagOid m          = Git.TagOid (CmdLineRepository m)
 
-type Blob m        = Git.Blob (CmdLineRepository m)
-type Tree m        = Git.Tree (CmdLineRepository m)
-type TreeEntry m   = Git.TreeEntry (CmdLineRepository m)
-type Commit m      = Git.Commit (CmdLineRepository m)
-type Tag m         = Git.Tag (CmdLineRepository m)
+type Blob m            = Git.Blob (CmdLineRepository m)
+type Tree m            = Git.Tree (CmdLineRepository m)
+type TreeEntry m       = Git.TreeEntry (CmdLineRepository m)
+type Commit m          = Git.Commit (CmdLineRepository m)
+type Tag m             = Git.Tag (CmdLineRepository m)
 
-type TreeRef m     = Git.TreeRef (CmdLineRepository m)
-type CommitRef m   = Git.CommitRef (CmdLineRepository m)
-type CommitName m  = Git.CommitName (CmdLineRepository m)
+type TreeRef m         = Git.TreeRef (CmdLineRepository m)
+type CommitRef m       = Git.CommitRef (CmdLineRepository m)
+type CommitName m      = Git.CommitName (CmdLineRepository m)
 
-type Reference m   = Git.Reference (CmdLineRepository m) (Commit m)
-type Object m      = Git.Object (CmdLineRepository m)
-type TreeBuilder m = Git.TreeBuilder (CmdLineRepository m)
+type Reference m       = Git.Reference (CmdLineRepository m) (Commit m)
+type Object m          = Git.Object (CmdLineRepository m)
+type TreeBuilder m     = Git.TreeBuilder (CmdLineRepository m)
+type ModifiedBuilder m = Git.ModifiedBuilder (CmdLineRepository m)
 
 instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     type Oid (CmdLineRepository m) = Git.SHA
@@ -415,7 +416,8 @@ cliMakeTree entMap = mempty <> Git.TreeBuilder
     { Git.mtbBaseTreeRef    = Nothing
     , Git.mtbPendingUpdates = mempty
     , Git.mtbNewBuilder    = cliNewTreeBuilder
-    , Git.mtbWriteContents = \tb -> (,) <$> pure tb <*> cliWriteBuilder entMap
+    , Git.mtbWriteContents = \tb -> (,) <$> pure (Git.BuilderUnchanged tb)
+                                        <*> cliWriteBuilder entMap
     , Git.mtbLookupEntry   = cliLookupBuilderEntry entMap
     , Git.mtbEntryCount    = cliBuilderEntryCount entMap
     , Git.mtbPutEntry      = flip cliPutEntry entMap
@@ -461,15 +463,17 @@ cliParseLsTree line =
 
 cliPutEntry :: Git.MonadGit m
             => TreeBuilder m -> EntryHashMap m -> Text -> TreeEntry m
-            -> CmdLineRepository m (TreeBuilder m)
+            -> CmdLineRepository m (ModifiedBuilder m)
 cliPutEntry tb entMap key ent =
-    return $ tb <> cliMakeTree (HashMap.insert key ent entMap)
+    return . Git.ModifiedBuilder $
+        tb <> cliMakeTree (HashMap.insert key ent entMap)
 
 cliDropEntry :: Git.MonadGit m
              => TreeBuilder m -> EntryHashMap m -> Text
-             -> CmdLineRepository m (TreeBuilder m)
+             -> CmdLineRepository m (ModifiedBuilder m)
 cliDropEntry tb entMap key =
-    return $ tb <> cliMakeTree (HashMap.delete key entMap)
+    return . Git.ModifiedBuilder $
+        tb <> cliMakeTree (HashMap.delete key entMap)
 
 cliLookupBuilderEntry :: Git.MonadGit m
                       => EntryHashMap m -> Text
@@ -814,7 +818,8 @@ openCliRepository opts = do
     case F.toText path of
         Left e -> failure (Git.BackendError e)
         Right p -> do
-            when (not exists && Git.repoAutoCreate opts) $
+            when (not exists && Git.repoAutoCreate opts) $ do
+                liftIO $ F.createTree (fromText (fromStrict p))
                 shellyNoDir $ silently $
                     git_ $ ["--git-dir", fromStrict p]
                         <> ["--bare" | Git.repoIsBare opts]

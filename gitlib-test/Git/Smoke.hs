@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -9,20 +10,28 @@
 
 module Git.Smoke where
 
-import Control.Applicative
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Control
-import Data.List (sort)
-import Data.Tagged
-import Data.Time
-import Data.Time.Clock.POSIX
-import Git
-import Prelude hiding (FilePath, putStr)
-import Test.HUnit
-import Test.Hspec (Spec, describe, it)
-import Test.Hspec.HUnit ()
+import           Control.Applicative
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
+import           Data.List (sort)
+import           Data.Monoid
+import           Data.Tagged
+import qualified Data.Text as T (Text, pack)
+import qualified Data.Text.Encoding as T (decodeUtf8)
+import           Data.Time
+import           Data.Time.Clock.POSIX
+import           Data.Typeable
+import           Filesystem.Path.CurrentOS (FilePath, fromText, toText,
+                                            filename)
+import           Git
+import           Prelude hiding (FilePath, putStr)
+import           Test.HUnit
+import           Test.Hspec (Spec, Example, describe, it)
+import           Test.Hspec.Expectations
+import           Test.Hspec.HUnit ()
 
 sampleCommit :: Repository m => TreeRef m -> Signature -> m (Commit m)
 sampleCommit tr sig =
@@ -247,60 +256,186 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
                               , "Five/More/Four"
                               , "More/Four"
                               ]
+
+  treeit "adds a file" pr
+      [ Bl "one"
+      ] $ do
+          putBlob "one" =<< lift (createBlobUtf8 "one\n")
 
-  -- it "push commit between repositories" $ do
-  --     let masterRef = "refs/heads/master"
-  --         sig = Signature { signatureName   = "First Name"
-  --                         , signatureEmail = "user1@email.org"
-  --                         , signatureWhen  = fakeTime 1348981883 }
+  treeit "adds two files" pr
+      [ Bl "one"
+      , Bl "two"
+      ] $ do
+          putBlob "one" =<< lift (createBlobUtf8 "one\n")
+          putBlob "two" =<< lift (createBlobUtf8 "two\n")
 
-  --     withNewRepository pr "pushSource.git" $ do
-  --         tree <- newTree
+  treeit "adds three files" pr
+      [ Bl "one"
+      , Bl "three"
+      , Bl "two"
+      ] $ do
+          putBlob "one" =<< lift (createBlobUtf8 "one\n")
+          putBlob "two" =<< lift (createBlobUtf8 "two\n")
+          putBlob "three" =<< lift (createBlobUtf8 "three\n")
 
-  --         putBlob tree "foo/README.md"
-  --             =<< createBlobUtf8 "one\n"
-  --         c <- createCommit [] (treeRef tree) sig sig
-  --                  "Initial commit.\n" Nothing
+  treeit "adds a file at a subpath" pr
+      [ Tr "a"
+      , Bl "a/one"
+      ] $ do
+          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
 
-  --         putBlob tree "bar/foo.txt"
-  --             =<< createBlobUtf8 "This is some content."
-  --         c <- createCommit [commitRef c] (treeRef tree) sig sig
-  --                  "This is another log message.\n" (Just masterRef)
+  treeit "adds a file at a deep subpath" pr
+      [ Tr "a"
+      , Tr "a/b"
+      , Tr "a/b/c"
+      , Tr "a/b/c/d"
+      , Tr "a/b/c/d/e"
+      , Bl "a/b/c/d/e/one"
+      ] $ do
+          putBlob "a/b/c/d/e/one" =<< lift (createBlobUtf8 "one\n")
 
-  --         putBlob tree "foo/bar/baz.txt"
-  --             =<< createBlobUtf8 "This is some content."
-  --         c <- createCommit [commitRef c] (treeRef tree) sig sig
-  --                  "This is another log message.\n" (Just masterRef)
+  treeit "adds files at multiple depths" pr
+      [ Tr "a"
+      , Tr "a/b"
+      , Bl "a/one"
+      , Tr "a/b/c"
+      , Bl "a/b/two"
+      , Tr "a/b/c/d"
+      , Bl "a/b/c/three"
+      , Tr "a/b/c/d/e"
+      , Bl "a/b/c/d/four"
+      , Bl "a/b/c/d/e/five"
+      ] $ do
+          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
+          putBlob "a/b/two" =<< lift (createBlobUtf8 "two\n")
+          putBlob "a/b/c/three" =<< lift (createBlobUtf8 "three\n")
+          putBlob "a/b/c/d/four" =<< lift (createBlobUtf8 "four\n")
+          putBlob "a/b/c/d/e/five" =<< lift (createBlobUtf8 "five\n")
 
-  --         putBlob tree "bar/bar.txt"
-  --             =<< createBlobUtf8 "This is some content."
-  --         c <- createCommit [commitRef c] (treeRef tree) sig sig
-  --                  "This is another log message.\n" (Just masterRef)
+  treeit "adds files at mixed depths" pr
+      [ Tr "a"
+      , Tr "b"
+      , Tr "d"
+      , Tr "g"
+      , Tr "k"
+      , Bl "a/one"
+      , Tr "b/c"
+      , Bl "b/c/two"
+      , Tr "d/e"
+      , Tr "d/e/f"
+      , Bl "d/e/f/three"
+      , Tr "g/h"
+      , Tr "g/h/i"
+      , Tr "g/h/i/j"
+      , Bl "g/h/i/j/four"
+      , Tr "k/l"
+      , Tr "k/l/m"
+      , Tr "k/l/m/n"
+      , Tr "k/l/m/n/o"
+      , Bl "k/l/m/n/o/five"
+      ] $ do
+          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
+          putBlob "b/c/two" =<< lift (createBlobUtf8 "two\n")
+          putBlob "d/e/f/three" =<< lift (createBlobUtf8 "three\n")
+          putBlob "g/h/i/j/four" =<< lift (createBlobUtf8 "four\n")
+          putBlob "k/l/m/n/o/five" =<< lift (createBlobUtf8 "five\n")
 
-  --         putBlob tree "foo/hello.txt"
-  --             =<< createBlobUtf8 "This is some content."
-  --         c <- createCommit [commitRef c] (treeRef tree) sig sig
-  --                  "This is another log message.\n" (Just masterRef)
+  treeit "adds and drops a file" pr
+      [] $ do
+          putBlob "one" =<< lift (createBlobUtf8 "one\n")
+          dropEntry "one"
 
-  --         Just cref <- resolveRef masterRef
-  --         let coid = renderObjOid (commitRefOid cref)
+  treeit "adds two files and drops one" pr
+      [ Bl "one"
+      ] $ do
+          putBlob "one" =<< lift (createBlobUtf8 "one\n")
+          putBlob "two" =<< lift (createBlobUtf8 "two\n")
+          dropEntry "two"
 
-  --         withNewRepository pr2 "pushDest.git" $ do
-  --             pushCommit (CommitRefName masterRef) Nothing masterRef
-  --             mref2 <- lookupRef masterRef
-  --             Just cref <- referenceToRef Nothing mref2
-  --             lift . lift $
-  --                 coid @?= renderObjOid (commitRefOid cref)
-
-  --         withNewRepository pr2 "pushDest.git" $ do
-  --             pushCommit (CommitRefName masterRef)
-  --                 (Just "file://pushDest.git") masterRef
-  --             mref2 <- lookupRef masterRef
-  --             Just cref <- referenceToRef Nothing mref2
-  --             lift . lift $
-  --                 coid @?= renderObjOid (commitRefOid cref)
+  treeit "adds and drops files at mixed depths" pr
+      [ Tr "a"
+      , Tr "b"
+      , Tr "g"
+      , Bl "a/one"
+      , Tr "b/c"
+      , Bl "b/c/two"
+      , Tr "g/h"
+      , Tr "g/h/i"
+      , Tr "g/h/i/j"
+      , Bl "g/h/i/j/four"
+      ] $ do
+          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
+          putBlob "b/c/two" =<< lift (createBlobUtf8 "two\n")
+          putBlob "b/c/three" =<< lift (createBlobUtf8 "three\n")
+          putBlob "d/e/f/three" =<< lift (createBlobUtf8 "three\n")
+          putBlob "g/h/i/j/four" =<< lift (createBlobUtf8 "four\n")
+          putBlob "k/l/m/n/o/five" =<< lift (createBlobUtf8 "five\n")
+          dropEntry "b/c/three"
+          dropEntry "d/e/f/three"
+          dropEntry "k/l"
 
   where
     fakeTime secs = utcToZonedTime utc (posixSecondsToUTCTime secs)
+
+data Kind = Bl FilePath | Tr FilePath deriving (Eq, Show)
+
+isBlobKind :: Kind -> Bool
+isBlobKind (Bl _) = True
+isBlobKind _      = False
+
+kindPath :: Kind -> FilePath
+kindPath (Bl path) = path
+kindPath (Tr path) = path
+
+data TreeitException = TreeitException T.Text deriving (Eq, Show, Typeable)
+
+instance Exception TreeitException
+
+mkBlob :: Repository m => FilePath -> TreeT m ()
+mkBlob path =
+    putBlob path =<< lift (createBlobUtf8 (baseFilename path <> "\n"))
+
+baseFilename :: FilePath -> T.Text
+baseFilename = either id id . toText . filename
+
+doTreeit :: (MonadBaseControl IO m, MonadIO m,
+             MonadTrans t, MonadGit (t m), Repository (t m))
+       => String -> RepositoryFactory t m c -> [Kind] -> TreeT (t m) a -> m ()
+doTreeit label pr kinds action = withNewRepository pr fullPath $ do
+    tref <- createTree $ action
+    tree <- resolveTreeRef tref
+    forM_ kinds $ \kind -> do
+        let path = kindPath kind
+        entry <- getTreeEntry tree path
+        case entry of
+            Just (BlobEntry boid _) -> do
+                liftIO $ isBlobKind kind @?= True
+                bs <- lookupBlob boid >>= blobToByteString
+                liftIO $ T.decodeUtf8 bs @?= baseFilename path <> "\n"
+            Just (TreeEntry _) ->
+                liftIO $ isBlobKind kind @?= False
+            Nothing ->
+                liftIO $ throwIO (TreeitException "Expected entry not found")
+            _ -> do
+                liftIO $ isBlobKind kind @?= False
+                liftIO $ throwIO (TreeitException "Entry is of unexpected kind")
+    kinds' <- traverseEntries (const . return) tree
+    liftIO $ sort kinds' @?= map kindPath kinds
+  where
+    fullPath  = fromText (T.pack (normalize label)) <> ".git"
+    normalize = map (\x -> if x == ' ' then '-' else x)
+
+treeit :: (Example (m ()), MonadTrans t, MonadGit m,
+           MonadGit (t m), Repository (t m))
+       => String -> RepositoryFactory t m c -> [Kind] -> TreeT (t m) a -> Spec
+treeit label pr kinds action = it label $ doTreeit label pr kinds action
+
+treeitFail :: (MonadTrans t,
+               MonadGit (t IO), Repository (t IO))
+           => String -> RepositoryFactory t IO c -> [Kind] -> TreeT (t IO) a
+           -> Spec
+treeitFail label pr kinds action =
+    it label $ doTreeit label pr kinds action
+        `shouldThrow` (\(_ :: TreeitException) -> True)
 
 -- Main.hs ends here

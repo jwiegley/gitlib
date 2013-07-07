@@ -108,19 +108,26 @@ instance Git.IsOid OidPtr where
 mkOid :: ForeignPtr C'git_oid -> OidPtr
 mkOid = OidPtr
 
+lgParseOidIO :: Text -> Int -> IO (Maybe Oid)
+lgParseOidIO str len = do
+    oid <- liftIO $ mallocForeignPtr
+    r <- liftIO $ withCString (T.unpack str) $ \cstr ->
+        withForeignPtr oid $ \ptr ->
+            if len == 40
+                then c'git_oid_fromstr ptr cstr
+                else c'git_oid_fromstrn ptr cstr (fromIntegral len)
+    return $ if r < 0
+             then Nothing
+             else Just (mkOid oid)
+
 lgParseOid :: Git.MonadGit m => Text -> LgRepository m Oid
 lgParseOid str
   | len > 40 = failure (Git.OidParseFailed str)
   | otherwise = do
-      oid <- liftIO $ mallocForeignPtr
-      r <- liftIO $ withCString (T.unpack str) $ \cstr ->
-          withForeignPtr oid $ \ptr ->
-              if len == 40
-                  then c'git_oid_fromstr ptr cstr
-                  else c'git_oid_fromstrn ptr cstr (fromIntegral len)
-      if r < 0
-          then failure (Git.OidParseFailed str)
-          else return (mkOid oid)
+      moid <- liftIO $ lgParseOidIO str len
+      case moid of
+          Nothing  -> failure (Git.OidParseFailed str)
+          Just oid -> return oid
   where
     len = T.length str
 
@@ -148,7 +155,7 @@ instance Eq OidPtr where
 instance Git.MonadGit m => Git.Repository (LgRepository m) where
     type Oid (LgRepository m)         = OidPtr
     data Tree (LgRepository m)        = LgTree
-        { lgTreePtr :: ForeignPtr C'git_tree
+        { lgTreePtr :: Maybe (ForeignPtr C'git_tree)
         }
     data Options (LgRepository m) = Options
 
@@ -256,17 +263,21 @@ type TreeEntry m = Git.TreeEntry (LgRepository m)
 
 lgTreeEntry :: Git.MonadGit m => Tree m -> FilePath
             -> LgRepository m (Maybe (TreeEntry m))
-lgTreeEntry tree fp = liftIO $ alloca $ \entryPtr ->
+lgTreeEntry (LgTree Nothing) _ = return Nothing
+lgTreeEntry (LgTree (Just tree)) fp = liftIO $ alloca $ \entryPtr ->
     withFilePath fp $ \pathStr ->
-        withForeignPtr (lgTreePtr tree) $ \treePtr -> do
+        withForeignPtr tree $ \treePtr -> do
             r <- c'git_tree_entry_bypath entryPtr treePtr pathStr
             if r < 0
                 then return Nothing
                 else Just <$> (entryToTreeEntry =<< peek entryPtr)
 
 lgTreeOid :: Git.MonadGit m => Tree m -> TreeOid m
-lgTreeOid tree = SU.unsafePerformIO $ liftIO $ do
-    toid  <- withForeignPtr (lgTreePtr tree) $ c'git_tree_id
+lgTreeOid (LgTree Nothing) =
+    SU.unsafePerformIO . liftIO $
+        Tagged . fromJust <$> lgParseOidIO Git.emptyTreeId 40
+lgTreeOid (LgTree (Just tree)) = SU.unsafePerformIO $ liftIO $ do
+    toid  <- withForeignPtr tree $ c'git_tree_id
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
@@ -274,8 +285,9 @@ lgTraverseEntries :: Git.MonadGit m
                   => (FilePath -> TreeEntry m -> LgRepository m a)
                   -> Tree m
                   -> LgRepository m [a]
-lgTraverseEntries f tree = do
-    entries <- liftIO $ withForeignPtr (lgTreePtr tree) $ \tr -> do
+lgTraverseEntries _ (LgTree Nothing) = return []
+lgTraverseEntries f (LgTree (Just tree)) = do
+    entries <- liftIO $ withForeignPtr tree $ \tr -> do
         ior <- newIORef []
         r <- bracket
                 (mk'git_treewalk_cb (callback ior))
@@ -302,13 +314,14 @@ lgMakeTree builder = mempty <> Git.TreeBuilder
     { Git.mtbBaseTreeRef    = Nothing
     , Git.mtbPendingUpdates = mempty
     , Git.mtbNewBuilder     = lgNewTreeBuilder
-    , Git.mtbWriteContents  = \tb -> (,) <$> pure tb <*> lgWriteBuilder builder
+    , Git.mtbWriteContents  = \tb -> (,) <$> pure (Git.BuilderUnchanged tb)
+                                         <*> lgWriteBuilder builder
     , Git.mtbLookupEntry    = lgLookupBuilderEntry builder
     , Git.mtbEntryCount     = lgBuilderEntryCount builder
     , Git.mtbPutEntry       = \tb name ent ->
-        lgPutEntry builder name ent >> return tb
+        lgPutEntry builder name ent >> return (Git.BuilderUnchanged tb)
     , Git.mtbDropEntry      = \tb name ->
-        lgDropEntry builder name >> return tb
+        lgDropEntry builder name >> return (Git.BuilderUnchanged tb)
     }
 
 -- | Create a new, empty tree.
@@ -321,8 +334,11 @@ lgNewTreeBuilder mtree = do
     mfptr <- liftIO $ alloca $ \pptr -> do
         r <- case mtree of
             Nothing -> c'git_treebuilder_create pptr nullPtr
-            Just tree -> withForeignPtr (lgTreePtr tree) $ \treePtr ->
-                c'git_treebuilder_create pptr treePtr
+            Just (LgTree Nothing) ->
+                c'git_treebuilder_create pptr nullPtr
+            Just (LgTree (Just tree)) ->
+                withForeignPtr tree $ \treePtr ->
+                    c'git_treebuilder_create pptr treePtr
         if r < 0
             then return Nothing
             else do
@@ -363,10 +379,8 @@ treeEntryToOid (Git.TreeEntry toid) =
 lgDropEntry :: Git.MonadGit m
             => ForeignPtr C'git_treebuilder -> Text -> LgRepository m ()
 lgDropEntry builder key = do
-    r2 <- liftIO $ withForeignPtr builder $ \ptr ->
-        withCString (T.unpack key) $ \name ->
-            c'git_treebuilder_remove ptr name
-    when (r2 < 0) $ failure (Git.TreeBuilderRemoveFailed key)
+    void $ liftIO $ withForeignPtr builder $ \ptr ->
+        withCString (T.unpack key) $ c'git_treebuilder_remove ptr
 
 lgLookupBuilderEntry :: Git.MonadGit m
                      => ForeignPtr C'git_treebuilder
@@ -385,9 +399,9 @@ lgBuilderEntryCount tb = do
     fromIntegral <$> liftIO (withForeignPtr tb c'git_treebuilder_entrycount)
 
 lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
-lgTreeEntryCount t = do
-    fromIntegral
-        <$> liftIO (withForeignPtr (lgTreePtr t) c'git_tree_entrycount)
+lgTreeEntryCount (LgTree Nothing) = return 0
+lgTreeEntryCount (LgTree (Just tree)) = do
+    fromIntegral <$> liftIO (withForeignPtr tree c'git_tree_entrycount)
 
 lgWriteBuilder :: Git.MonadGit m
                => ForeignPtr C'git_treebuilder
@@ -442,12 +456,16 @@ lgCloneBuilder fptr =
 
 lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
              -> LgRepository m (Tree m)
-lgLookupTree len oid = do
-    -- jww (2013-01-28): Verify the oid here
-    fptr <- lookupObject' (getOid (untag oid)) len
-          c'git_tree_lookup c'git_tree_lookup_prefix $
-          \_coid obj _ -> return obj
-    return $ LgTree fptr
+lgLookupTree len (getOid . untag -> oid) = do
+    str <- liftIO $ withForeignPtr oid $ \oidPtr -> oidToStr oidPtr
+    if str == T.unpack Git.emptyTreeId
+        then return (LgTree Nothing)
+        else do
+            -- jww (2013-01-28): Verify the oid here
+            fptr <- lookupObject' oid len
+                  c'git_tree_lookup c'git_tree_lookup_prefix $
+                  \_coid obj _ -> return obj
+            return $ LgTree (Just fptr)
 
 entryToTreeEntry :: Ptr C'git_tree_entry -> IO (TreeEntry m)
 entryToTreeEntry entry = do

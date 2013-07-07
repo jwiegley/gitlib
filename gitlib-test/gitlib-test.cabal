@@ -47,10 +47,12 @@ Library
         , HUnit                >= 1.2.5
         , hspec                >= 1.4.4
         , hspec-expectations   >= 0.3
+        , bytestring           >= 0.9.2
         , monad-control        >= 0.3.1
         , system-fileio        >= 0.3.9
         , system-filepath      >= 0.4.7
         , tagged               >= 0.4.4
+        , text                 >= 0.11.2
         , time                 >= 1.4
         , transformers         >= 0.3
     exposed-modules:

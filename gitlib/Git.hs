@@ -7,6 +7,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
 -- | Interface for working with Git repositories.
 module Git
@@ -46,6 +47,7 @@ module Git
 
        , TreeT
        , TreeBuilder(..)
+       , ModifiedBuilder(..)
        , TreeEntry(..)
        , TreeOid
        , TreeRef
@@ -781,16 +783,30 @@ splitPath path = T.splitOn "/" text
                  Left x  -> error $ "Invalid path: " ++ T.unpack x
                  Right y -> y
 
+data ModifiedBuilder m = ModifiedBuilder (TreeBuilder m)
+                       | BuilderUnchanged (TreeBuilder m)
+
+instance Monoid (ModifiedBuilder m) where
+    mempty = BuilderUnchanged (error "ModifiedBuilder is a semigroup")
+    BuilderUnchanged _ `mappend` BuilderUnchanged b2 = BuilderUnchanged b2
+    ModifiedBuilder b1  `mappend` BuilderUnchanged _ = ModifiedBuilder b1
+    BuilderUnchanged _ `mappend` ModifiedBuilder b2  = ModifiedBuilder b2
+    ModifiedBuilder _  `mappend` ModifiedBuilder b2  = ModifiedBuilder b2
+
+fromBuilderMod :: ModifiedBuilder m -> TreeBuilder m
+fromBuilderMod (BuilderUnchanged tb) = tb
+fromBuilderMod (ModifiedBuilder tb)  = tb
+
 data TreeBuilder m = TreeBuilder
     { mtbBaseTreeRef    :: Maybe (TreeRef m)
     , mtbPendingUpdates :: HashMap Text (TreeBuilder m)
     , mtbNewBuilder     :: Maybe (Tree m) -> m (TreeBuilder m)
-    , mtbWriteContents  :: TreeBuilder m -> m (TreeBuilder m, TreeRef m)
+    , mtbWriteContents  :: TreeBuilder m -> m (ModifiedBuilder m, TreeRef m)
     , mtbLookupEntry    :: Text -> m (Maybe (TreeEntry m))
     , mtbEntryCount     :: m Int
     , mtbPutEntry       :: TreeBuilder m -> Text -> TreeEntry m
-                        -> m (TreeBuilder m)
-    , mtbDropEntry      :: TreeBuilder m -> Text -> m (TreeBuilder m)
+                        -> m (ModifiedBuilder m)
+    , mtbDropEntry      :: TreeBuilder m -> Text -> m (ModifiedBuilder m)
     }
 
 instance Monad m => Monoid (TreeBuilder m) where
@@ -801,8 +817,8 @@ instance Monad m => Monoid (TreeBuilder m) where
         , mtbWriteContents  = error "Implement TreeBuilder.mtbWriteContents"
         , mtbLookupEntry    = \_ -> return Nothing
         , mtbEntryCount     = return 0
-        , mtbPutEntry       = \tb' _ _ -> return tb'
-        , mtbDropEntry      = \tb' _ -> return tb'
+        , mtbPutEntry       = \tb _ _ -> return (BuilderUnchanged tb)
+        , mtbDropEntry      = \tb _ -> return (BuilderUnchanged tb)
         }
     tb1 `mappend` tb2 = tb2
         { mtbBaseTreeRef    = mtbBaseTreeRef tb1
@@ -823,63 +839,75 @@ queryTreeBuilder :: Repository m
                   -> BuilderAction
                   -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
                   -> m (TreeBuilder m, Maybe (TreeEntry m))
-queryTreeBuilder builder path kind f =
-    fmap fromModifyTreeResult <$> walk builder (splitPath path)
+queryTreeBuilder builder path kind f = do
+    (mtb, mtresult) <- walk (BuilderUnchanged builder) (splitPath path)
+    return (fromBuilderMod mtb, fromModifyTreeResult mtresult)
   where
     walk _ [] = error "queryTreeBuilder called without a path"
-    walk tb (name:names) = do
+    walk bm (name:names) = do
+        let tb = fromBuilderMod bm
         y <- case HashMap.lookup name (mtbPendingUpdates tb) of
-            Just x  -> return $ Left x
+            Just x  -> return $ Left (BuilderUnchanged x)
             Nothing -> do
                 mentry <- mtbLookupEntry tb name
                 case mentry of
                     Nothing
                         | kind == PutEntry && not (null names) ->
-                            Left <$> mtbNewBuilder tb Nothing
+                            Left . ModifiedBuilder
+                                <$> mtbNewBuilder tb Nothing
                         | otherwise -> return $ Right Nothing
-                    x@(Just _) -> return $ Right x
-        x <- update tb name names y
-        return x
+                    Just x -> return $ Right (Just x)
+        update bm name names y
 
-    update tb name [] (Left stb)
-        | kind == GetEntry = do
-            (_, tref) <- writeTreeBuilder stb
-            returnTree tb name $ f (Just (TreeEntry (treeRefOid tref)))
-        | otherwise = returnTree tb name (f Nothing)
+    doUpdate GetEntry bm name sbm = do
+        (_, tref) <- writeTreeBuilder (fromBuilderMod sbm)
+        returnTree bm name $ f (Just (TreeEntry (treeRefOid tref)))
+    doUpdate _ bm name _ = returnTree bm name (f Nothing)
 
-    update tb name [] (Right y)   = returnTree tb name (f y)
-    update tb _ _ (Right Nothing) = return (tb, TreeEntryNotFound)
+    update bm name [] (Left sbm) = doUpdate kind bm name sbm
+    update bm name [] (Right y)  = returnTree bm name (f y)
 
+    update bm _ _ (Right Nothing) = return (bm, TreeEntryNotFound)
     update _ _ _ (Right (Just BlobEntry {})) =
         failure TreeCannotTraverseBlob
     update _ _ _ (Right (Just CommitEntry {})) =
         failure TreeCannotTraverseCommit
 
-    update tb name names arg = do
-        stb <- case arg of
-            Left stb' -> return stb'
+    update bm name names arg = do
+        sbm <- case arg of
+            Left sbm' -> return sbm'
             Right (Just (TreeEntry st')) -> do
                 tree <- lookupTree st'
-                mtbNewBuilder tb (Just tree)
+                ModifiedBuilder
+                    <$> mtbNewBuilder (fromBuilderMod bm) (Just tree)
             _ -> error "queryTreeBuilder encountered the impossible"
 
-        (stb', z) <- walk stb names
-        let tb' = postUpdate tb stb' name z
-        return $ tb' `seq` (tb', z)
+        (sbm', z) <- walk sbm names
+        let bm' = bm <> postUpdate bm sbm' name
+        return $ bm' `seq` (bm', z)
 
-    returnTree tb n z = do
-        tb' <- case z of
-            TreeEntryNotFound     -> return tb
-            TreeEntryPersistent _ -> return tb
-            TreeEntryDeleted      -> mtbDropEntry tb tb n
+    returnTree bm@(fromBuilderMod -> tb) n z = do
+        bm' <- case z of
+            TreeEntryNotFound     -> return bm
+            TreeEntryPersistent _ -> return bm
+            TreeEntryDeleted      -> do
+                bm' <- mtbDropEntry tb tb n
+                let tb'   = fromBuilderMod bm'
+                    upds' = mtbPendingUpdates tb'
+                return $
+                    if HashMap.member n upds'
+                     then ModifiedBuilder tb'
+                         { mtbPendingUpdates = HashMap.delete n upds' }
+                     else bm'
             TreeEntryMutated z'   -> mtbPutEntry tb tb n z'
-        return $ tb' `seq` (tb', z)
+        let bm'' = bm <> bm'
+        return $ bm'' `seq` (bm'', z)
 
-    postUpdate tb _ _ TreeEntryNotFound       = tb
-    postUpdate tb _ _ (TreeEntryPersistent _) = tb
-    postUpdate tb stb name _ =
-        tb { mtbPendingUpdates =
-                  HashMap.insert name stb (mtbPendingUpdates tb) }
+    postUpdate bm (BuilderUnchanged _) _ = bm
+    postUpdate (fromBuilderMod -> tb) (ModifiedBuilder sbm) name =
+        ModifiedBuilder $ tb
+            { mtbPendingUpdates =
+                   HashMap.insert name sbm (mtbPendingUpdates tb) }
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
@@ -887,29 +915,39 @@ writeTreeBuilder :: Repository m
                  => TreeBuilder m
                  -> m (TreeBuilder m, TreeRef m)
 writeTreeBuilder builder = do
-    (tb', mtref) <- go builder
+    (bm, mtref) <- go (BuilderUnchanged builder)
     tref <- case mtref of
         Nothing -> do
             emptyTreeOid <- parseObjOid emptyTreeId
             return $ ByOid emptyTreeOid
         Just tref -> return tref
-    return (tb', tref)
+    return (fromBuilderMod bm, tref)
   where
-    go tb = do
-        tb' <- foldM update tb $ HashMap.toList (mtbPendingUpdates tb)
-        let tb'' = tb' { mtbPendingUpdates = HashMap.empty }
-        cnt <- mtbEntryCount tb''
+    go bm = do
+        let upds = mtbPendingUpdates (fromBuilderMod bm)
+        bm' <- if HashMap.size upds == 0
+               then return bm
+               else do
+                   bm' <- foldM update bm $ HashMap.toList upds
+                   return $ ModifiedBuilder (fromBuilderMod bm')
+                       { mtbPendingUpdates = HashMap.empty }
+        let tb' = fromBuilderMod bm'
+        cnt <- mtbEntryCount tb'
         if cnt == 0
-            then return (tb'', Nothing)
-            else fmap Just <$> mtbWriteContents tb'' tb''
+            then return (bm', Nothing)
+            else do
+                 (bm'', tref) <- mtbWriteContents tb' tb'
+                 return (bm' <> bm'', Just tref)
 
-    update tb' (k,v) = do
+    update bm (k,v) = do
+        let tb = fromBuilderMod bm
         -- The intermediate TreeBuilder will be dropped after this fold is
         -- completed, by setting mtbPendingUpdates to HashMap.empty, above.
-        (_,mtref) <- go v
-        case mtref of
-            Nothing   -> mtbDropEntry tb' tb' k
-            Just tref -> mtbPutEntry tb' tb' k (TreeEntry (treeRefOid tref))
+        (_,mtref) <- go (BuilderUnchanged v)
+        bm' <- case mtref of
+            Nothing   -> mtbDropEntry tb tb k
+            Just tref -> mtbPutEntry tb tb k (TreeEntry (treeRefOid tref))
+        return $ bm <> bm'
 
 treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
 treeBlobEntries tree =
