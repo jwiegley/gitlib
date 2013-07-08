@@ -96,14 +96,12 @@ pushToGitHub opts = do
 
     withRepository lgFactory gd $ do
         cref <- fromJust <$> resolveReference "HEAD"
-        hc   <- resolveCommitRef cref
+        hc   <- lookupCommit cref
         rcoid <- Tagged <$> parseOid (toStrict remoteHead)
-        objs <- missingObjects
-                    (Just (CommitObjectId rcoid))
-                    (CommitObjectId (commitOid hc))
+        objs <- missingObjects (Just rcoid) (commitOid hc)
         for_ objs $ \obj -> case obj of
-            Git.CommitObj cref -> do
-                commit <- resolveCommitRef cref
+            Git.CommitObjOid coid -> do
+                commit <- lookupCommit coid
                 sh opts $ processCommitTags (commitLog commit)
             _ -> return ()
 

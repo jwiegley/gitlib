@@ -82,12 +82,11 @@ type TreeEntry m       = Git.TreeEntry (CmdLineRepository m)
 type Commit m          = Git.Commit (CmdLineRepository m)
 type Tag m             = Git.Tag (CmdLineRepository m)
 
-type TreeRef m         = Git.TreeRef (CmdLineRepository m)
-type CommitRef m       = Git.CommitRef (CmdLineRepository m)
 type CommitName m      = Git.CommitName (CmdLineRepository m)
-
-type Reference m       = Git.Reference (CmdLineRepository m) (Commit m)
+type Reference m       = Git.Reference (CmdLineRepository m)
 type Object m          = Git.Object (CmdLineRepository m)
+type ObjectOid m       = Git.ObjectOid (CmdLineRepository m)
+
 type TreeBuilder m     = Git.TreeBuilder (CmdLineRepository m)
 type ModifiedBuilder m = Git.ModifiedBuilder (CmdLineRepository m)
 
@@ -170,7 +169,7 @@ cliFilePathToURI =
 
 cliPushCommitDirectly :: Git.MonadGit m
                       => CommitName m -> Text -> Text -> Maybe FilePath
-                      -> CmdLineRepository m (CommitRef m)
+                      -> CmdLineRepository m (CommitOid m)
 cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
     repo <- cliGet
     merr <- shellyNoDir $ silently $ errExit False $ do
@@ -253,7 +252,7 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
                     Nothing ->
                         failure (Git.BackendError
                                  "Reference missing: HEAD (left)")
-                    Just lh -> recordMerge repo (Git.commitRefOid lh)
+                    Just lh -> recordMerge repo lh
   where
     -- jww (2013-05-15): This function should not overwrite head, but simply
     -- create a detached commit and return its id.
@@ -291,7 +290,7 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
         case mref of
             Nothing  -> failure (Git.BackendError $
                                  T.append "Reference missing: " name)
-            Just ref -> return (Git.commitRefOid ref)
+            Just ref -> return ref
 
     charToModKind 'M' = Just Git.Modified
     charToModKind 'U' = Just Git.Unchanged
@@ -374,37 +373,35 @@ cliExistsObject (getOid -> sha) = do
         return (ec == 0)
 
 cliTraverseCommits :: Git.MonadGit m
-                   => (CommitRef m -> CmdLineRepository m a)
-                   -> CommitName m
+                   => (CommitOid m -> CmdLineRepository m a)
+                   -> CommitOid m
                    -> CmdLineRepository m [a]
-cliTraverseCommits f name = do
+cliTraverseCommits f coid = do
     shas <- doRunGit run [ "--no-pager", "log", "--format=%H"
-                         , fromStrict (Git.renderCommitName name) ]
+                         , fromStrict (Git.renderObjOid coid) ]
             $ return ()
-    mapM (\sha -> f =<< (Git.ByOid . Tagged <$> Git.parseOid (toStrict sha)))
+    mapM (\sha -> f =<< (Tagged <$> Git.parseOid (toStrict sha)))
         (TL.lines shas)
 
 cliMissingObjects :: Git.MonadGit m
-                  => Maybe (CommitName m) -> CommitName m
-                  -> CmdLineRepository m [Object m]
+                  => Maybe (CommitOid m) -> CommitOid m
+                  -> CmdLineRepository m [ObjectOid m]
 cliMissingObjects mhave need = do
     shas <- doRunGit run
             ([ "--no-pager", "log", "--format=%H %T", "-z"]
              <> (case mhave of
-                      Nothing   -> [ fromStrict (Git.renderCommitName need) ]
+                      Nothing   -> [ fromStrict (Git.renderObjOid need) ]
                       Just have ->
-                          [ fromStrict (Git.renderCommitName have)
+                          [ fromStrict (Git.renderObjOid have)
                           , TL.append "^"
-                            (fromStrict (Git.renderCommitName need)) ]))
+                            (fromStrict (Git.renderObjOid need)) ]))
             $ return ()
     concat <$> mapM (go . T.words . toStrict) (TL.lines shas)
   where
     go [csha,tsha] = do
-        coid <- Git.parseOid csha
-        toid <- Git.parseOid tsha
-        return [ Git.CommitObj (Git.ByOid (Tagged coid))
-               , Git.TreeObj (Git.ByOid (Tagged toid))
-               ]
+        coid <- Git.parseObjOid csha
+        toid <- Git.parseObjOid tsha
+        return [Git.CommitObjOid coid, Git.TreeObjOid toid]
     go x = failure (Git.BackendError $
                     "Unexpected output from git-log: " <> T.pack (show x))
 
@@ -413,7 +410,7 @@ type EntryHashMap m = HashMap Text (TreeEntry m)
 cliMakeTree :: Git.MonadGit m
             => EntryHashMap m -> TreeBuilder m
 cliMakeTree entMap = mempty <> Git.TreeBuilder
-    { Git.mtbBaseTreeRef    = Nothing
+    { Git.mtbBaseTreeOid    = Nothing
     , Git.mtbPendingUpdates = mempty
     , Git.mtbNewBuilder    = cliNewTreeBuilder
     , Git.mtbWriteContents = \tb -> (,) <$> pure (Git.BuilderUnchanged tb)
@@ -434,7 +431,7 @@ cliNewTreeBuilder mtree = do
     entMap <- case mtree of
         Nothing   -> return HashMap.empty
         Just tree -> go (Git.treeOid tree)
-    return $ (cliMakeTree entMap) { Git.mtbBaseTreeRef = Git.treeRef <$> mtree }
+    return $ (cliMakeTree entMap) { Git.mtbBaseTreeOid = Git.treeOid <$> mtree }
 
   where
     go (Tagged (getOid -> sha)) = do
@@ -492,12 +489,12 @@ cliTreeEntryCount t =
 
 cliWriteBuilder :: Git.MonadGit m
                 => EntryHashMap m
-                -> CmdLineRepository m (TreeRef m)
+                -> CmdLineRepository m (TreeOid m)
 cliWriteBuilder entMap = do
     rendered <- mapM renderLine (HashMap.toList entMap)
     oid      <- doRunGit run ["mktree", "-z", "--missing"]
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
-    Git.ByOid . Tagged <$> mkOid (TL.init oid)
+    Tagged <$> mkOid (TL.init oid)
   where
     renderLine (path, Git.BlobEntry (Tagged (getOid -> sha)) kind) =
         return $ TL.concat [ case kind of
@@ -596,8 +593,8 @@ cliLookupCommit (Tagged (getOid -> sha)) = do
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
             , Git.commitLog       = T.pack (init message)
-            , Git.commitTree      = Git.ByOid toid'
-            , Git.commitParents   = map Git.ByOid poids'
+            , Git.commitTree      = toid'
+            , Git.commitParents   = poids'
             , Git.commitEncoding  = "utf-8"
             }
 
@@ -609,16 +606,14 @@ cliLookupCommit (Tagged (getOid -> sha)) = do
             <*> (parseCliTime <$> manyTill anyChar newline)
 
 cliCreateCommit :: Git.MonadGit m
-                => [CommitRef m]
-                -> TreeRef m
+                => [CommitOid m]
+                -> TreeOid m
                 -> Git.Signature
                 -> Git.Signature
                 -> Text
                 -> Maybe Text
                 -> CmdLineRepository m (Commit m)
-cliCreateCommit parents tref author committer message ref = do
-    let treeOid    = Git.treeRefOid tref
-        parentOids = map Git.commitRefOid parents
+cliCreateCommit parentOids treeOid author committer message ref = do
     oid <- doRunGit run
            (["commit-tree"]
             <> [fromStrict (Git.renderObjOid treeOid)]
@@ -642,12 +637,12 @@ cliCreateCommit parents tref author committer message ref = do
             , Git.commitAuthor    = author
             , Git.commitCommitter = committer
             , Git.commitLog       = message
-            , Git.commitTree      = Git.ByOid treeOid
-            , Git.commitParents   = map Git.ByOid parentOids
+            , Git.commitTree      = treeOid
+            , Git.commitParents   = parentOids
             , Git.commitEncoding  = "utf-8"
             }
     when (isJust ref) $
-        void $ cliUpdateRef (fromJust ref) (Git.RefObj (Git.Known commit))
+        void $ cliUpdateRef (fromJust ref) (Git.RefObj (Git.commitOid commit))
 
     return commit
 
@@ -676,7 +671,7 @@ nameAndShaToRef :: Git.MonadGit m
                 => TL.Text -> TL.Text -> CmdLineRepository m (Reference m)
 nameAndShaToRef name sha =
     Git.Reference <$> pure (toStrict name)
-                  <*> (Git.RefObj . Git.ByOid . Tagged <$> mkOid sha)
+                  <*> (Git.RefObj . Tagged <$> mkOid sha)
 
 cliLookupRef :: Git.MonadGit m
              => Text -> CmdLineRepository m (Maybe (Reference m))
@@ -688,10 +683,9 @@ cliLookupRef refName = do
         (fmap Just . uncurry nameAndShaToRef . \sha -> (name,sha)) ref
 
 cliUpdateRef :: Git.MonadGit m
-             => Text -> Git.RefTarget (CmdLineRepository m) (Commit m)
+             => Text -> Git.RefTarget (CmdLineRepository m)
              -> CmdLineRepository m (Reference m)
-cliUpdateRef refName refObj@(Git.RefObj commitRef) = do
-    let Tagged (getOid -> sha) = Git.commitRefOid commitRef
+cliUpdateRef refName refObj@(Git.RefObj (Tagged (getOid -> sha))) = do
     runGit_ ["update-ref", fromStrict refName, sha]
     return (Git.Reference refName refObj)
 
@@ -711,7 +705,7 @@ cliAllRefs = do
         Just xs -> mapM (uncurry nameAndShaToRef) xs
 
 cliResolveRef :: Git.MonadGit m
-              => Text -> CmdLineRepository m (Maybe (CommitRef m))
+              => Text -> CmdLineRepository m (Maybe (CommitOid m))
 cliResolveRef refName = do
     repo <- cliGet
     shellyNoDir $ silently $ errExit False $ do
@@ -720,7 +714,7 @@ cliResolveRef refName = do
                    , fromStrict refName ]
         ec  <- lastExitCode
         if ec == 0
-            then Just . Git.ByOid . Tagged <$> mkOid (TL.init rev)
+            then Just . Tagged <$> mkOid (TL.init rev)
             else return Nothing
 
 -- cliLookupTag :: TagOid -> CmdLineRepository Tag
@@ -739,8 +733,7 @@ cliCreateTag oid@(Tagged (getOid -> sha)) tagger msg name = do
           <> TL.pack (formatTime defaultTimeLocale "%s %z"
                       (Git.signatureWhen tagger))
         , ""] <> TL.lines (fromStrict msg)
-    Git.Tag <$> (Tagged <$> mkOid (TL.init tsha))
-            <*> pure (Git.ByOid oid)
+    Git.Tag <$> (Tagged <$> mkOid (TL.init tsha)) <*> pure oid
 
 data Repository = Repository
     { repoOptions :: Git.RepositoryOptions

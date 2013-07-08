@@ -33,7 +33,7 @@ import           Test.Hspec (Spec, Example, describe, it)
 import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 
-sampleCommit :: Repository m => TreeRef m -> Signature -> m (Commit m)
+sampleCommit :: Repository m => TreeOid m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] tr sig sig "Sample log message.\n" Nothing
 
@@ -57,7 +57,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single tree" $ withNewRepository pr "singleTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- createTree $ putBlob "hello/world.txt" hello
-      let x = renderObjOid (treeRefOid tr)
+      let x = renderObjOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       toid <- Git.parseOid "c0c848a2737a6a8533a18e6bd4d04266225e0271"
@@ -68,31 +68,31 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create two trees" $ withNewRepository pr "twoTrees.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- createTree $ putBlob "hello/world.txt" hello
-      let x = renderObjOid (treeRefOid tr)
+      let x = renderObjOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      tr <- mutateTreeRef tr $ putBlob "goodbye/files/world.txt" goodbye
-      let x = renderObjOid (treeRefOid tr)
+      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
+      let x = renderObjOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
   it "delete an item from a tree" $ withNewRepository pr "deleteTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- createTree $ putBlob "hello/world.txt" hello
-      let x = renderObjOid (treeRefOid tr)
+      let x = renderObjOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
-      tr <- mutateTreeRef tr $
+      tr <- mutateTreeOid tr $
           putBlob "goodbye/files/world.txt"
               =<< lift (createBlobUtf8 "Goodbye, world!\n")
-      let x = renderObjOid (treeRefOid tr)
+      let x = renderObjOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- Confirm that deleting world.txt also deletes the now-empty
       -- subtree goodbye/files, which also deletes the then-empty subtree
       -- goodbye, returning us back the original tree.
-      tr <- mutateTreeRef tr $ dropEntry "goodbye/files/world.txt"
-      let x = renderObjOid (treeRefOid tr)
+      tr <- mutateTreeOid tr $ dropEntry "goodbye/files/world.txt"
+      let x = renderObjOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   it "create a single commit" $ withNewRepository pr "createCommit.git" $ do
@@ -100,8 +100,8 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       tr <- createTree $ putBlob "hello/world.txt" hello
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      tr <- mutateTreeRef tr $ putBlob "goodbye/files/world.txt" goodbye
-      let x = renderObjOid (treeRefOid tr)
+      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
+      let x = renderObjOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- The Oid has been cleared in tr, so this tests that it gets
@@ -123,7 +123,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- createTree $ putBlob "hello/world.txt" hello
-      let x = renderObjOid (treeRefOid tr)
+      let x = renderObjOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
       let sig  = Signature {
@@ -136,10 +136,10 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       liftIO $ x @?= "d592871f56aa949d726fcc211370d1af305e9597"
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      tr' <- mutateTreeRef (Git.commitTree c) $
+      tr' <- mutateTreeOid (Git.commitTree c) $
                  putBlob "hello/goodbye.txt" goodbye
 
-      let x = renderObjOid (treeRefOid tr')
+      let x = renderObjOid tr'
       liftIO $ x @?= "19974fde643bddd26c46052f7a8bdf87f7772c1e"
 
       let sig  = Signature {
@@ -147,7 +147,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = fakeTime 1348980883 }
 
-      c <- createCommit [commitRef c] tr' sig sig
+      c <- createCommit [commitOid c] tr' sig sig
                "Sample log message 2.\n" (Just "refs/heads/master")
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "61a2c6425d2e60a480d272aa921d4f4ffe5dd20f"
@@ -157,8 +157,8 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       tr <- createTree $ putBlob "hello/world.txt" hello
 
       goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      tr <- mutateTreeRef tr $ putBlob "goodbye/files/world.txt" goodbye
-      let x = renderObjOid (treeRefOid tr)
+      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
+      let x = renderObjOid tr
       liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
       -- The Oid has been cleared in tr, so this tests that it gets written as
@@ -172,27 +172,26 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
       goodbye2 <- createBlobUtf8 "Goodbye, world again!\n"
-      tr <- mutateTreeRef tr $ putBlob "goodbye/files/world.txt" goodbye2
-      let x = renderObjOid (treeRefOid tr)
+      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye2
+      let x = renderObjOid tr
       liftIO $ x @?= "f2b42168651a45a4b7ce98464f09c7ec7c06d706"
 
       let sig = Signature {
               signatureName  = "John Wiegley"
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = fakeTime 1348981883 }
-      c2 <- createCommit [commitRef c] tr sig sig
+      c2 <- createCommit [commitOid c] tr sig sig
                 "Second sample log message.\n" Nothing
       let x = renderObjOid (commitOid c2)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
-      updateReference_ "refs/heads/master" (RefObj (commitRef c2))
+      updateReference_ "refs/heads/master" (RefObj (commitOid c2))
       hasSymRefs <- hasSymbolicReferences <$> facts
       when hasSymRefs $
           updateReference_ "HEAD" (RefSymbolic "refs/heads/master")
 
       Just c3 <- resolveReference "refs/heads/master"
-      c3 <- resolveCommitRef c3
-      let x = renderObjOid (commitOid c3)
+      let x = renderObjOid c3
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       refs <- allReferenceNames
@@ -224,8 +223,8 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       commit <- createCommit [] tree sig sig "Initial commit" Nothing
 
       blob <- createBlobUtf8 "This is some content."
-      tree <- mutateTreeRef tree $ putBlob "foo.txt" blob
-      createCommit [commitRef commit] tree sig sig
+      tree <- mutateTreeOid tree $ putBlob "foo.txt" blob
+      createCommit [commitOid commit] tree sig sig
           "This is another log message." (Just masterRef)
 
       liftIO $ True @?= True
@@ -244,7 +243,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
           putBlob "Five/More/Four" =<< lift (createBlobUtf8 "Five\n")
       createCommit [] tree sig sig "Initial commit" (Just masterRef)
 
-      tree' <- resolveTreeRef tree
+      tree' <- lookupTree tree
       paths <- traverseEntries (const . return) tree'
       liftIO $ sort paths @?= [ "Files"
                               , "Five"
@@ -403,7 +402,7 @@ doTreeit :: (MonadBaseControl IO m, MonadIO m,
        => String -> RepositoryFactory t m c -> [Kind] -> TreeT (t m) a -> m ()
 doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     tref <- createTree $ action
-    tree <- resolveTreeRef tref
+    tree <- lookupTree tref
     forM_ kinds $ \kind -> do
         let path = kindPath kind
         entry <- getTreeEntry tree path

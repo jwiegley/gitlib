@@ -141,16 +141,15 @@ doMain opts = do
                 then resolveReference sref
                 else return Nothing
         scr' <- maybe (fromJust <$> resolveReference "HEAD") return scr
-        sc   <- resolveCommitRef scr'
-        let tref = commitTree sc
-            toid = treeRefOid tref
-        tree <- resolveTreeRef tref
+        sc   <- lookupCommit scr'
+        let toid = commitTree sc
+        tree <- lookupTree toid
         ft   <- readFileTree' tree wd (isNothing scr)
 
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
         -- time, typically using SIGINT (C-c) or even SIGKILL.
-        snapshotTree opts wd userName userEmail ref sref sc tref toid ft
+        snapshotTree opts wd userName userEmail ref sref sc toid ft
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots
@@ -163,39 +162,37 @@ snapshotTree :: MonadGit m
              -> Text
              -> Text
              -> Commit (LgRepository m)
-             -> TreeRef (LgRepository m)
              -> TreeOid (LgRepository m)
              -> Map FilePath (FileEntry (LgRepository m))
              -> LgRepository m ()
-snapshotTree opts wd name email ref sref = fix $ \loop sc tref toid ft -> do
+snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     -- Read the current working tree's state on disk
     ft' <- readFileTree ref wd False
 
     -- Prune files which have been removed since the last interval, and find
     -- files which have been added or changed
-    tref' <- mutateTreeRef tref $ do
+    toid' <- mutateTreeOid toid $ do
         Map.foldlWithKey' (\a p e -> a >> scanOldEntry ft' p e) (return ()) ft
         Map.foldlWithKey' (\a p e -> a >> scanNewEntry ft p e) (return ()) ft'
 
     -- If the snapshot tree changed, create a new commit to reflect it
-    let toid' = treeRefOid tref'
-    sc'   <- if toid /= toid'
-            then do
-                now <- liftIO getZonedTime
-                let sig = Signature
-                          { signatureName  = name
-                          , signatureEmail = email
-                          , signatureWhen  = now
-                          }
-                    msg = "Snapshot at "
-                       ++ formatTime defaultTimeLocale "%F %T %Z" now
+    sc' <- if toid /= toid'
+          then do
+              now <- liftIO getZonedTime
+              let sig = Signature
+                        { signatureName  = name
+                        , signatureEmail = email
+                        , signatureWhen  = now
+                        }
+                  msg = "Snapshot at "
+                     ++ formatTime defaultTimeLocale "%F %T %Z" now
 
-                c <- createCommit [commitRef sc] tref'
-                                  sig sig (T.pack msg) (Just sref)
-                infoL $ "Commit "
-                     ++ (T.unpack . renderObjOid . commitOid $ c)
-                return c
-            else return sc
+              c <- createCommit [commitOid sc] toid'
+                                sig sig (T.pack msg) (Just sref)
+              infoL $ "Commit "
+                   ++ (T.unpack . renderObjOid . commitOid $ c)
+              return c
+          else return sc
 
     -- Wait a given number of seconds
     liftIO $ threadDelay (interval opts * 1000000)
@@ -208,7 +205,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc tref toid ft -> do
     if ref /= curRef
         then infoL $ "Branch changed to " ++ T.unpack curRef
                   ++ ", restarting"
-        else loop sc' tref' toid' ft'
+        else loop sc' toid' ft'
 
   where
     scanOldEntry :: MonadGit m
@@ -265,7 +262,7 @@ readFileTree ref wdir getHash = do
     case h of
         Nothing -> pure Map.empty
         Just h' -> do
-            tr <- resolveTreeRef . commitTree =<< resolveCommitRef h'
+            tr <- lookupTree . commitTree =<< lookupCommit h'
             readFileTree' tr wdir getHash
 
 readFileTree' :: MonadGit m

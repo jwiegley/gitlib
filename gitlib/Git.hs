@@ -23,8 +23,11 @@ module Git
        , IsOid(..)
        , copyOid
        , Object(..)
-       , ObjRef(..)
+       , ObjectOid(..)
        , objectOid
+       , loadObject
+       , objectToObjOid
+       , untagObjOid
        , SHA(..)
        , textToSha
        , shaToText
@@ -34,10 +37,7 @@ module Git
        , BlobContents(..)
        , BlobKind(..)
        , ByteSource
-       , BlobRef
        , blobEntry
-       , blobRefOid
-       , resolveBlobRef
        , createBlobUtf8
        , catBlob
        , catBlobUtf8
@@ -50,15 +50,13 @@ module Git
        , ModifiedBuilder(..)
        , TreeEntry(..)
        , TreeOid
-       , TreeRef
        , createTree
        , withNewTree
        , mutateTree
-       , mutateTreeRef
+       , mutateTreeOid
        , currentTree
-       , currentTreeRef
        , withTree
-       , withTreeRef
+       , withTreeOid
        , dropEntry
        , getEntry
        , putBlob
@@ -66,11 +64,8 @@ module Git
        , putCommit
        , putEntry
        , putTree
-       , resolveTreeRef
        , treeEntry
        , getTreeEntryOid
-       , treeRef
-       , treeRefOid
        , ModifyTreeResult(..)
        , fromModifyTreeResult
        , toModifyTreeResult
@@ -82,19 +77,15 @@ module Git
        , Commit(..)
        , CommitOid
        , CommitName(..)
-       , CommitRef
        , Signature(..)
        , commitEntry
-       , commitNameToRef
-       , commitRef
-       , commitRefOid
        , commitRefTarget
        , getCommitParents
        , copyCommitName
        , copyCommitOid
        , nameOfCommit
+       , commitNameToOid
        , renderCommitName
-       , resolveCommitRef
        , commitTreeEntry
        , copyCommit
        , genericPushCommit
@@ -106,12 +97,10 @@ module Git
 
        , Tag(..)
        , TagOid
-       , TagRef
-       , tagRefOid
 
        , RefTarget(..)
        , Reference(..)
-       , referenceToRef
+       , referenceToOid
        , resolveReferenceTree
 
        , GitException(..)
@@ -191,25 +180,23 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     parseObjOid sha = Tagged <$> parseOid sha
 
     -- References
-    createReference  :: Text -> RefTarget m (Commit m)
-                     -> m (Reference m (Commit m))
-    createReference_ :: Text -> RefTarget m (Commit m) -> m ()
+    createReference  :: Text -> RefTarget m -> m (Reference m)
+    createReference_ :: Text -> RefTarget m -> m ()
     createReference_ = (void .) . createReference
-    lookupReference  :: Text -> m (Maybe (Reference m (Commit m)))
-    updateReference  :: Text -> RefTarget m (Commit m)
-                     -> m (Reference m (Commit m))
-    updateReference_ :: Text -> RefTarget m (Commit m) -> m ()
+    lookupReference  :: Text -> m (Maybe (Reference m))
+    updateReference  :: Text -> RefTarget m -> m (Reference m)
+    updateReference_ :: Text -> RefTarget m -> m ()
     updateReference_ = (void .) . updateReference
     deleteReference  :: Text -> m ()
 
-    allReferences :: m [Reference m (Commit m)]
+    allReferences :: m [Reference m]
     allReferences = catMaybes <$> (mapM lookupReference =<< allReferenceNames)
 
     allReferenceNames :: m [Text]
     allReferenceNames = map referenceName <$> allReferences
 
-    resolveReference :: Text -> m (Maybe (CommitRef m))
-    resolveReference name = lookupReference name >>= referenceToRef (Just name)
+    resolveReference :: Text -> m (Maybe (CommitOid m))
+    resolveReference name = lookupReference name >>= referenceToOid (Just name)
 
     -- Lookup
     lookupCommit :: CommitOid m -> m (Commit m)
@@ -218,28 +205,29 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     lookupTag    :: TagOid m -> m (Tag m)
 
     lookupObject :: Text -> m (Object m)
+    lookupObjectOid :: Text -> m (ObjectOid m)
+    lookupObjectOid = fmap objectToObjOid . lookupObject
     existsObject :: Oid m -> m Bool
 
     traverseObjects :: forall a.
-                       (Object m -> m a) -> Maybe (CommitName m) -> m [a]
-    traverseObjects_ :: (Object m -> m ()) -> Maybe (CommitName m) -> m ()
+                       (Oid m -> m a) -> Maybe (CommitOid m) -> m [a]
+    traverseObjects_ :: (Oid m -> m ()) -> Maybe (CommitOid m) -> m ()
     traverseObjects_ = (void .) . traverseObjects
 
     pushCommit :: (MonadTrans t, MonadGit m, MonadGit (t m),
                    Repository m, Repository (t m))
-               => CommitName m -> Maybe Text -> Text
-               -> t m (CommitRef (t m))
+               => CommitOid m -> Maybe Text -> Text -> t m (CommitOid (t m))
 
     traverseCommits :: forall a.
-                       (CommitRef m -> m a) -> CommitName m -> m [a]
-    traverseCommits_ :: (CommitRef m -> m ()) -> CommitName m -> m ()
+                       (CommitOid m -> m a) -> CommitOid m -> m [a]
+    traverseCommits_ :: (CommitOid m -> m ()) -> CommitOid m -> m ()
     traverseCommits_ = (void .) . traverseCommits
 
-    missingObjects :: Maybe (CommitName m) -- ^ A commit we may already have
-                   -> CommitName m         -- ^ The commit we need
-                   -> m [Object m]         -- ^ All the objects in between
+    missingObjects :: Maybe (CommitOid m) -- ^ A commit we may already have
+                   -> CommitOid m         -- ^ The commit we need
+                   -> m [ObjectOid m]     -- ^ All the objects in between
 
-    -- Object creation
+    -- Object creation, not to be called by users directly
     newTreeBuilder :: Maybe (Tree m) -> m (TreeBuilder m)
 
     treeOid :: Tree m -> TreeOid m
@@ -250,7 +238,7 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
 
     hashContents :: BlobContents m -> m (BlobOid m)
     createBlob   :: BlobContents m -> m (BlobOid m)
-    createCommit :: [CommitRef m] -> TreeRef m
+    createCommit :: [CommitOid m] -> TreeOid m
                  -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
 
@@ -324,32 +312,32 @@ type CommitOid m = Tagged (Commit m) (Oid m)
 type TagOid m    = Tagged (Tag m) (Oid m)
 
 {- $references -}
-data RefTarget m a = RefObj !(ObjRef m a) | RefSymbolic !Text
+data RefTarget m = RefObj !(CommitOid m) | RefSymbolic !Text
 
-data Reference m a = Reference
+data Reference m = Reference
     { referenceName   :: !Text
-    , referenceTarget :: !(RefTarget m a) }
+    , referenceTarget :: !(RefTarget m) }
 
 data CommitName m = CommitObjectId !(CommitOid m)
-                  | CommitRefName !Text
-                  | CommitReference !(Reference m (Commit m))
+                  | CommitReferenceName !Text
+                  | CommitReference !(Reference m)
 
 instance Repository m => Show (CommitName m) where
     show (CommitObjectId coid) = T.unpack (renderObjOid coid)
-    show (CommitRefName name)  = show name
+    show (CommitReferenceName name)  = show name
     show (CommitReference ref) = show (referenceName ref)
 
 nameOfCommit :: Commit m -> CommitName m
 nameOfCommit = CommitObjectId . commitOid
 
-commitNameToRef :: Repository m => CommitName m -> m (Maybe (CommitRef m))
-commitNameToRef (CommitObjectId coid) = return (Just (ByOid coid))
-commitNameToRef (CommitRefName name)  = resolveReference name
-commitNameToRef (CommitReference ref) = referenceToRef Nothing (Just ref)
+commitNameToOid :: Repository m => CommitName m -> m (Maybe (CommitOid m))
+commitNameToOid (CommitObjectId coid) = return (Just coid)
+commitNameToOid (CommitReferenceName name)  = resolveReference name
+commitNameToOid (CommitReference ref) = referenceToOid Nothing (Just ref)
 
 renderCommitName :: Repository m => CommitName m -> Text
 renderCommitName (CommitObjectId coid) = renderObjOid coid
-renderCommitName (CommitRefName name)  = name
+renderCommitName (CommitReferenceName name)  = name
 renderCommitName (CommitReference ref) = referenceName ref
 
 copyOid :: (Repository m, Repository n) => Oid m -> n (Oid n)
@@ -365,40 +353,49 @@ copyCommitName :: (Repository m, MonadGit m, Repository n, MonadGit n)
                => CommitName m -> n (Maybe (CommitName n))
 copyCommitName (CommitObjectId coid) =
     Just . CommitObjectId . Tagged <$> parseOid (renderObjOid coid)
-copyCommitName (CommitRefName name) = return (Just (CommitRefName name))
+copyCommitName (CommitReferenceName name) =
+    return (Just (CommitReferenceName name))
 copyCommitName (CommitReference ref) =
     fmap CommitReference <$> lookupReference (referenceName ref)
 
 {- $objects -}
-data ObjRef m a = ByOid !(Tagged a (Oid m)) | Known !a
+data ObjectOid m = BlobObjOid   !(BlobOid m)
+                 | TreeObjOid   !(TreeOid m)
+                 | CommitObjOid !(CommitOid m)
+                 | TagObjOid    !(TagOid m)
 
-type BlobRef m   = ObjRef m (Blob m)
-type TreeRef m   = ObjRef m (Tree m)
-type CommitRef m = ObjRef m (Commit m)
-type TagRef m    = ObjRef m (Tag m)
+data Object m = BlobObj   !(Blob m)
+              | TreeObj   !(Tree m)
+              | CommitObj !(Commit m)
+              | TagObj    !(Tag m)
 
-data Object m = BlobObj      !(BlobRef m)
-              | TreeObj      !(TreeRef m)
-              | CommitObj    !(CommitRef m)
-              | TagObj       !(TagRef m)
+objectOid :: Repository m => Object m -> Oid m
+objectOid (BlobObj obj)   = untag (blobOid obj)
+objectOid (TreeObj obj)   = untag (treeOid obj)
+objectOid (CommitObj obj) = untag (commitOid obj)
+objectOid (TagObj obj)    = untag (tagOid obj)
 
-objectOid :: Repository m => Object m -> m (Oid m)
-objectOid (BlobObj ref)   = return . untag $ blobRefOid ref
-objectOid (TreeObj ref)   = return . untag $ treeRefOid ref
-objectOid (CommitObj ref) = return . untag $ commitRefOid ref
-objectOid (TagObj ref)    = return . untag $ tagRefOid ref
+loadObject :: Repository m => ObjectOid m -> m (Object m)
+loadObject (BlobObjOid oid)   = BlobObj   <$> lookupBlob oid
+loadObject (TreeObjOid oid)   = TreeObj   <$> lookupTree oid
+loadObject (CommitObjOid oid) = CommitObj <$> lookupCommit oid
+loadObject (TagObjOid oid)    = TagObj    <$> lookupTag oid
+
+objectToObjOid :: Repository m => Object m -> ObjectOid m
+objectToObjOid (BlobObj obj)   = BlobObjOid (blobOid obj)
+objectToObjOid (TreeObj obj)   = TreeObjOid (treeOid obj)
+objectToObjOid (CommitObj obj) = CommitObjOid (commitOid obj)
+objectToObjOid (TagObj obj)    = TagObjOid (tagOid obj)
+
+untagObjOid :: Repository m => ObjectOid m -> Oid m
+untagObjOid (BlobObjOid oid)   = untag oid
+untagObjOid (TreeObjOid oid)   = untag oid
+untagObjOid (CommitObjOid oid) = untag oid
+untagObjOid (TagObjOid oid)    = untag oid
 
 {- $blobs -}
 data Blob m = Blob { blobOid      :: !(BlobOid m)
                    , blobContents :: !(BlobContents m) }
-
-blobRefOid :: Repository m => BlobRef m -> BlobOid m
-blobRefOid (ByOid oid) = oid
-blobRefOid (Known (Blob {..})) = blobOid
-
-resolveBlobRef :: Repository m => BlobRef m -> m (Blob m)
-resolveBlobRef (ByOid oid) = lookupBlob oid
-resolveBlobRef (Known obj) = return obj
 
 type ByteSource m = Producer m ByteString
 
@@ -485,40 +482,40 @@ putTree path t = putEntry path (TreeEntry t)
 putCommit :: Repository m => FilePath -> CommitOid m -> TreeT m ()
 putCommit path c = putEntry path (CommitEntry c)
 
-doWithTree :: Repository m => Maybe (Tree m) -> TreeT m a -> m (a, TreeRef m)
+doWithTree :: Repository m => Maybe (Tree m) -> TreeT m a -> m (a, TreeOid m)
 doWithTree mtr act =
     fst <$> (runStateT (runTreeT go) =<< newTreeBuilder mtr)
   where
-    go = liftM2 (,) act currentTreeRef
+    go = liftM2 (,) act currentTreeOid
 
-withTree :: Repository m => Tree m -> TreeT m a -> m (a, TreeRef m)
+withTree :: Repository m => Tree m -> TreeT m a -> m (a, TreeOid m)
 withTree tr = doWithTree (Just tr)
 
-withTreeRef :: Repository m => TreeRef m -> TreeT m a -> m (a, TreeRef m)
-withTreeRef ref action = do
-    tree <- resolveTreeRef ref
+withTreeOid :: Repository m => TreeOid m -> TreeT m a -> m (a, TreeOid m)
+withTreeOid oid action = do
+    tree <- lookupTree oid
     doWithTree (Just tree) action
 
-mutateTree :: Repository m => Tree m -> TreeT m a -> m (TreeRef m)
+mutateTree :: Repository m => Tree m -> TreeT m a -> m (TreeOid m)
 mutateTree tr action = snd <$> withTree tr action
 
-mutateTreeRef :: Repository m => TreeRef m -> TreeT m a -> m (TreeRef m)
-mutateTreeRef tr action = snd <$> withTreeRef tr action
+mutateTreeOid :: Repository m => TreeOid m -> TreeT m a -> m (TreeOid m)
+mutateTreeOid tr action = snd <$> withTreeOid tr action
 
-currentTreeRef :: Repository m => TreeT m (TreeRef m)
-currentTreeRef = do
+currentTreeOid :: Repository m => TreeT m (TreeOid m)
+currentTreeOid = do
     tb <- getBuilder
-    (tb', tref) <- lift $ writeTreeBuilder tb
+    (tb', toid) <- lift $ writeTreeBuilder tb
     putBuilder tb'
-    return tref
+    return toid
 
 currentTree :: Repository m => TreeT m (Tree m)
-currentTree = lift . resolveTreeRef =<< currentTreeRef
+currentTree = lift . lookupTree =<< currentTreeOid
 
-withNewTree :: Repository m => TreeT m a -> m (a, TreeRef m)
+withNewTree :: Repository m => TreeT m a -> m (a, TreeOid m)
 withNewTree = doWithTree Nothing
 
-createTree :: Repository m => TreeT m a -> m (TreeRef m)
+createTree :: Repository m => TreeT m a -> m (TreeOid m)
 createTree action = snd <$> withNewTree action
 
 data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
@@ -557,18 +554,6 @@ toModifyTreeResult :: (TreeEntry m -> ModifyTreeResult m)
 toModifyTreeResult _ Nothing  = TreeEntryNotFound
 toModifyTreeResult f (Just x) = f x
 
--- | A 'Tree' is anything that is "treeish".
-treeRef :: Tree m -> TreeRef m
-treeRef = Known
-
-treeRefOid :: Repository m => TreeRef m -> TreeOid m
-treeRefOid (ByOid x) = x
-treeRefOid (Known x) = treeOid x
-
-resolveTreeRef :: Repository m => TreeRef m -> m (Tree m)
-resolveTreeRef (ByOid oid) = lookupTree oid
-resolveTreeRef (Known obj) = return obj
-
 {- $commits -}
 data Signature = Signature
     { signatureName  :: !Text
@@ -591,32 +576,21 @@ instance Default Signature where
 
 data Commit m = Commit
     { commitOid       :: !(CommitOid m)
-    , commitParents   :: ![CommitRef m]
-    , commitTree      :: !(TreeRef m)
+    , commitParents   :: ![CommitOid m]
+    , commitTree      :: !(TreeOid m)
     , commitAuthor    :: !Signature
     , commitCommitter :: !Signature
     , commitLog       :: !Text
     , commitEncoding  :: !Text
     }
 
-commitRef :: Commit m -> CommitRef m
-commitRef = Known
+commitRefTarget :: Commit m -> RefTarget m
+commitRefTarget = RefObj . commitOid
 
-commitRefTarget :: Commit c -> RefTarget m (Commit c)
-commitRefTarget = RefObj . Known
-
-commitRefOid :: Repository m => CommitRef m -> CommitOid m
-commitRefOid (ByOid x) = x
-commitRefOid (Known x) = commitOid x
-
-resolveCommitRef :: Repository m => CommitRef m -> m (Commit m)
-resolveCommitRef (ByOid oid) = lookupCommit oid
-resolveCommitRef (Known obj) = return obj
-
-referenceToRef :: Repository m
-               => Maybe Text -> Maybe (Reference m (Commit m))
-               -> m (Maybe (CommitRef m))
-referenceToRef mname mref =
+referenceToOid :: Repository m
+               => Maybe Text -> Maybe (Reference m)
+               -> m (Maybe (CommitOid m))
+referenceToOid mname mref =
     case mref of
         Nothing -> return Nothing
         Just (Reference { referenceTarget = RefObj x }) ->
@@ -630,12 +604,8 @@ referenceToRef mname mref =
 
 data Tag m = Tag
     { tagOid    :: !(TagOid m)
-    , tagCommit :: !(CommitRef m)
+    , tagCommit :: !(CommitOid m)
     }
-
-tagRefOid :: Repository m => TagRef m -> TagOid m
-tagRefOid (ByOid x) = x
-tagRefOid (Known x) = tagOid x
 
 {- $merges -}
 
@@ -756,8 +726,7 @@ catBlob str =
     else do
         obj <- lookupObject str
         case obj of
-            BlobObj (ByOid oid) -> lookupBlob oid >>= blobToByteString
-            BlobObj (Known x)   -> blobToByteString x
+            BlobObj b -> blobToByteString b
             _ -> failure (ObjectLookupFailed str len)
   where
     len = T.length str
@@ -780,8 +749,8 @@ blobToByteString (Blob _ contents) = blobContentsToByteString contents
 splitPath :: FilePath -> [Text]
 splitPath path = T.splitOn "/" text
   where text = case toText path of
-                 Left x  -> error $ "Invalid path: " ++ T.unpack x
-                 Right y -> y
+            Left x  -> error $ "Invalid path: " ++ T.unpack x
+            Right y -> y
 
 data ModifiedBuilder m = ModifiedBuilder (TreeBuilder m)
                        | BuilderUnchanged (TreeBuilder m)
@@ -798,10 +767,10 @@ fromBuilderMod (BuilderUnchanged tb) = tb
 fromBuilderMod (ModifiedBuilder tb)  = tb
 
 data TreeBuilder m = TreeBuilder
-    { mtbBaseTreeRef    :: Maybe (TreeRef m)
+    { mtbBaseTreeOid    :: Maybe (TreeOid m)
     , mtbPendingUpdates :: HashMap Text (TreeBuilder m)
     , mtbNewBuilder     :: Maybe (Tree m) -> m (TreeBuilder m)
-    , mtbWriteContents  :: TreeBuilder m -> m (ModifiedBuilder m, TreeRef m)
+    , mtbWriteContents  :: TreeBuilder m -> m (ModifiedBuilder m, TreeOid m)
     , mtbLookupEntry    :: Text -> m (Maybe (TreeEntry m))
     , mtbEntryCount     :: m Int
     , mtbPutEntry       :: TreeBuilder m -> Text -> TreeEntry m
@@ -811,7 +780,7 @@ data TreeBuilder m = TreeBuilder
 
 instance Monad m => Monoid (TreeBuilder m) where
     mempty = TreeBuilder
-        { mtbBaseTreeRef    = Nothing
+        { mtbBaseTreeOid    = Nothing
         , mtbPendingUpdates = HashMap.empty
         , mtbNewBuilder     = error "Implement TreeBuilder.mtbNewBuilder"
         , mtbWriteContents  = error "Implement TreeBuilder.mtbWriteContents"
@@ -821,7 +790,7 @@ instance Monad m => Monoid (TreeBuilder m) where
         , mtbDropEntry      = \tb _ -> return (BuilderUnchanged tb)
         }
     tb1 `mappend` tb2 = tb2
-        { mtbBaseTreeRef    = mtbBaseTreeRef tb1
+        { mtbBaseTreeOid    = mtbBaseTreeOid tb1
         , mtbPendingUpdates = mtbPendingUpdates tb1
         }
 
@@ -861,7 +830,7 @@ queryTreeBuilder builder path kind f = do
 
     doUpdate GetEntry bm name sbm = do
         (_, tref) <- writeTreeBuilder (fromBuilderMod sbm)
-        returnTree bm name $ f (Just (TreeEntry (treeRefOid tref)))
+        returnTree bm name $ f (Just (TreeEntry tref))
     doUpdate _ bm name _ = returnTree bm name (f Nothing)
 
     update bm name [] (Left sbm) = doUpdate kind bm name sbm
@@ -917,13 +886,11 @@ queryTreeBuilder builder path kind f = do
 --   nothing will happen.
 writeTreeBuilder :: Repository m
                  => TreeBuilder m
-                 -> m (TreeBuilder m, TreeRef m)
+                 -> m (TreeBuilder m, TreeOid m)
 writeTreeBuilder builder = do
     (bm, mtref) <- go (BuilderUnchanged builder)
     tref <- case mtref of
-        Nothing -> do
-            emptyTreeOid <- parseObjOid emptyTreeId
-            return $ ByOid emptyTreeOid
+        Nothing   -> parseObjOid emptyTreeId
         Just tref -> return tref
     return (fromBuilderMod bm, tref)
   where
@@ -950,7 +917,7 @@ writeTreeBuilder builder = do
         (_,mtref) <- go (BuilderUnchanged v)
         bm' <- case mtref of
             Nothing   -> mtbDropEntry tb tb k
-            Just tref -> mtbPutEntry tb tb k (TreeEntry (treeRefOid tref))
+            Just tref -> mtbPutEntry tb tb k (TreeEntry tref)
         return $ bm <> bm'
 
 treeBlobEntries :: Repository m => Tree m -> m [(FilePath,TreeEntry m)]
@@ -966,20 +933,19 @@ commitTreeEntry :: Repository m
                 -> FilePath
                 -> m (Maybe (TreeEntry m))
 commitTreeEntry c path =
-    flip getTreeEntry path =<< resolveTreeRef (commitTree c)
+    flip getTreeEntry path =<< lookupTree (commitTree c)
 
 copyBlob :: (Repository m, Repository (t m), MonadTrans t)
-         => BlobRef m
+         => BlobOid m
          -> HashSet Text
          -> t m (BlobOid (t m), HashSet Text)
 copyBlob blobr needed = do
-    let oid = untag (blobRefOid blobr)
+    let oid = untag blobr
         sha = renderOid oid
     oid2 <- parseOid (renderOid oid)
     if HashSet.member sha needed
         then do
-        bs <- lift $ blobToByteString
-              =<< resolveBlobRef (ByOid (Tagged oid))
+        bs <- lift $ blobToByteString =<< lookupBlob (Tagged oid)
         boid <- createBlob (BlobString bs)
 
         let x = HashSet.delete sha needed
@@ -992,7 +958,7 @@ copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               -> HashSet Text
               -> t m (TreeEntry (t m), HashSet Text)
 copyTreeEntry (BlobEntry oid kind) needed = do
-    (b,needed') <- copyBlob (ByOid oid) needed
+    (b,needed') <- copyBlob oid needed
     return (BlobEntry b kind, needed')
 copyTreeEntry (CommitEntry oid) needed = do
     coid <- parseOid (renderObjOid oid)
@@ -1000,23 +966,23 @@ copyTreeEntry (CommitEntry oid) needed = do
 copyTreeEntry (TreeEntry _) _ = error "This should never be called"
 
 copyTree :: (Repository m, Repository (t m), MonadTrans t)
-         => TreeRef m
+         => TreeOid m
          -> HashSet Text
-         -> t m (TreeRef (t m), HashSet Text)
+         -> t m (TreeOid (t m), HashSet Text)
 copyTree tr needed = do
-    let oid = untag (treeRefOid tr)
+    let oid = untag tr
         sha = renderOid oid
     oid2 <- parseOid (renderOid oid)
     if HashSet.member sha needed
         then do
-        tree            <- lift $ resolveTreeRef tr
+        tree            <- lift $ lookupTree tr
         entries         <- lift $ traverseEntries (curry return) tree
         (needed', tref) <- withNewTree $ foldM doCopyTreeEntry needed entries
 
         let x = HashSet.delete sha needed'
         return $ tref `seq` x `seq` (tref, x)
 
-        else return (ByOid (Tagged oid2), needed)
+        else return (Tagged oid2, needed)
   where
     doCopyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
                     => HashSet Text -> (FilePath, TreeEntry m)
@@ -1028,14 +994,14 @@ copyTree tr needed = do
         return needed''
 
 copyCommit :: (Repository m, Repository (t m), MonadTrans t)
-           => CommitRef m
+           => CommitOid m
            -> Maybe Text
            -> HashSet Text
-           -> t m (CommitRef (t m), HashSet Text)
+           -> t m (CommitOid (t m), HashSet Text)
 copyCommit cr mref needed = do
-    let oid = untag (commitRefOid cr)
+    let oid = untag cr
         sha = renderOid oid
-    commit <- lift $ resolveCommitRef cr
+    commit <- lift $ lookupCommit cr
     oid2   <- parseOid sha
     if HashSet.member sha needed
         then do
@@ -1049,11 +1015,11 @@ copyCommit cr mref needed = do
             (commitLog commit)
             mref
 
-        let cref = commitRef $! commit'
+        let coid = commitOid commit'
             x    = HashSet.delete sha needed''
-        return $ cref `seq` x `seq` (cref, x)
+        return $ coid `seq` x `seq` (coid, x)
 
-        else return (ByOid (Tagged oid2), needed)
+        else return (Tagged oid2, needed)
   where
     copyParent (prefs,needed') cref = do
         (cref2,needed'') <- copyCommit cref Nothing needed'
@@ -1063,15 +1029,15 @@ copyCommit cr mref needed = do
 -- | Given a list of objects (commit and top-level trees) return by
 --   'missingObjects', expand it to include all subtrees and blobs as well.
 --   Ordering is preserved.
-allMissingObjects :: Repository m => [Object m] -> m [Object m]
+allMissingObjects :: Repository m => [ObjectOid m] -> m [ObjectOid m]
 allMissingObjects objs =
     fmap concat . forM objs $ \obj -> case obj of
-        TreeObj ref -> do
-            tr       <- resolveTreeRef ref
+        TreeObjOid toid -> do
+            tr <- lookupTree toid
             subobjss <- flip traverseEntries tr $ \_ ent ->
                 return $ case ent of
-                    BlobEntry oid _ -> [BlobObj (ByOid oid)]
-                    TreeEntry oid   -> [TreeObj (ByOid oid)]
+                    BlobEntry oid _ -> [BlobObjOid oid]
+                    TreeEntry oid   -> [TreeObjOid oid]
                     _ -> []
             return (obj:concat subobjss)
         _ -> return [obj]
@@ -1079,10 +1045,10 @@ allMissingObjects objs =
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works.
 genericPushCommit :: (Repository m, Repository (t m), MonadTrans t)
-                  => CommitName m -> Text -> t m (CommitRef (t m))
-genericPushCommit cname remoteRefName = do
+                  => CommitOid m -> Text -> t m (CommitOid (t m))
+genericPushCommit coid remoteRefName = do
     mrref    <- lookupReference remoteRefName
-    commits1 <- lift $ traverseCommits crefToSha cname
+    commits1 <- lift $ traverseCommits crefToSha coid
     fastForward <- case mrref of
         Just rref -> do
             mrsha <- referenceSha rref
@@ -1092,7 +1058,7 @@ genericPushCommit cname remoteRefName = do
                 Just rsha
                     | rsha `elem` commits1 -> do
                         roid <- lift $ parseOid rsha
-                        return $ Just (Just (CommitObjectId (Tagged roid)))
+                        return $ Just (Just (Tagged roid))
                     | otherwise -> do
                         failure (PushNotFastForward $
                                  "SHA " <> rsha
@@ -1100,31 +1066,23 @@ genericPushCommit cname remoteRefName = do
         Nothing -> return (Just Nothing)
     case fastForward of
         Nothing -> failure (PushNotFastForward "unexpected")
-        Just liftedMrref -> do
-            objs <- lift $ allMissingObjects
-                        =<< missingObjects liftedMrref cname
-            shas <- mapM (\obj -> renderOid <$> lift (objectOid obj)) objs
-            mref <- lift $ commitNameToRef cname
-            case mref of
-                Nothing -> failure (ReferenceLookupFailed (T.pack (show cname)))
-                Just ref -> do
-                    (cref,_) <- copyCommit ref Nothing (HashSet.fromList shas)
-                    -- jww (2013-04-18): This is something the user must
-                    -- decide to do
-                    -- updateRef_ remoteRefName (RefObj cref)
-                    return cref
+        Just rref -> do
+            objs <- lift $ allMissingObjects =<< missingObjects rref coid
+            shas <- mapM (return . renderOid . untagObjOid) objs
+            (cref,_) <- copyCommit coid Nothing (HashSet.fromList shas)
+            -- jww (2013-04-18): This is something the user must
+            -- decide to do
+            -- updateReference_ remoteRefName (RefObj cref)
+            return cref
   where
-    referenceSha ref = do
-        r <- referenceToRef Nothing (Just ref)
-        return $ renderObjOid . commitRefOid <$> r
-
-    crefToSha cref  = return (renderObjOid (commitRefOid cref))
+    referenceSha ref = fmap renderObjOid <$> referenceToOid Nothing (Just ref)
+    crefToSha cref   = return $ renderObjOid cref
 
 commitHistoryFirstParent :: Repository m => Commit m -> m [Commit m]
 commitHistoryFirstParent c =
     case commitParents c of
         []    -> return [c]
-        (p:_) -> do ps <- commitHistoryFirstParent =<< resolveCommitRef p
+        (p:_) -> do ps <- commitHistoryFirstParent =<< lookupCommit p
                     return (c:ps)
 
 data PinnedEntry m = PinnedEntry
@@ -1149,7 +1107,7 @@ commitEntryHistory c path =
         entry <- getCommitTreeEntry co
         rest  <- case commitParents co of
             []    -> return []
-            (p:_) -> go =<< resolveCommitRef p
+            (p:_) -> go =<< lookupCommit p
         return $ maybe rest (:rest) entry
 
     getCommitTreeEntry co = do
@@ -1159,7 +1117,7 @@ commitEntryHistory c path =
             Just ce' -> Just <$> identifyEntry co ce'
 
 getCommitParents :: Repository m => Commit m -> m [Commit m]
-getCommitParents = traverse resolveCommitRef . commitParents
+getCommitParents = traverse lookupCommit . commitParents
 
 resolveReferenceTree :: Repository m => Text -> m (Maybe (Tree m))
 resolveReferenceTree refName = do
@@ -1167,7 +1125,7 @@ resolveReferenceTree refName = do
     case c of
         Nothing -> return Nothing
         Just c' ->
-            Just <$> (resolveCommitRef c' >>= resolveTreeRef . commitTree)
+            Just <$> (lookupCommit c' >>= lookupTree . commitTree)
 
 withNewRepository :: (Repository (t m), MonadGit (t m),
                       MonadBaseControl IO m, MonadIO m, MonadTrans t)

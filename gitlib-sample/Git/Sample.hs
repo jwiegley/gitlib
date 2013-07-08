@@ -15,7 +15,7 @@ module Git.Sample
        ( SampleRepository(..), Repository(..)
        , Git.Oid, BlobOid(), TreeOid(), CommitOid()
        , Tree(), Commit()
-       , TreeRef(), CommitRef(), Reference()
+       , Reference()
        , sampleFactory
        , sampleGet
        ) where
@@ -100,11 +100,7 @@ type CommitOid m = Git.CommitOid (SampleRepository m)
 
 type Tree m      = Git.Tree (SampleRepository m)
 type Commit m    = Git.Commit (SampleRepository m)
-
-type TreeRef m   = Git.TreeRef (SampleRepository m)
-type CommitRef m = Git.CommitRef (SampleRepository m)
-
-type Reference m = Git.Reference (SampleRepository m) (Commit m)
+type Reference m = Git.Reference (SampleRepository m)
 
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask
