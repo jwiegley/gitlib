@@ -248,7 +248,7 @@ lgObjToBlob oid ptr = do
     -- The lifetime of buf is tied to the lifetime of the blob object in
     -- libgit2, which this Blob object controls, so we can use
     -- unsafePackCStringLen to refer to its bytes.
-    bstr <- curry BU.unsafePackCStringLen (castPtr buf) (fromIntegral size)
+    bstr <- curry B.packCStringLen (castPtr buf) (fromIntegral size)
     return $ Git.Blob oid (Git.BlobString bstr)
 
 lgLookupBlob :: Git.MonadGit m => BlobOid m

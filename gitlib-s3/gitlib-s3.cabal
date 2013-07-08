@@ -1,5 +1,5 @@
 Name:                gitlib-s3
-Version:             1.4.0
+Version:             1.4.1
 Synopsis:            Gitlib repository backend for storing Git objects in Amazon S3
 Description:         Gitlib repository backend for storing Git objects in Amazon S3.
 License-file:        LICENSE
@@ -23,9 +23,9 @@ Test-suite smoke
   build-depends:
       base >=3
     , gitlib             >= 1.4.0
-    , gitlib-s3          >= 1.4.0
+    , gitlib-s3          >= 1.4.1
     , gitlib-test        >= 1.4.0
-    , gitlib-libgit2     >= 1.4.0
+    , gitlib-libgit2     >= 1.4.1
     , hlibgit2           >= 0.18.0.7
     , aws                >= 0.7.5
     , HUnit              >= 1.2.5
@@ -46,7 +46,7 @@ Library
   build-depends:
       base                 >= 3 && < 5
     , gitlib               >= 1.4.0
-    , gitlib-libgit2       >= 1.4.0
+    , gitlib-libgit2       >= 1.4.1
     , ghc-prim
     , hlibgit2             >= 0.18.0.1
     , HUnit                >= 1.2.5
