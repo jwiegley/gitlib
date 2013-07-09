@@ -47,7 +47,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
-      x <- catBlob "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+      x <- catBlob =<< parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
       liftIO $ x @?= "Hello, world!\n"
 
       -- jww (2013-02-01): Restore when S3 support prefix lookups
@@ -185,16 +185,16 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c2)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
-      updateReference_ "refs/heads/master" (RefObj (commitOid c2))
+      updateReference "refs/heads/master" (RefObj (commitOid c2))
       hasSymRefs <- hasSymbolicReferences <$> facts
       when hasSymRefs $
-          updateReference_ "HEAD" (RefSymbolic "refs/heads/master")
+          updateReference "HEAD" (RefSymbolic "refs/heads/master")
 
       Just c3 <- resolveReference "refs/heads/master"
       let x = renderObjOid c3
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
-      refs <- allReferenceNames
+      refs <- listReferences
       liftIO $ show refs @?= "[\"refs/heads/master\"]"
 
       -- jww (2013-01-27): Restore
@@ -244,16 +244,16 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       createCommit [] tree sig sig "Initial commit" (Just masterRef)
 
       tree' <- lookupTree tree
-      paths <- traverseEntries (const . return) tree'
+      paths <- map fst <$> listTreeEntries tree'
       liftIO $ sort paths @?= [ "Files"
-                              , "Five"
-                              , "More"
-                              , "One"
-                              , "Two"
                               , "Files/Three"
+                              , "Five"
                               , "Five/More"
                               , "Five/More/Four"
+                              , "More"
                               , "More/Four"
+                              , "One"
+                              , "Two"
                               ]
 
   treeit "adds a file" pr
@@ -296,14 +296,14 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   treeit "adds files at multiple depths" pr
       [ Tr "a"
       , Tr "a/b"
-      , Bl "a/one"
       , Tr "a/b/c"
-      , Bl "a/b/two"
       , Tr "a/b/c/d"
-      , Bl "a/b/c/three"
       , Tr "a/b/c/d/e"
-      , Bl "a/b/c/d/four"
       , Bl "a/b/c/d/e/five"
+      , Bl "a/b/c/d/four"
+      , Bl "a/b/c/three"
+      , Bl "a/b/two"
+      , Bl "a/one"
       ] $ do
           putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
           putBlob "a/b/two" =<< lift (createBlobUtf8 "two\n")
@@ -313,20 +313,20 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
   treeit "adds files at mixed depths" pr
       [ Tr "a"
-      , Tr "b"
-      , Tr "d"
-      , Tr "g"
-      , Tr "k"
       , Bl "a/one"
+      , Tr "b"
       , Tr "b/c"
       , Bl "b/c/two"
+      , Tr "d"
       , Tr "d/e"
       , Tr "d/e/f"
       , Bl "d/e/f/three"
+      , Tr "g"
       , Tr "g/h"
       , Tr "g/h/i"
       , Tr "g/h/i/j"
       , Bl "g/h/i/j/four"
+      , Tr "k"
       , Tr "k/l"
       , Tr "k/l/m"
       , Tr "k/l/m/n"
@@ -353,11 +353,11 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
   treeit "adds and drops files at mixed depths" pr
       [ Tr "a"
-      , Tr "b"
-      , Tr "g"
       , Bl "a/one"
+      , Tr "b"
       , Tr "b/c"
       , Bl "b/c/two"
+      , Tr "g"
       , Tr "g/h"
       , Tr "g/h/i"
       , Tr "g/h/i/j"
@@ -376,13 +376,13 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   where
     fakeTime secs = utcToZonedTime utc (posixSecondsToUTCTime secs)
 
-data Kind = Bl FilePath | Tr FilePath deriving (Eq, Show)
+data Kind = Bl T.Text | Tr T.Text deriving (Eq, Show)
 
 isBlobKind :: Kind -> Bool
 isBlobKind (Bl _) = True
 isBlobKind _      = False
 
-kindPath :: Kind -> FilePath
+kindPath :: Kind -> T.Text
 kindPath (Bl path) = path
 kindPath (Tr path) = path
 
@@ -390,9 +390,10 @@ data TreeitException = TreeitException T.Text deriving (Eq, Show, Typeable)
 
 instance Exception TreeitException
 
-mkBlob :: Repository m => FilePath -> TreeT m ()
+mkBlob :: Repository m => T.Text -> TreeT m ()
 mkBlob path =
-    putBlob path =<< lift (createBlobUtf8 (baseFilename path <> "\n"))
+    putBlob path
+        =<< lift (createBlobUtf8 (baseFilename (fromText path) <> "\n"))
 
 baseFilename :: FilePath -> T.Text
 baseFilename = either id id . toText . filename
@@ -405,12 +406,13 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     tree <- lookupTree tref
     forM_ kinds $ \kind -> do
         let path = kindPath kind
-        entry <- getTreeEntry tree path
+        entry <- treeEntry tree path
         case entry of
             Just (BlobEntry boid _) -> do
                 liftIO $ isBlobKind kind @?= True
                 bs <- lookupBlob boid >>= blobToByteString
-                liftIO $ T.decodeUtf8 bs @?= baseFilename path <> "\n"
+                liftIO $ T.decodeUtf8 bs
+                    @?= baseFilename (fromText path) <> "\n"
             Just (TreeEntry _) ->
                 liftIO $ isBlobKind kind @?= False
             Nothing ->
@@ -418,8 +420,8 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
             _ -> do
                 liftIO $ isBlobKind kind @?= False
                 liftIO $ throwIO (TreeitException "Entry is of unexpected kind")
-    kinds' <- traverseEntries (const . return) tree
-    liftIO $ sort kinds' @?= map kindPath kinds
+    paths <- map fst <$> listTreeEntries tree
+    liftIO $ sort paths @?= map kindPath kinds
   where
     fullPath  = fromText (T.pack (normalize label)) <> ".git"
     normalize = map (\x -> if x == ' ' then '-' else x)

@@ -563,29 +563,23 @@ putFileS3 dets filepath src = do
                             (RequestBodyLBS lbs))
             void $ readResponseIO res
 
-type RefMap m = M.HashMap Text (Maybe (Git.Reference (LgRepository m)))
+type RefMap m = M.HashMap Text (Maybe (Git.RefTarget (LgRepository m)))
 
 -- jww (2013-04-26): Split these off into a gitlib-aeson library.
-instance A.FromJSON (Reference m) where
+instance A.FromJSON (RefTarget m) where
     parseJSON j = do
         o <- A.parseJSON j
         case L.lookup "symbolic" (M.toList (o :: A.Object)) of
-            Just _ -> Git.Reference
-                          <$> o .: "symbolic"
-                          <*> (Git.RefSymbolic <$> o .: "target")
-            Nothing -> Git.Reference
-                           <$> o .: "name"
-                           <*> (Git.RefObj . go <$> o .: "target")
+            Just _  -> Git.RefSymbolic <$> o .: "symbolic-target"
+            Nothing -> Git.RefObj . go <$> o .: "oid-target"
       where
         go = return . mkOid . unsafePerformIO . strToOid
 
-instance Git.MonadGit m => A.ToJSON (Reference m) where
-  toJSON (Git.Reference name (Git.RefSymbolic target)) =
-      object [ "symbolic" .= name
-             , "target"   .= target ]
-  toJSON (Git.Reference name (Git.RefObj oid)) =
-      object [ "name"   .= name
-             , "target" .= coidToJSON (getOid (unTagged oid)) ]
+instance Git.MonadGit m => A.ToJSON (RefTarget m) where
+  toJSON (Git.RefSymbolic target) =
+      object [ "symbolic-target" .= target ]
+  toJSON (Git.RefObj oid) =
+      object [ "oid-target" .= coidToJSON (getOid (unTagged oid)) ]
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
@@ -623,13 +617,11 @@ mirrorRefsFromS3 be = do
   where
     go repoPtr namePtr ref ptr = do
         r <- case ref of
-            Just Git.Reference
-                { Git.referenceTarget = Git.RefSymbolic target } ->
+            Just (Git.RefSymbolic target) ->
                 withCString (T.unpack target) $ \targetPtr ->
                     c'git_reference_symbolic_create ptr repoPtr namePtr
                         targetPtr 1
-            Just Git.Reference {
-                Git.referenceTarget = Git.RefObj (Tagged coid) } ->
+            Just (Git.RefObj (Tagged coid)) ->
                 withForeignPtr (getOid coid) $ \coidPtr ->
                     c'git_reference_create ptr repoPtr namePtr coidPtr 1
             _ -> return 0
@@ -637,7 +629,7 @@ mirrorRefsFromS3 be = do
 
 mirrorRefsToS3 :: Git.MonadGit m => Ptr C'git_odb_backend -> LgRepository m ()
 mirrorRefsToS3 be = do
-    names <- Git.allReferenceNames
+    names <- Git.listReferences
     refs  <- mapM Git.lookupReference names
     liftIO $ writeRefs be (M.fromList (L.zip names refs))
 

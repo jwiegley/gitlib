@@ -11,6 +11,7 @@
 module Main where
 
 import           Control.Concurrent (threadDelay)
+import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Trans.Class
@@ -21,11 +22,11 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Text (Text)
-import qualified Data.Text as T (Text, pack, unpack)
+import qualified Data.Text as T
 #if MIN_VERSION_shelly(1, 0, 0)
-import qualified Data.Text as TL (Text, pack, unpack, init)
+import qualified Data.Text as TL
 #else
-import qualified Data.Text.Lazy as TL (Text, pack, unpack, toStrict, init)
+import qualified Data.Text.Lazy as TL
 #endif
 import           Data.Time
 import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
@@ -47,6 +48,13 @@ toStrict :: TL.Text -> T.Text
 toStrict = id
 #else
 toStrict = TL.toStrict
+#endif
+
+fromStrict :: T.Text -> TL.Text
+#if MIN_VERSION_shelly(1, 0, 0)
+fromStrict = id
+#else
+fromStrict = TL.fromStrict
 #endif
 
 instance Read FilePath
@@ -108,7 +116,7 @@ doMain opts = do
         infoL $ "Working tree: " ++ fileStr wd
         ref <- lookupReference "HEAD"
         void $ case ref of
-            Just (Reference _ (RefSymbolic name)) -> do
+            Just (RefSymbolic name) -> do
                 infoL $ "Tracking branch " ++ T.unpack name
                 start wd (toStrict userName) (toStrict userEmail) name
             _ -> do
@@ -163,7 +171,7 @@ snapshotTree :: MonadGit m
              -> Text
              -> Commit (LgRepository m)
              -> TreeOid (LgRepository m)
-             -> Map FilePath (FileEntry (LgRepository m))
+             -> Map Text (FileEntry (LgRepository m))
              -> LgRepository m ()
 snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     -- Read the current working tree's state on disk
@@ -199,9 +207,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
 
     -- Rinse, wash, repeat.
     ref' <- lookupReference "HEAD"
-    let curRef = case ref' of
-            Just (Reference _ (RefSymbolic ref'')) -> ref''
-            _ -> ""
+    let curRef = case ref' of Just (RefSymbolic ref'') -> ref''; _ -> ""
     if ref /= curRef
         then infoL $ "Branch changed to " ++ T.unpack curRef
                   ++ ", restarting"
@@ -209,48 +215,48 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
 
   where
     scanOldEntry :: MonadGit m
-                 => Map FilePath (FileEntry (LgRepository m))
-                 -> FilePath
+                 => Map Text (FileEntry (LgRepository m))
+                 -> Text
                  -> FileEntry (LgRepository m)
                  -> TreeT (LgRepository m) ()
     scanOldEntry ft fp _ = case Map.lookup fp ft of
         Nothing -> do
-            lift . infoL $ "Removed: " ++ fileStr fp
+            lift . infoL $ "Removed: " <> T.unpack fp
             dropEntry fp
         _ -> return ()
 
     scanNewEntry :: MonadGit m
-                 => Map FilePath (FileEntry (LgRepository m))
-                 -> FilePath
+                 => Map Text (FileEntry (LgRepository m))
+                 -> Text
                  -> FileEntry (LgRepository m)
                  -> TreeT (LgRepository m) ()
-    scanNewEntry ft fp (FileEntry mt (BlobEntry oid exe) _) =
+    scanNewEntry ft fp (FileEntry mt oid kind _) =
         case Map.lookup fp ft of
             Nothing -> do
-                lift . infoL $ "Added to snapshot: " ++ fileStr fp
-                putBlob' fp oid exe
-            Just (FileEntry oldMt (BlobEntry oldOid oldExe) fileOid)
-                | oid /= oldOid || exe /= oldExe -> do
-                    lift . infoL $ "Changed: " ++ fileStr fp
-                    putBlob' fp oid exe
+                lift . infoL $ "Added to snapshot: " ++ T.unpack fp
+                putBlob' fp oid kind
+            Just (FileEntry oldMt oldOid oldKind fileOid)
+                | oid /= oldOid || kind /= oldKind -> do
+                    lift . infoL $ "Changed: " ++ T.unpack fp
+                    putBlob' fp oid kind
                 | mt /= oldMt || oid /= fileOid -> do
                     path <- fileStr <$>
-                            liftIO (canonicalizePath (wd </> fp))
-                    lift . infoL $ "Changed: " ++ fileStr fp
+                            liftIO (canonicalizePath
+                                    (wd </> fromText (fromStrict fp)))
+                    lift . infoL $ "Changed: " ++ T.unpack fp
                     contents <- liftIO $ B.readFile path
                     newOid   <- lift $ createBlob (BlobString contents)
-                    putBlob' fp newOid exe
+                    putBlob' fp newOid kind
                 | otherwise -> return ()
-            _ -> return ()
-    scanNewEntry _ft _fp (FileEntry _mt _ _foid) = return ()
 
 data FileEntry m = FileEntry
-    { fileModTime   :: UTCTime
-    , fileBlobEntry :: TreeEntry m
-    , fileChecksum  :: BlobOid m
+    { fileModTime  :: UTCTime
+    , fileBlobOid  :: BlobOid m
+    , fileBlobKind :: BlobKind
+    , fileChecksum :: BlobOid m
     }
 
-type FileTree m = Map FilePath (FileEntry m)
+type FileTree m = Map Text (FileEntry m)
 
 readFileTree :: MonadGit m
              => Text
@@ -270,30 +276,33 @@ readFileTree' :: MonadGit m
               -> LgRepository m (FileTree (LgRepository m))
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
-    foldlM (\m (fp,ent) -> do
-                 fent <- readModTime wdir getHash fp ent
+    foldlM (\m (fp,oid,kind) -> do
+                 fent <- readModTime wdir getHash fp oid kind
                  return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
 readModTime :: MonadGit m
             => FilePath
             -> Bool
-            -> FilePath
-            -> TreeEntry (LgRepository m)
+            -> Text
+            -> BlobOid (LgRepository m)
+            -> BlobKind
             -> LgRepository m (Maybe (FileEntry (LgRepository m)))
-readModTime wdir getHash fp ent = do
-    let path = wdir </> fp
+readModTime wdir getHash fp oid kind = do
+    let path = wdir </> fromText (fromStrict fp)
     debugL $ "Checking file: " ++ fileStr path
     exists <- liftIO $ isFile path
     if exists
         then Just <$>
              (FileEntry
                   <$> liftIO (getModified path)
-                  <*> pure ent
+                  <*> pure oid
+                  <*> pure kind
                   <*> if getHash
-                      then do contents <- liftIO $ B.readFile (fileStr path)
+                      then do contents <- liftIO $ evaluate
+                                              =<< B.readFile (fileStr path)
                               hashContents (BlobString contents)
-                      else return (blobEntryOid ent))
+                      else return oid)
         else return Nothing
 
 fileStr :: FilePath -> String

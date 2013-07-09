@@ -98,7 +98,7 @@ pushToGitHub opts = do
         cref <- fromJust <$> resolveReference "HEAD"
         hc   <- lookupCommit cref
         rcoid <- Tagged <$> parseOid (toStrict remoteHead)
-        objs <- missingObjects (Just rcoid) (commitOid hc)
+        objs <- listObjects (Just rcoid) (commitOid hc) False
         for_ objs $ \obj -> case obj of
             Git.CommitObjOid coid -> do
                 commit <- lookupCommit coid
@@ -113,9 +113,9 @@ getRemoteName gd = do
     mref <- liftIO $ withRepository lgFactory gd $ lookupReference "HEAD"
     case mref of
         Nothing -> error "Could not find HEAD"
-        Just (Reference _ (RefObj _)) ->
+        Just (RefObj _) ->
             error "Cannot push from a detached HEAD"
-        Just (Reference _ (RefSymbolic (fromStrict -> branch)))
+        Just (RefSymbolic (fromStrict -> branch))
             | "refs/heads/" `TL.isPrefixOf` branch ->
                 TL.init <$> git [ "config"
                                 , "branch." <> base branch <> ".remote" ]

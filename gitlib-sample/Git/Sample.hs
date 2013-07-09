@@ -15,7 +15,6 @@ module Git.Sample
        ( SampleRepository(..), Repository(..)
        , Git.Oid, BlobOid(), TreeOid(), CommitOid()
        , Tree(), Commit()
-       , Reference()
        , sampleFactory
        , sampleGet
        ) where
@@ -56,8 +55,7 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     createReference   = undefined
     updateReference   = undefined
     deleteReference   = undefined
-    resolveReference  = undefined
-    allReferenceNames = undefined
+    listReferences    = undefined
     lookupCommit      = undefined
     lookupTree        = undefined
     lookupBlob        = undefined
@@ -65,13 +63,11 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     lookupObject      = undefined
     existsObject      = undefined
     pushCommit        = undefined
-    traverseCommits   = undefined
-    missingObjects    = undefined
-    traverseObjects   = undefined
+    listObjects       = undefined
     newTreeBuilder    = undefined
     treeOid           = undefined
-    getTreeEntry      = undefined
-    traverseEntries   = undefined
+    treeEntry         = undefined
+    listTreeEntries   = undefined
     hashContents      = undefined
     createBlob        = undefined
     createCommit      = undefined
@@ -96,11 +92,11 @@ newtype SampleRepository m a = SampleRepository
 type BlobOid m   = Git.BlobOid (SampleRepository m)
 type TreeOid m   = Git.TreeOid (SampleRepository m)
 type CommitOid m = Git.CommitOid (SampleRepository m)
---type TagOid m    = Git.TagOid (SampleRepository m)
+type TagOid m    = Git.TagOid (SampleRepository m)
 
 type Tree m      = Git.Tree (SampleRepository m)
 type Commit m    = Git.Commit (SampleRepository m)
-type Reference m = Git.Reference (SampleRepository m)
+type RefTarget m = Git.RefTarget (SampleRepository m)
 
 sampleGet :: Monad m => SampleRepository m Repository
 sampleGet = SampleRepository ask

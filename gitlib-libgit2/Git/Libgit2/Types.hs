@@ -96,10 +96,9 @@ type Tree m        = Git.Tree (LgRepository m)
 type Commit m      = Git.Commit (LgRepository m)
 type Tag m         = Git.Tag (LgRepository m)
 
-type CommitName m  = Git.CommitName (LgRepository m)
-type Reference m   = Git.Reference (LgRepository m)
 type Object m      = Git.Object (LgRepository m)
 type ObjectOid m   = Git.ObjectOid (LgRepository m)
+type RefTarget m   = Git.RefTarget (LgRepository m)
 
 type TreeBuilder m = Git.TreeBuilder (LgRepository m)
 type Options m     = Git.Options (LgRepository m)
