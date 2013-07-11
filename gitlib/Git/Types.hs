@@ -191,6 +191,11 @@ data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
                  | TreeEntry   { treeEntryOid   :: !(TreeOid m) }
                  | CommitEntry { commitEntryOid :: !(CommitOid m) }
 
+instance Repository m => Show (TreeEntry m) where
+    show (BlobEntry oid _) = "<BlobEntry " ++ T.unpack (renderObjOid oid)
+    show (TreeEntry oid)   = "<TreeEntry " ++ T.unpack (renderObjOid oid)
+    show (CommitEntry oid) = "<CommitEntry " ++ T.unpack (renderObjOid oid)
+
 treeEntryToOid :: Repository m => TreeEntry m -> Oid m
 treeEntryToOid (BlobEntry boid _) = untag boid
 treeEntryToOid (TreeEntry toid)   = untag toid
