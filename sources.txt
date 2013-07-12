@@ -8,7 +8,5 @@
 ./hlibgit2
 ./vendor/aws
 ./vendor/c2hsc
-./vendor/general-prelude
-./vendor/stringable
 ./git-monitor
 ./git-gpush

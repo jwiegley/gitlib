@@ -1,39 +1,9 @@
 [submodule "hlibgit2/libgit2"]
 	path = hlibgit2/libgit2
 	url = https://github.com/jwiegley/libgit2.git
-[submodule "vendor/mock-s3"]
-	path = vendor/mock-s3
-	url = https://github.com/jwiegley/mock-s3.git
 [submodule "vendor/aws"]
 	path = vendor/aws
 	url = https://github.com/fpco/aws
 [submodule "vendor/c2hsc"]
 	path = vendor/c2hsc
 	url = https://github.com/jwiegley/c2hsc.git
-[submodule "vendor/conduit"]
-	path = vendor/conduit
-	url = https://github.com/snoyberg/conduit.git
-[submodule "vendor/convertible"]
-	path = vendor/convertible
-	url = https://github.com/jwiegley/convertible
-[submodule "vendor/general-prelude"]
-	path = vendor/general-prelude
-	url = https://github.com/jwiegley/general-prelude.git
-[submodule "vendor/http-conduit"]
-	path = vendor/http-conduit
-	url = https://github.com/snoyberg/http-conduit.git
-[submodule "vendor/http-types"]
-	path = vendor/http-types
-	url = https://github.com/jwiegley/http-types.git
-[submodule "vendor/rest-client"]
-	path = vendor/rest-client
-	url = https://github.com/fpco/rest-client.git
-[submodule "vendor/stringable"]
-	path = vendor/stringable
-	url = https://github.com/jwiegley/stringable.git
-[submodule "vendor/svndump"]
-	path = vendor/svndump
-	url = https://github.com/jwiegley/svndump.git
-[submodule "vendor/github"]
-	path = vendor/github
-	url = https://github.com/fpco/github.git
