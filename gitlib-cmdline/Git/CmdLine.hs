@@ -181,10 +181,10 @@ cliFilePathToURI =
         . liftIO
         . F.canonicalizePath
 
-cliPushCommitDirectly :: Git.MonadGit m
-                      => CommitOid m -> Text -> Text -> Maybe FilePath
-                      -> CmdLineRepository m (CommitOid m)
-cliPushCommitDirectly cname remoteNameOrURI remoteRefName msshCmd = do
+cliPushCommit :: Git.MonadGit m
+              => CommitOid m -> Text -> Text -> Maybe FilePath
+              -> CmdLineRepository m (CommitOid m)
+cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
     repo <- cliGet
     merr <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
@@ -222,17 +222,17 @@ cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliResetHard refname =
     doRunGit run_ [ "reset", "--hard", fromStrict refname ] $ return ()
 
-cliPullCommitDirectly :: Git.MonadGit m
-                      => Text
-                      -> Text
-                      -> Text
-                      -> Text
-                      -> Maybe FilePath
-                      -> CmdLineRepository m
-                          (Git.MergeResult (CmdLineRepository m))
-cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
+cliPullCommit :: Git.MonadGit m
+              => Text
+              -> Text
+              -> Text
+              -> Text
+              -> Maybe FilePath
+              -> CmdLineRepository m
+                  (Git.MergeResult (CmdLineRepository m))
+cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     repo     <- cliGet
-    leftHead <- Git.resolveReference "HEAD"
+    leftHead <- cliResolveRef "HEAD"
 
     eres <- shellyNoDir $ silently $ errExit False $ do
         case msshCmd of
@@ -300,7 +300,7 @@ cliPullCommitDirectly remoteNameOrURI remoteRefName user email msshCmd = do
         git_ [ "--git-dir", repoPath repo, "add", fromStrict fp ]
 
     getOid name = do
-        mref <- Git.resolveReference name
+        mref <- cliResolveRef name
         case mref of
             Nothing  -> failure (Git.BackendError $
                                  T.append "Reference missing: " name)
