@@ -601,10 +601,15 @@ cliShowRef mrefName = do
 cliLookupRef :: Git.MonadGit m
              => Text -> CmdLineRepository m (Maybe (RefTarget m))
 cliLookupRef refName = do
-    xs <- cliShowRef (Just refName)
-    let name = fromStrict refName
-        ref  = maybe Nothing (lookup name) xs
-    maybe (return Nothing) (fmap Just . shaToRef) ref
+    repo <- cliGet
+    (ec,rev) <- shellyNoDir $ silently $ errExit False $ do
+        rev <- git $ [ "--git-dir", repoPath repo
+                     , "symbolic-ref", fromStrict refName ]
+        ec  <- lastExitCode
+        return (ec,rev)
+    if ec == 0
+        then return . Just . Git.RefSymbolic . toStrict . TL.init $ rev
+        else fmap Git.RefObj <$> cliResolveRef refName
 
 cliUpdateRef :: Git.MonadGit m
              => Text -> Git.RefTarget (CmdLineRepository m)
