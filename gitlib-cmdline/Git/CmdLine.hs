@@ -121,7 +121,9 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     createBlob       = cliCreateBlob
     createCommit     = cliCreateCommit
     createTag        = cliCreateTag
-    remoteFetch      = error "Not defined: CmdLineRepository.remoteFetch"
+
+    -- remoteFetch      = error "Not defined: CmdLineRepository.remoteFetch"
+
     deleteRepository =
         cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions
 

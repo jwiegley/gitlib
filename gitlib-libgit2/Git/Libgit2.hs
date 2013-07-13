@@ -36,8 +36,11 @@ module Git.Libgit2
        , lgGet
        , lgExcTrap
        , lgLoadPackFileInMemory
+       , lgBuildPackFile
        , lgReadFromPack
        , lgWithPackFile
+       , lgWritePackFile
+       , lgWrap
        , oidToSha
        , shaToOid
        , openLgRepository
@@ -185,11 +188,11 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
 
     deleteRepository = lgGet >>= liftIO . removeTree . repoPath
 
-    buildPackFile   = lgBuildPackFile
-    buildPackIndex  = lgBuildPackIndexWrapper
-    writePackFile   = lgWrap . lgWritePackFile
+    -- buildPackFile   = lgBuildPackFile
+    -- buildPackIndex  = lgBuildPackIndexWrapper
+    -- writePackFile   = lgWrap . lgWritePackFile
 
-    remoteFetch     = lgRemoteFetch
+    -- remoteFetch     = lgRemoteFetch
 
 lgWrap :: (MonadIO m, MonadBaseControl IO m)
        => LgRepository m a -> LgRepository m a

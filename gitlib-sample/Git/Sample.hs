@@ -72,7 +72,7 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     createCommit      = undefined
     createTag         = undefined
     deleteRepository  = undefined
-    remoteFetch       = undefined
+    -- remoteFetch       = undefined
 
 -- type TreeEntry m = Git.TreeEntry (SampleRepository m)
 
