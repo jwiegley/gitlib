@@ -80,27 +80,22 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
                  -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
     createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
 
-    -- Pushing and pulling
-    pushCommit :: (MonadTrans t, MonadGit m, MonadGit (t m),
-                   Repository m, Repository (t m))
-               => CommitOid m -> Maybe Text -> Text -> t m (CommitOid (t m))
+    -- -- Pack files
+    -- buildPackFile :: FilePath -> [Either (CommitOid m) (TreeOid m)]
+    --               -> m FilePath
+    -- buildPackFile _ _ =
+    --     failure (BackendError "Backend does not support building pack files")
 
-    -- Pack files
-    buildPackFile :: FilePath -> [Either (CommitOid m) (TreeOid m)]
-                  -> m FilePath
-    buildPackFile _ _ =
-        failure (BackendError "Backend does not support building pack files")
+    -- buildPackIndex :: FilePath -> ByteString -> m (Text, FilePath, FilePath)
+    -- buildPackIndex _ _ =
+    --     failure (BackendError "Backend does not support building pack indexes")
 
-    buildPackIndex :: FilePath -> ByteString -> m (Text, FilePath, FilePath)
-    buildPackIndex _ _ =
-        failure (BackendError "Backend does not support building pack indexes")
+    -- writePackFile :: FilePath -> m ()
+    -- writePackFile _ =
+    --     failure (BackendError "Backend does not support writing  pack files")
 
-    writePackFile :: FilePath -> m ()
-    writePackFile _ =
-        failure (BackendError "Backend does not support writing  pack files")
-
-    -- Git remotes
-    remoteFetch :: Text {- URI -} -> Text {- fetch spec -} -> m ()
+    -- -- Git remotes
+    -- remoteFetch :: Text {- URI -} -> Text {- fetch spec -} -> m ()
 
 data RepositoryOptions = RepositoryOptions
     { repoPath       :: !FilePath

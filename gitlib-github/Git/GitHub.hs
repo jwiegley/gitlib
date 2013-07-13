@@ -93,7 +93,6 @@ instance Git.MonadGit m => Git.Repository (GitHubRepository m) where
     updateRef        = ghUpdateRef
     deleteRef        = ghDeleteRef
     allRefs          = ghAllRefs
-    pushCommit       = \name _ rrefname -> Git.genericPushCommit name rrefname
     lookupCommit     = ghLookupCommit
     lookupTree       = ghLookupTree
     lookupBlob       = ghLookupBlob

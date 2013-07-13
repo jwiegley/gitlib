@@ -112,7 +112,6 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupTag        = error "Not defined CmdLineRepository.cliLookupTag"
     lookupObject     = error "Not defined CmdLineRepository.cliLookupObject"
     existsObject     = cliExistsObject
-    pushCommit       = \name _ rrefname -> Git.genericPushCommit name rrefname
     listObjects      = cliListObjects
     newTreeBuilder   = Pure.newPureTreeBuilder cliReadTree cliWriteTree
     treeEntry        = cliTreeEntry

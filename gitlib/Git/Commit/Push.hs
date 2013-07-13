@@ -19,9 +19,9 @@ import           Prelude hiding (FilePath)
 --   copy.  This can be extremely slow, but always works no matter which two
 --   backends are being used.  It should be considered a matter of last
 --   resort, or for objects sets that are known to be small.
-genericPushCommit :: (Repository m, Repository (t m), MonadTrans t)
-                  => CommitOid m -> Text -> t m (CommitOid (t m))
-genericPushCommit coid remoteRefName = do
+pushCommit :: (Repository m, Repository (t m), MonadTrans t)
+           => CommitOid m -> Text -> t m (CommitOid (t m))
+pushCommit coid remoteRefName = do
     mrref <- resolveReference remoteRefName
     commits1 <- mapM copyCommitOid =<< lift (listCommits Nothing coid)
     fastForward <- case mrref of

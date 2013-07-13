@@ -172,7 +172,6 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     lookupTag       = error "Not implemented: LgRepository.lookupTag"
     lookupObject    = lgLookupObject
     existsObject    = lgExistsObject
-    pushCommit      = \name _ rrefname -> Git.genericPushCommit name rrefname
     listObjects     = lgListObjects
     newTreeBuilder  = lgNewTreeBuilder
     treeEntry       = lgTreeEntry
