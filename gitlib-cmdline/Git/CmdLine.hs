@@ -45,7 +45,6 @@ import           Data.Tuple
 import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
-import qualified Git.Commit.Push as Git
 import qualified Git.Tree.Builder.Pure as Pure
 import           Prelude hiding (FilePath)
 import           Shelly hiding (trace)

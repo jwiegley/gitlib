@@ -86,7 +86,6 @@ import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git
-import qualified Git.Commit.Push as Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 import           Prelude hiding (FilePath)

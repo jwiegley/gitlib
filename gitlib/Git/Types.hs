@@ -5,7 +5,6 @@ import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
 import qualified Data.Binary as Bin
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
