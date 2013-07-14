@@ -225,7 +225,8 @@ lgCreateBlob b = do
     repo <- lgGet
     ptr  <- liftIO mallocForeignPtr
     r    <- Git.blobContentsToByteString b
-            >>= \bs -> liftIO $ createBlobFromByteString repo ptr bs
+            >>= \bs -> liftIO $ evaluate
+                       =<< createBlobFromByteString repo ptr bs
     when (r < 0) $ failure Git.BlobCreateFailed
     return (Tagged (mkOid ptr))
 

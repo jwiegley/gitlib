@@ -150,7 +150,7 @@ data BackendCallbacks = BackendCallbacks
       -- object to the S3 repository.  The for tracking it is that sometimes
       -- calling 'locateObject' can be much faster than querying Amazon.
 
-    , registerPackFile :: Text -> [SHA] -> ObjectLength -> IO ()
+    , registerPackFile :: Text -> [SHA] -> IO ()
       -- 'registerPackFile' takes the basename of a pack file, and a list of
       -- SHAs which are contained with the pack.  It must register this in an
       -- index, for the sake of the next function.
@@ -211,7 +211,7 @@ instance Default BackendCallbacks where
     def = BackendCallbacks
         { checkQuota       = \_       -> return Nothing
         , registerObject   = \_ _     -> return ()
-        , registerPackFile = \_ _ _   -> return ()
+        , registerPackFile = \_ _     -> return ()
         , lookupObject     = \_       -> return Nothing
         , getBucket        = \_ _     -> return Nothing
         , headObject       = \_ _     -> return Nothing
@@ -371,12 +371,13 @@ wrapRegisterObject f name metadata =
         (f name metadata)
         (return ())
 
-wrapRegisterPackFile :: (Text -> [SHA] -> ObjectLength -> IO ())
-                     -> Text -> [SHA] -> ObjectLength
+wrapRegisterPackFile :: (Text -> [SHA] -> IO ())
+                     -> Text
+                     -> [SHA]
                      -> IO ()
-wrapRegisterPackFile f name shas len =
+wrapRegisterPackFile f name shas =
     wrap ("registerPackFile: " ++ show name)
-        (f name shas len)
+        (f name shas)
         (return ())
 
 wrapLookupObject :: (SHA -> IO (Maybe ObjectStatus))
@@ -652,7 +653,8 @@ observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
     debug "observePackObjects: update known objects map"
     now  <- getCurrentTime
     shas <- readIORef mshas
-    let obj = PackedCached now packSha (replaceExtension idxFile "pack") idxFile
+    let obj = PackedCached now packSha
+                  (replaceExtension idxFile "pack") idxFile
     atomically $ modifyTVar (knownObjects dets) $ \objs ->
         foldr (`M.insert` obj) objs shas
 
@@ -714,7 +716,7 @@ cacheLoadObject dets sha ce metadataOnly = do
                 else go LooseRemote
 
     go (PackedRemote packSha) = do
-        mpaths <- runResourceT $ remoteReadPackFile dets packSha
+        mpaths <- runResourceT $ remoteReadPackFile dets packSha True
         join <$> for mpaths (\(packPath,idxPath) -> do
             void $ catalogPackFile dets packSha idxPath
             packLoadObject dets sha packSha packPath idxPath metadataOnly)
@@ -746,6 +748,7 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     go >>= cacheUpdateEntry dets sha
   where
     go | Just path <- infoPath = do
+           for_ infoData $ B.writeFile (pathStr path)
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
@@ -774,14 +777,13 @@ callbackRegisterObject dets sha info@ObjectInfo {..} = do
     wrapRegisterObject (registerObject (callbacks dets)) sha
         (Just (infoLength, infoType))`orElse` return ()
 
-callbackRegisterPackFile :: OdbS3Details -> Text -> [SHA] -> ObjectLength
-                         -> IO ()
-callbackRegisterPackFile dets packSha shas len = do
+callbackRegisterPackFile :: OdbS3Details -> Text -> [SHA] -> IO ()
+callbackRegisterPackFile dets packSha shas = do
     debug $ "callbackRegisterPackFile " ++ show packSha
     -- Let whoever is listening know about this pack files and its contained
     -- objects
     wrapRegisterPackFile (registerPackFile (callbacks dets))
-        packSha shas len `orElse` return ()
+        packSha shas `orElse` return ()
 
 callbackRegisterCacheEntry :: OdbS3Details -> SHA -> CacheEntry -> IO ()
 callbackRegisterCacheEntry dets sha ce =
@@ -852,19 +854,23 @@ remoteReadFile dets path = do
 
     mapPair f (x,y) = (f x, f y)
 
-remoteReadPackFile :: OdbS3Details -> Text
+remoteReadPackFile :: OdbS3Details -> Text -> Bool
                    -> ResourceT IO (Maybe (FilePath, FilePath))
-remoteReadPackFile dets packSha = do
+remoteReadPackFile dets packSha readPackAndIndex = do
     debug $ "remoteReadPackFile " ++ show packSha
     let tmpDir   = tempDirectory dets
         packPath = tmpDir </> fromText ("pack-" <> packSha <> ".pack")
         idxPath  = replaceExtension packPath "idx"
 
     runMaybeT $ do
-        exists <- liftIO $ isFile packPath
-        void $ if exists
-               then return (Just ())
-               else download packPath
+        -- jww (2013-07-14): We cannot derive a list of all the objects in the
+        -- pack file by only reading the index.  This should be possible, but
+        -- did not work for me in testing of Bug #1953.
+        when (True || readPackAndIndex) $ do
+            exists <- liftIO $ isFile packPath
+            void $ if exists
+                   then return (Just ())
+                   else download packPath
         exists <- liftIO $ isFile idxPath
         void $ if exists
                then return (Just ())
@@ -919,49 +925,57 @@ remoteCatalogContents :: OdbS3Details -> ResourceT IO ()
 remoteCatalogContents dets = do
     debug "remoteCatalogContents"
     items <- listBucketS3 dets
-    for_ items $ \item ->
-        when (".idx" `T.isSuffixOf` item) $ do
-            let packName = fromText item
-                packSha  = T.drop 5 (pathText (basename packName))
-            debug $ "remoteCatalogContents: found pack file " ++ show packSha
-            mpaths <- remoteReadPackFile dets packSha
-            for_ mpaths $ \(_,idxPath) ->
-                liftIO $ catalogPackFile dets packSha idxPath
+    for_ items $ \item -> case () of
+        () | ".idx" `T.isSuffixOf` item -> do
+                let packName = fromText item
+                    packSha  = T.drop 5 (pathText (basename packName))
+                debug $ "remoteCatalogContents: found pack file "
+                     ++ show packSha
+                mpaths <- remoteReadPackFile dets packSha False
+                for_ mpaths $ \(_,idxPath) -> liftIO $ do
+                    shas <- catalogPackFile dets packSha idxPath
+                    callbackRegisterPackFile dets packSha shas
+
+           | ".pack" `T.isSuffixOf` item -> return ()
+
+           -- jww (2013-07-14): Don't catalog loose objects, which may include
+           -- loose blobs that are used for indices, which would then cause
+           -- the contents of the index to immediately change.  Loose objects
+           -- can be rediscovered easily with a call to testFileS3, so it's not
+           -- important to recache them here.
+
+           -- | T.length item == 40 -> liftIO $ do
+           --      sha <- Git.textToSha . pathText . basename . fromText $ item
+           --      cacheUpdateEntry dets sha LooseRemote
+           --      callbackRegisterCacheEntry dets sha LooseRemote
+
+           | otherwise -> return ()
 
-accessObject :: OdbS3Details
-             -> SHA
-             -> Bool
-             -> IO (Maybe CacheEntry)
-accessObject dets sha remote =
-    flip runContT return $ callCC $ \exit -> do
-        mentry <- liftIO $ cacheLookupEntry dets sha
-        for_ mentry $ const $
-            exit mentry
+accessObject :: OdbS3Details -> SHA -> Bool -> IO (Maybe CacheEntry)
+accessObject dets sha checkRemote = scoped $ \exit -> do
+    mentry <- liftIO $ cacheLookupEntry dets sha
+    for_ mentry $ const $
+        exit mentry
 
-        mentry <- liftIO $ callbackLocateObject dets sha
-        for_ mentry $ \entry -> do
-            liftIO $ cacheUpdateEntry dets sha entry
-            exit mentry
+    mentry <- liftIO $ callbackLocateObject dets sha
+    for_ mentry $ \entry -> do
+        liftIO $ cacheUpdateEntry dets sha entry
+        exit mentry
 
-        unless remote $ exit Nothing
+    unless checkRemote $ exit Nothing
 
-        exists <- liftIO $ runResourceT $ remoteObjectExists dets sha
-        when exists $ do
-            liftIO $ cacheUpdateEntry dets sha LooseRemote
-            liftIO $ callbackRegisterCacheEntry dets sha LooseRemote
-            exit (Just LooseRemote)
+    exists <- liftIO $ runResourceT $ remoteObjectExists dets sha
+    when exists $ do
+        liftIO $ cacheUpdateEntry dets sha LooseRemote
+        liftIO $ callbackRegisterCacheEntry dets sha LooseRemote
+        exit (Just LooseRemote)
 
-        -- jww (2013-04-27): This is disabled, pending further discussion with
-        -- Snoyman about Bug #965.
-        --
-        -- lift $ runResourceT $ remoteCatalogContents dets
-        --
-        -- mentry <- liftIO $ cacheLookupEntry dets sha
-        -- for_ mentry $ \entry -> do
-        --     liftIO $ callbackRegisterCacheEntry dets sha entry
-        --     exit mentry
+    -- This can be a very time consuming operation
+    liftIO $ runResourceT $ remoteCatalogContents dets
 
-        return Nothing
+    liftIO $ cacheLookupEntry dets sha
+  where
+    scoped = flip runContT return . callCC
 
 -- All of these functions follow the same general outline:
 --
@@ -986,13 +1000,13 @@ expectingJust msg Nothing   = throw (Git.BackendError msg)
 expectingJust _msg (Just x) = return x
 
 objectExists :: OdbS3Details -> SHA -> Bool -> IO CacheEntry
-objectExists dets sha remote = do
-    mce <- accessObject dets sha remote
+objectExists dets sha checkRemote = do
+    mce <- accessObject dets sha checkRemote
     return $ fromMaybe DoesNotExist mce
 
 readObject :: OdbS3Details -> SHA -> Bool -> IO (Maybe ObjectInfo)
 readObject dets sha metadataOnly = do
-    ce <- objectExists dets sha False
+    ce <- objectExists dets sha True
 
     -- By passing False to 'objectExists', we force it to query only the local
     -- cache and database registry for information about the object, and not
@@ -1028,7 +1042,7 @@ writePackFile dets bytes = do
     -- This updates the local cache and remote registry with knowledge of
     -- every object in the pack file.
     shas <- catalogPackFile dets packSha idxPath
-    callbackRegisterPackFile dets packSha shas (ObjectLength (fromIntegral len))
+    callbackRegisterPackFile dets packSha shas
 
 readCallback :: F'git_odb_backend_read_callback
 readCallback data_p len_p type_p be oid = do
