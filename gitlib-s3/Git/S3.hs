@@ -661,7 +661,8 @@ observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
     debug "observePackObjects: update known objects map"
     now  <- getCurrentTime
     shas <- readIORef mshas
-    let obj = PackedCached now packSha (replaceExtension idxFile "pack") idxFile
+    let obj = PackedCached now packSha
+                  (replaceExtension idxFile "pack") idxFile
     atomically $ modifyTVar (knownObjects dets) $ \objs ->
         foldr (`M.insert` obj) objs shas
 
