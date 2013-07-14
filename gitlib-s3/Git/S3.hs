@@ -755,6 +755,7 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     go >>= cacheUpdateEntry dets sha
   where
     go | Just path <- infoPath = do
+           for_ infoData $ B.writeFile (pathStr path)
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
