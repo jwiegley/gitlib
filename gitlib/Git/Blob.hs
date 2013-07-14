@@ -1,5 +1,6 @@
 module Git.Blob where
 
+import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Data.ByteString as B
@@ -24,12 +25,10 @@ catBlobUtf8 = catBlob >=> return . T.decodeUtf8
 
 blobContentsToByteString :: Repository m => BlobContents m -> m ByteString
 blobContentsToByteString (BlobString bs) = return bs
-blobContentsToByteString (BlobStream bs) = do
-    strs <- bs $$ CList.consume
-    return (B.concat strs)
-blobContentsToByteString (BlobSizedStream bs _) = do
-    strs <- bs $$ CList.consume
-    return (B.concat strs)
+blobContentsToByteString (BlobStream bs) =
+    B.concat <$> (bs $$ CList.consume)
+blobContentsToByteString (BlobSizedStream bs _) =
+    B.concat <$> (bs $$ CList.consume)
 
 blobToByteString :: Repository m => Blob m -> m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
