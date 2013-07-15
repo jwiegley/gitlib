@@ -54,16 +54,16 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     listReferences  :: m [Text]
 
     -- Object lookup
-    lookupCommit :: CommitOid m -> m (Commit m)
-    lookupTree   :: TreeOid m -> m (Tree m)
-    lookupBlob   :: BlobOid m -> m (Blob m)
-    lookupTag    :: TagOid m -> m (Tag m)
-    lookupObject :: Oid m -> m (Object m)
-    existsObject :: Oid m -> m Bool
-    listObjects  :: Maybe (CommitOid m) -- ^ A commit we may already have
-                 -> CommitOid m         -- ^ The commit we need
-                 -> Bool                -- ^ Include commit trees also?
-                 -> m [ObjectOid m]     -- ^ All the objects in between
+    lookupCommit  :: CommitOid m -> m (Commit m)
+    lookupTree    :: TreeOid m   -> m (Tree m)
+    lookupBlob    :: BlobOid m   -> m (Blob m)
+    lookupTag     :: TagOid m    -> m (Tag m)
+    lookupObject  :: Oid m       -> m (Object m)
+    existsObject  :: Oid m       -> m Bool
+    sourceObjects :: Maybe (CommitOid m)    -- ^ A commit we may already have
+                  -> CommitOid m            -- ^ The commit we need
+                  -> Bool                   -- ^ Include commit trees also?
+                  -> Source m (ObjectOid m) -- ^ All the objects in between
 
     -- Working with trees
     newTreeBuilder :: Maybe (Tree m) -> m (TreeBuilder m)

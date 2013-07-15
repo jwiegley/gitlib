@@ -2,6 +2,8 @@ module Git.Commit where
 
 import           Control.Monad
 import           Control.Monad.Trans.Class
+import           Data.Conduit
+import qualified Data.Conduit.List as CL
 import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
@@ -59,8 +61,10 @@ listCommits :: Repository m
             => Maybe (CommitOid m) -- ^ A commit we may already have
             -> CommitOid m         -- ^ The commit we need
             -> m [CommitOid m]     -- ^ All the objects in between
-listCommits have need =
-    mapM (\(CommitObjOid c) -> return c) =<< listObjects have need False
+listCommits mhave need =
+    sourceObjects mhave need False
+        $= CL.mapM (\(CommitObjOid c) -> return c)
+        $$ CL.consume
 
 traverseCommits :: Repository m => (CommitOid m -> m a) -> CommitOid m -> m [a]
 traverseCommits f need = mapM f =<< listCommits Nothing need

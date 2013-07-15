@@ -57,11 +57,13 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Loops
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
 import           Data.Bits ((.|.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
+import           Data.Conduit
 import           Data.IORef
 import           Data.List as L
 import           Data.Maybe
@@ -95,8 +97,8 @@ import qualified System.IO.Unsafe as SU
 import           Unsafe.Coerce
 
 debug :: MonadIO m => String -> m ()
---debug = liftIO . putStrLn
-debug = const (return ())
+debug = liftIO . putStrLn
+--debug = const (return ())
 
 type Oid = OidPtr
 
@@ -163,25 +165,25 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
 
     parseOid = lgParseOid
 
-    lookupReference = lgLookupRef
-    createReference = lgUpdateRef
-    updateReference = lgUpdateRef
-    deleteReference = lgDeleteRef
-    listReferences  = lgListRefs
-    lookupCommit    = lgLookupCommit 40
-    lookupTree      = lgLookupTree 40
-    lookupBlob      = lgLookupBlob
-    lookupTag       = error "Not implemented: LgRepository.lookupTag"
-    lookupObject    = lgLookupObject
-    existsObject    = lgExistsObject
-    listObjects     = lgListObjects
-    newTreeBuilder  = lgNewTreeBuilder
-    treeEntry       = lgTreeEntry
-    treeOid         = lgTreeOid
-    listTreeEntries = lgListTreeEntries
-    hashContents    = lgHashContents
-    createBlob      = lgWrap . lgCreateBlob
-    createTag       = error "Not implemented: LgRepository.createTag"
+    lookupReference   = lgLookupRef
+    createReference   = lgUpdateRef
+    updateReference   = lgUpdateRef
+    deleteReference   = lgDeleteRef
+    listReferences    = lgListRefs
+    lookupCommit      = lgLookupCommit 40
+    lookupTree        = lgLookupTree 40
+    lookupBlob        = lgLookupBlob
+    lookupTag         = error "Not implemented: LgRepository.lookupTag"
+    lookupObject      = lgLookupObject
+    existsObject      = lgExistsObject
+    sourceObjects     = lgSourceObjects
+    newTreeBuilder    = lgNewTreeBuilder
+    treeEntry         = lgTreeEntry
+    treeOid           = lgTreeOid
+    listTreeEntries   = lgListTreeEntries
+    hashContents      = lgHashContents
+    createBlob        = lgWrap . lgCreateBlob
+    createTag         = error "Not implemented: LgRepository.createTag"
 
     createCommit p t a c l r = lgWrap $ lgCreateCommit p t a c l r
 
@@ -435,7 +437,7 @@ lgCloneBuilder fptr =
             (mk'git_treebuilder_filter_cb (callback builder'))
             freeHaskellFunPtr
             (flip (c'git_treebuilder_filter builder) nullPtr)
-        FC.newForeignPtr builder'(c'git_treebuilder_free builder')
+        FC.newForeignPtr builder' (c'git_treebuilder_free builder')
   where
     callback builder te _ = do
         cname <- c'git_tree_entry_name te
@@ -608,56 +610,47 @@ lgForEachObject odbPtr f payload =
         freeHaskellFunPtr
         (flip (c'git_odb_foreach odbPtr) payload)
 
-lgListObjects :: Git.MonadGit m
-              => Maybe (CommitOid m) -> CommitOid m -> Bool
-              -> LgRepository m [ObjectOid m]
-lgListObjects mhave need alsoTrees = do
-    repo <- lgGet
-    refs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
-        alloca $ \pptr ->
-            Exc.bracket
-                (do r <- c'git_revwalk_new pptr repoPtr
-                    when (r < 0) $
-                        failure (Git.BackendError "Could not create revwalker")
-                    peek pptr)
-                c'git_revwalk_free
-                (lgRevWalker need mhave)
-    concat <$> mapM getCommitContents refs
-  where
-    getCommitContents cref
-        | alsoTrees = do
-            c <- lgLookupCommit 40 cref
-            return [Git.CommitObjOid cref, Git.TreeObjOid (Git.commitTree c)]
-        | otherwise = return [Git.CommitObjOid cref]
+lgSourceObjects
+    :: Git.MonadGit m
+    => Maybe (CommitOid m) -> CommitOid m -> Bool
+    -> Source (LgRepository m) (ObjectOid m)
+lgSourceObjects mhave need alsoTrees = do
+    repo   <- lift $ lgGet
+    walker <- liftIO $ alloca $ \pptr -> do
+        r <- withForeignPtr (repoObj repo) $ \repoPtr ->
+                c'git_revwalk_new pptr repoPtr
+        when (r < 0) $
+            failure (Git.BackendError "Could not create revwalker")
+        ptr <- peek pptr
+        newForeignPtr p'git_revwalk_free ptr
 
-    lgRevWalker coid moid walker = do
-        pushOid (getOid (untag coid))
-        case moid of
-            Nothing -> return ()
-            Just oid ->
-                withForeignPtr (getOid (untag oid)) $ \coid -> do
-                    r2 <- c'git_revwalk_hide walker coid
-                    when (r2 < 0) $
-                        failure (Git.BackendError
-                                 "Could not hide commit on revwalker")
-        alloca $ \coidPtr -> do
-            c'git_revwalk_sorting walker
-                (fromIntegral ((1 :: Int) .|. (4 :: Int)))
-            whileM ((==) <$> pure 0
-                         <*> c'git_revwalk_next coidPtr walker)
-                (Tagged . mkOid <$> coidPtrToOid coidPtr)
-      where
-        pushOid oid =
-            withForeignPtr oid $ \coid -> do
-                r2 <- c'git_revwalk_push walker coid
-                when (r2 < 0) $
-                    failure (Git.BackendError "Could not push oid on revwalker")
+    liftIO $ withForeignPtr (getOid (untag need)) $ \coid -> do
+        r2 <- withForeignPtr walker $ flip c'git_revwalk_push coid
+        when (r2 < 0) $
+            failure (Git.BackendError "Could not push oid on revwalker")
 
-        pushRef refName =
-            withCString refName $ \namePtr -> do
-                r2 <- c'git_revwalk_push_ref walker namePtr
-                when (r2 < 0) $
-                    failure (Git.BackendError "Could not push ref on revwalker")
+    case mhave of
+        Nothing   -> return ()
+        Just have -> liftIO $ withForeignPtr (getOid (untag have)) $ \coid -> do
+            r2 <- withForeignPtr walker $ flip c'git_revwalk_hide coid
+            when (r2 < 0) $
+                failure (Git.BackendError "Could not hide commit on revwalker")
+
+    liftIO $ withForeignPtr walker $ flip c'git_revwalk_sorting
+        (fromIntegral ((1 :: Int) .|. (4 :: Int)))
+
+    coidPtr <- liftIO mallocForeignPtr
+    whileM_ ((==) <$> pure 0
+                  <*> liftIO (withForeignPtr walker $ \walker' ->
+                              withForeignPtr coidPtr $ \coidPtr' ->
+                                  c'git_revwalk_next coidPtr' walker')) $ do
+        oidPtr <- liftIO $ withForeignPtr coidPtr coidPtrToOid
+        do
+            let coid = Tagged (mkOid oidPtr)
+            yield $ Git.CommitObjOid coid
+            when alsoTrees $ do
+                c <- lift $ lgLookupCommit 40 coid
+                yield $ Git.TreeObjOid (Git.commitTree c)
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.

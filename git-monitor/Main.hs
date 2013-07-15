@@ -60,7 +60,8 @@ fromStrict = TL.fromStrict
 instance Read FilePath
 
 data Options = Options
-    { verbose    :: Bool
+    { quiet      :: Bool
+    , verbose    :: Bool
     , debug      :: Bool
     , gitDir     :: String
     , workingDir :: String
@@ -70,7 +71,8 @@ data Options = Options
 
 options :: Parser Options
 options = Options
-    <$> switch (short 'v' <> long "verbose" <> help "Display info")
+    <$> switch (short 'q' <> long "quiet" <> help "Do not display progress")
+    <*> switch (short 'v' <> long "verbose" <> help "Display more info")
     <*> switch (short 'D' <> long "debug" <> help "Display debug")
     <*> strOption
         (long "git-dir" <> value ".git"
@@ -93,7 +95,7 @@ main = withLibGitDo $ execParser opts >>= doMain
 doMain :: Options -> IO ()
 doMain opts = do
     -- Setup logging service if --verbose is used
-    when (verbose opts) $ initLogging (debug opts)
+    unless (quiet opts) $ initLogging (debug opts)
 
     -- Ask Git for the user name and email in this repository
     (userName,userEmail) <- shelly $ silently $
@@ -125,8 +127,8 @@ doMain opts = do
   where
     initLogging debugMode = do
         let level | debugMode    = DEBUG
-                  | verbose opts = INFO
-                  | otherwise    = NOTICE
+                  | verbose opts = DEBUG
+                  | otherwise    = INFO
         h <- (`setFormatter` tfLogFormatter "%H:%M:%S" "$time - [$prio] $msg")
              <$> streamHandler System.IO.stderr level
         removeAllHandlers

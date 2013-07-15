@@ -111,7 +111,7 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupTag        = error "Not defined CmdLineRepository.cliLookupTag"
     lookupObject     = error "Not defined CmdLineRepository.cliLookupObject"
     existsObject     = cliExistsObject
-    listObjects      = cliListObjects
+    sourceObjects    = cliSourceObjects
     newTreeBuilder   = Pure.newPureTreeBuilder cliReadTree cliWriteTree
     treeEntry        = cliTreeEntry
     listTreeEntries  = cliListTreeEntries
@@ -153,7 +153,7 @@ doRunGit :: Git.MonadGit m
          -> CmdLineRepository m a
 doRunGit f args act = do
     repo <- cliGet
-    shellyNoDir $ silently $ do
+    shellyNoDir $ verbosely $ do
         act
         f "git" $ ["--git-dir", repoPath repo] <> args
 
@@ -186,7 +186,7 @@ cliPushCommit :: Git.MonadGit m
               -> CmdLineRepository m (CommitOid m)
 cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
     repo <- cliGet
-    merr <- shellyNoDir $ silently $ errExit False $ do
+    merr <- shellyNoDir $ verbosely $ errExit False $ do
         case msshCmd of
             Nothing -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
@@ -234,7 +234,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     repo     <- cliGet
     leftHead <- cliResolveRef "HEAD"
 
-    eres <- shellyNoDir $ silently $ errExit False $ do
+    eres <- shellyNoDir $ verbosely $ errExit False $ do
         case msshCmd of
             Nothing     -> return ()
             Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
@@ -272,7 +272,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     -- create a detached commit and return its id.
     recordMerge repo leftHead = do
         rightHead <- getOid "MERGE_HEAD"
-        xs <- shellyNoDir $ silently $ errExit False $ do
+        xs <- shellyNoDir $ verbosely $ errExit False $ do
             xs <- returnConflict . TL.init
                   <$> git [ "--git-dir", repoPath repo
                           , "status", "-z", "--porcelain" ]
@@ -376,16 +376,16 @@ cliExistsObject :: Git.MonadGit m
                 => Git.SHA -> CmdLineRepository m Bool
 cliExistsObject (Git.shaToText -> sha) = do
     repo <- cliGet
-    shellyNoDir $ silently $ errExit False $ do
+    shellyNoDir $ verbosely $ errExit False $ do
         git_ [ "--git-dir", repoPath repo, "cat-file", "-e", fromStrict sha ]
         ec <- lastExitCode
         return (ec == 0)
 
-cliListObjects :: Git.MonadGit m
-               => Maybe (CommitOid m) -> CommitOid m -> Bool
-               -> CmdLineRepository m [ObjectOid m]
-cliListObjects mhave need alsoTrees = do
-    shas <- doRunGit run
+cliSourceObjects :: Git.MonadGit m
+                 => Maybe (CommitOid m) -> CommitOid m -> Bool
+                 -> Source (CmdLineRepository m) (ObjectOid m)
+cliSourceObjects mhave need alsoTrees = do
+    shas <- lift $ doRunGit run
             ([ "--no-pager", "log", "--format=%H %T" ]
              <> (case mhave of
                       Nothing   -> [ fromStrict (Git.renderObjOid need) ]
@@ -394,12 +394,15 @@ cliListObjects mhave need alsoTrees = do
                           , TL.append "^"
                             (fromStrict (Git.renderObjOid need)) ]))
             $ return ()
-    concat <$> mapM (go . T.words . toStrict) (TL.lines shas)
+    mapM_ (go . T.words . toStrict) (TL.lines shas)
   where
     go [csha,tsha] = do
-        coid <- Git.parseObjOid csha
-        toid <- Git.parseObjOid tsha
-        return $ [Git.CommitObjOid coid] <> [Git.TreeObjOid toid | alsoTrees]
+        coid <- lift $ Git.parseObjOid csha
+        yield $ Git.CommitObjOid coid
+        when alsoTrees $ do
+            toid <- lift $ Git.parseObjOid tsha
+            yield $ Git.TreeObjOid toid
+
     go x = failure (Git.BackendError $
                     "Unexpected output from git-log: " <> T.pack (show x))
 
@@ -460,7 +463,7 @@ cliWriteTree entMap = do
 cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
 cliLookupTree oid@(Git.renderObjOid -> sha) = do
     repo <- cliGet
-    ec <- shellyNoDir $ silently $ errExit False $ do
+    ec <- shellyNoDir $ verbosely $ errExit False $ do
         git_ $ [ "--git-dir", repoPath repo, "cat-file", "-t", fromStrict sha ]
         lastExitCode
     if ec == 0
@@ -471,7 +474,7 @@ cliTreeEntry :: Git.MonadGit m => Tree m -> Text
              -> CmdLineRepository m (Maybe (TreeEntry m))
 cliTreeEntry tree fp = do
     repo <- cliGet
-    mentryLines <- shellyNoDir $ silently $ errExit False $ do
+    mentryLines <- shellyNoDir $ verbosely $ errExit False $ do
         contents <- git $ [ "--git-dir", repoPath repo
                           , "ls-tree", "-z"
                           , fromStrict (Git.renderObjOid (Git.treeOid tree))
@@ -589,7 +592,7 @@ cliShowRef :: Git.MonadGit m
            => Maybe Text -> CmdLineRepository m (Maybe [(TL.Text,TL.Text)])
 cliShowRef mrefName = do
     repo <- cliGet
-    shellyNoDir $ silently $ errExit False $ do
+    shellyNoDir $ verbosely $ errExit False $ do
         rev <- git $ [ "--git-dir", repoPath repo, "show-ref" ]
                  <> [ fromStrict (fromJust mrefName) | isJust mrefName ]
         ec  <- lastExitCode
@@ -602,7 +605,7 @@ cliLookupRef :: Git.MonadGit m
              => Text -> CmdLineRepository m (Maybe (RefTarget m))
 cliLookupRef refName = do
     repo <- cliGet
-    (ec,rev) <- shellyNoDir $ silently $ errExit False $ do
+    (ec,rev) <- shellyNoDir $ verbosely $ errExit False $ do
         rev <- git $ [ "--git-dir", repoPath repo
                      , "symbolic-ref", fromStrict refName ]
         ec  <- lastExitCode
@@ -635,7 +638,7 @@ cliResolveRef :: Git.MonadGit m
               => Text -> CmdLineRepository m (Maybe (CommitOid m))
 cliResolveRef refName = do
     repo <- cliGet
-    (rev, ec) <- shellyNoDir $ silently $ errExit False $ do
+    (rev, ec) <- shellyNoDir $ verbosely $ errExit False $ do
         rev <- git [ "--git-dir", repoPath repo
                    , "rev-parse", "--quiet", "--verify"
                    , fromStrict refName ]
@@ -741,7 +744,7 @@ openCliRepository opts = do
         Right p -> do
             when (not exists && Git.repoAutoCreate opts) $ do
                 liftIO $ F.createTree (fromText (fromStrict p))
-                shellyNoDir $ silently $
+                shellyNoDir $ verbosely $
                     git_ $ ["--git-dir", fromStrict p]
                         <> ["--bare" | Git.repoIsBare opts]
                         <> ["init"]
