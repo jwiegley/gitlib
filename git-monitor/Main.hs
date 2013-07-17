@@ -126,9 +126,8 @@ doMain opts = do
                 liftIO $ threadDelay (interval opts * 1000000)
   where
     initLogging debugMode = do
-        let level | debugMode    = DEBUG
-                  | verbose opts = DEBUG
-                  | otherwise    = INFO
+        let level | debugMode = DEBUG
+                  | otherwise = INFO
         h <- (`setFormatter` tfLogFormatter "%H:%M:%S" "$time - [$prio] $msg")
              <$> streamHandler System.IO.stderr level
         removeAllHandlers
