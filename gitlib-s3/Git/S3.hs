@@ -863,10 +863,7 @@ remoteReadPackFile dets packSha readPackAndIndex = do
         idxPath  = replaceExtension packPath "idx"
 
     runMaybeT $ do
-        -- jww (2013-07-14): We cannot derive a list of all the objects in the
-        -- pack file by only reading the index.  This should be possible, but
-        -- did not work for me in testing of Bug #1953.
-        when (True || readPackAndIndex) $ do
+        when readPackAndIndex $ do
             exists <- liftIO $ isFile packPath
             void $ if exists
                    then return (Just ())
@@ -938,16 +935,10 @@ remoteCatalogContents dets = do
 
            | ".pack" `T.isSuffixOf` item -> return ()
 
-           -- jww (2013-07-14): Don't catalog loose objects, which may include
-           -- loose blobs that are used for indices, which would then cause
-           -- the contents of the index to immediately change.  Loose objects
-           -- can be rediscovered easily with a call to testFileS3, so it's not
-           -- important to recache them here.
-
-           -- | T.length item == 40 -> liftIO $ do
-           --      sha <- Git.textToSha . pathText . basename . fromText $ item
-           --      cacheUpdateEntry dets sha LooseRemote
-           --      callbackRegisterCacheEntry dets sha LooseRemote
+           | T.length item == 40 -> liftIO $ do
+                sha <- Git.textToSha . pathText . basename . fromText $ item
+                cacheUpdateEntry dets sha LooseRemote
+                callbackRegisterCacheEntry dets sha LooseRemote
 
            | otherwise -> return ()
 
