@@ -1,5 +1,5 @@
 Name:                gitlib-libgit2
-Version:             1.4.1
+Version:             1.4.2
 Synopsis:            Libgit2 backend for gitlib
 License-file:        LICENSE
 License:             MIT
@@ -25,7 +25,7 @@ Test-suite smoke
           base >=3
         , gitlib             >= 1.4.0
         , gitlib-test        >= 1.4.0
-        , gitlib-libgit2     >= 1.4.1
+        , gitlib-libgit2     >= 1.4.2
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3
