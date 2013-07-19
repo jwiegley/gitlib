@@ -94,6 +94,10 @@ import           Git.Libgit2.Types
 import           Network.HTTP.Conduit hiding (Response)
 import           Prelude hiding (FilePath, mapM_, catch)
 import           System.IO.Unsafe
+
+debug :: MonadIO m => String -> m ()
+debug = liftIO . putStrLn
+--debug = const (return ())
 
 newtype ObjectLength = ObjectLength { getObjectLength :: Int64 }
                      deriving (Eq, Show, Generic)
@@ -303,10 +307,6 @@ instance Storable OdbS3Backend where
     pokeByteOff p sizev2 v2
     return ()
 
-debug :: MonadIO m => String -> m ()
---debug = liftIO . putStrLn
-debug = const (return ())
-
 toType :: ObjectType -> C'git_otype
 toType (ObjectType t) = fromIntegral t
 
