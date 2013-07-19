@@ -863,7 +863,7 @@ remoteReadPackFile dets packSha readPackAndIndex = do
         idxPath  = replaceExtension packPath "idx"
 
     runMaybeT $ do
-        when readPackAndIndex $ do
+        when (True || readPackAndIndex) $ do
             exists <- liftIO $ isFile packPath
             void $ if exists
                    then return (Just ())
@@ -998,15 +998,7 @@ objectExists dets sha checkRemote = do
 readObject :: OdbS3Details -> SHA -> Bool -> IO (Maybe ObjectInfo)
 readObject dets sha metadataOnly = do
     ce <- objectExists dets sha True
-
-    -- By passing False to 'objectExists', we force it to query only the local
-    -- cache and database registry for information about the object, and not
-    -- Amazon.  If it's unknown, we make the assumption that it exists loosely
-    -- on S3, as this will almost always be the case with objects saved by the
-    -- School of Haskell (which does not use packs).
-    let ce' = case ce of DoesNotExist -> LooseRemote; _ -> ce
-    cacheLoadObject dets sha ce' metadataOnly
-        `catch` \(_ :: SomeException) -> return Nothing
+    cacheLoadObject dets sha ce metadataOnly `orElse` return Nothing
 
 readObjectMetadata :: OdbS3Details -> SHA -> IO (Maybe ObjectInfo)
 readObjectMetadata dets sha = readObject dets sha True
