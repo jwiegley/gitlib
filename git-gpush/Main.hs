@@ -26,10 +26,20 @@ import           Data.Text.Lazy (Text)
 import qualified Data.Text.Lazy as TL hiding (tails)
 #endif
 import           Git hiding (Options)
-import           Git.Libgit2 (lgFactory, withLibGitDo)
+#if USE_LIBGIT2
+import           Git.Libgit2 (lgFactory)
+#else
+import           Git.CmdLine (cliFactory)
+#endif
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
 import           Shelly
+
+#if USE_LIBGIT2
+factory = lgFactory
+#else
+factory = cliFactory
+#endif
 
 toStrict :: TL.Text -> T.Text
 #if MIN_VERSION_shelly(1, 0, 0)
@@ -74,7 +84,7 @@ git_ :: [Text] -> Sh ()
 git_ = run_ "git"
 
 main :: IO ()
-main = withLibGitDo $ execParser opts >>= pushToGitHub
+main = withBackendDo factory $ execParser opts >>= pushToGitHub
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
@@ -83,8 +93,7 @@ main = withLibGitDo $ execParser opts >>= pushToGitHub
 
 pushToGitHub :: Options -> IO ()
 pushToGitHub opts = do
-    gd <- fromText . TL.init
-              <$> sh opts (run "git" ["rev-parse", "--git-dir"])
+    gd <- fromText . TL.init <$> sh opts (run "git" ["rev-parse", "--git-dir"])
 
     remoteName <- case remote opts of
         Nothing -> sh opts $ getRemoteName gd
@@ -94,7 +103,9 @@ pushToGitHub opts = do
         head . TL.words . TL.init
             <$> sh opts (git [ "ls-remote", remoteName, "HEAD" ])
 
-    withRepository lgFactory gd $ do
+    sh opts $ git [ "fetch" ]
+
+    withRepository factory gd $ do
         cref <- fromJust <$> resolveReference "HEAD"
         hc   <- lookupCommit cref
         rcoid <- Tagged <$> parseOid (toStrict remoteHead)
@@ -110,7 +121,7 @@ pushToGitHub opts = do
 
 getRemoteName :: FilePath -> Sh Text
 getRemoteName gd = do
-    mref <- liftIO $ withRepository lgFactory gd $ lookupReference "HEAD"
+    mref <- liftIO $ withRepository factory gd $ lookupReference "HEAD"
     case mref of
         Nothing -> error "Could not find HEAD"
         Just (RefObj _) ->
