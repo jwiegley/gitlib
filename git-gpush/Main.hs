@@ -27,18 +27,20 @@ import qualified Data.Text.Lazy as TL hiding (tails)
 #endif
 import           Git hiding (Options)
 #if USE_LIBGIT2
-import           Git.Libgit2 (lgFactory)
+import qualified Git.Libgit2 as Lg
 #else
-import           Git.CmdLine (cliFactory)
+import qualified Git.CmdLine as Cli
 #endif
 import           Options.Applicative
 import           Prelude hiding (FilePath, null)
 import           Shelly
 
 #if USE_LIBGIT2
-factory = lgFactory
+factory :: RepositoryFactory Lg.LgRepository IO Lg.Repository
+factory = Lg.lgFactory
 #else
-factory = cliFactory
+factory :: RepositoryFactory Cli.CmdLineRepository IO Cli.Repository
+factory = Cli.cliFactory
 #endif
 
 toStrict :: TL.Text -> T.Text
@@ -103,7 +105,7 @@ pushToGitHub opts = do
         head . TL.words . TL.init
             <$> sh opts (git [ "ls-remote", remoteName, "HEAD" ])
 
-    sh opts $ git [ "fetch" ]
+    sh opts $ git_ [ "fetch" ]
 
     withRepository factory gd $ do
         cref <- fromJust <$> resolveReference "HEAD"
