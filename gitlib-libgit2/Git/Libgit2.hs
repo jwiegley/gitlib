@@ -737,20 +737,20 @@ lgUpdateRef :: Git.MonadGit m
             -> LgRepository m ()
 lgUpdateRef name refTarg = do
     repo <- lgGet
-    liftIO $ alloca $ \ptr ->
+    r <- liftIO $ alloca $ \ptr ->
         withForeignPtr (repoObj repo) $ \repoPtr ->
         withCString (T.unpack name) $ \namePtr -> do
-            r <- case refTarg of
+            case refTarg of
                 Git.RefObj oid ->
                     withForeignPtr (getOid (untag oid)) $ \coidPtr ->
                         c'git_reference_create ptr repoPtr namePtr
                                                coidPtr (fromBool True)
 
                 Git.RefSymbolic symName ->
-                  withCString (T.unpack symName) $ \symPtr ->
-                    c'git_reference_symbolic_create ptr repoPtr namePtr
-                                                    symPtr (fromBool True)
-            when (r < 0) $ failure Git.ReferenceCreateFailed
+                    withCString (T.unpack symName) $ \symPtr ->
+                        c'git_reference_symbolic_create ptr repoPtr namePtr
+                                                        symPtr (fromBool True)
+    when (r < 0) $ failure (Git.ReferenceCreateFailed name)
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)

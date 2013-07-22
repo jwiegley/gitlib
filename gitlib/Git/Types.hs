@@ -403,7 +403,7 @@ data GitException = BackendError Text
                   | TreeEmptyCreateFailed
                   | CommitCreateFailed
                   | CommitLookupFailed Text
-                  | ReferenceCreateFailed
+                  | ReferenceCreateFailed Text
                   | ReferenceDeleteFailed Text
                   | RefCannotCreateFromPartialOid
                   | ReferenceListingFailed
