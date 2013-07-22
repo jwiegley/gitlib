@@ -863,6 +863,9 @@ remoteReadPackFile dets packSha readPackAndIndex = do
         idxPath  = replaceExtension packPath "idx"
 
     runMaybeT $ do
+        -- jww (2013-07-22): It would help performance if we could drop the
+        -- "True ||" here, but right now this is not working with the current
+        -- libgit2.
         when (True || readPackAndIndex) $ do
             exists <- liftIO $ isFile packPath
             void $ if exists
