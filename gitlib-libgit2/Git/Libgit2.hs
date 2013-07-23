@@ -750,7 +750,13 @@ lgUpdateRef name refTarg = do
                     withCString (T.unpack symName) $ \symPtr ->
                         c'git_reference_symbolic_create ptr repoPtr namePtr
                                                         symPtr (fromBool True)
-    when (r < 0) $ failure (Git.ReferenceCreateFailed name)
+    when (r < 0) $ do
+        errStr <- liftIO $ do
+            errPtr <- c'giterr_last
+            err    <- peek errPtr
+            peekCString (c'git_error'message err)
+        failure (Git.ReferenceCreateFailed $ name <> " => "
+                 <> T.pack (show refTarg) <> ": " <> T.pack errStr)
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)

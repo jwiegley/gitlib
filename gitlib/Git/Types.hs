@@ -293,6 +293,10 @@ untagObjOid (TagObjOid oid)    = untag oid
 {- $references -}
 data RefTarget m = RefObj !(CommitOid m) | RefSymbolic !Text
 
+instance Repository m => Show (RefTarget m) where
+    show (RefObj coid) = "RefObj#" ++ T.unpack (renderObjOid coid)
+    show (RefSymbolic name) = "RefSymbolic#" ++ T.unpack name
+
 commitRefTarget :: Commit m -> RefTarget m
 commitRefTarget = RefObj . commitOid
 
