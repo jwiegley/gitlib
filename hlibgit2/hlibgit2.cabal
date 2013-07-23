@@ -207,8 +207,7 @@ Library
     libgit2/src
     libgit2/deps/http-parser
 
-  cc-options: -O2         -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL
-  ld-options: -O2
+  cc-options: -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL
   if os(windows)
     cpp-options: -DWINDOWS
     cc-options: -DGIT_WIN32 -DWIN32 -DWIN32_SHA1 -D_DEBUG -D_WIN32_WINNT=0x0501 -DGIT_WINHTTP
