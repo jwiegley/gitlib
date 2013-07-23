@@ -26,6 +26,7 @@ module Git.Libgit2
        , Repository(..)
        , Tree()
        , TreeOid()
+       , repoPath
        , addTracingBackend
        , checkResult
        , closeLgRepository
@@ -39,7 +40,7 @@ module Git.Libgit2
        , lgBuildPackFile
        , lgReadFromPack
        , lgWithPackFile
-       , lgWritePackFile
+       , lgCopyPackFile
        , lgWrap
        , oidToSha
        , shaToOid
@@ -587,17 +588,17 @@ lgExistsObject oid = do
     repo <- lgGet
     result <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \pptr -> do
-            r0 <- c'git_repository_odb pptr repoPtr
-            if r0 < 0
+            r <- c'git_repository_odb pptr repoPtr
+            if r < 0
                 then return Nothing
                 else
                 -- jww (2013-02-28): Need to guard against exceptions so that
                 -- ptr doesn't leak.
                 withForeignPtr (getOid oid) $ \coid -> do
                     ptr <- peek pptr
-                    r <- c'git_odb_exists ptr coid 0
+                    r1 <- c'git_odb_exists ptr coid 0
                     c'git_odb_free ptr
-                    return (Just (r == 0))
+                    return (Just (r1 == 0))
     maybe (failure Git.RepositoryInvalid) return result
 
 lgForEachObject :: Ptr C'git_odb
@@ -1029,8 +1030,8 @@ shaToOid (Git.SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
         c'git_oid_fromraw ptr' (castPtr bytes)
         return ptr
 
-lgWritePackFile :: Git.MonadGit m => FilePath -> LgRepository m ()
-lgWritePackFile packFile = do
+lgCopyPackFile :: Git.MonadGit m => FilePath -> LgRepository m ()
+lgCopyPackFile packFile = do
     -- jww (2013-04-23): This would be much more efficient (we already have
     -- the pack file on disk, why not just copy it?), but we have no way at
     -- present of communicating with the S3 backend directly.
