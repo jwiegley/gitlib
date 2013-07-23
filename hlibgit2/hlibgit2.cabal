@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.18.0.8
+Version:             0.18.0.9
 Synopsis:            Low-level bindings to libgit2
 Description:         Bindings to libgit2 v0.18.0.
 License-file:        LICENSE
@@ -207,8 +207,8 @@ Library
     libgit2/src
     libgit2/deps/http-parser
 
-  cc-options: -g         -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL
-  ld-options: -g
+  cc-options: -O2         -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL
+  ld-options: -O2
   if os(windows)
     cpp-options: -DWINDOWS
     cc-options: -DGIT_WIN32 -DWIN32 -DWIN32_SHA1 -D_DEBUG -D_WIN32_WINNT=0x0501 -DGIT_WINHTTP
