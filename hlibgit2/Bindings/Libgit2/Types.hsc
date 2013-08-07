@@ -36,17 +36,17 @@ import Bindings.Libgit2.Common
 {- typedef struct git_odb git_odb; -}
 #opaque_t git_odb
 {- typedef struct git_odb_backend git_odb_backend; -}
-{- #opaque_t git_odb_backend -}
+{-  #opaque_t git_odb_backend -}
 {- typedef struct git_odb_object git_odb_object; -}
 #opaque_t git_odb_object
 {- typedef struct git_odb_stream git_odb_stream; -}
-{- #opaque_t git_odb_stream -}
+{-  #opaque_t git_odb_stream -}
 {- typedef struct git_odb_writepack git_odb_writepack; -}
-{- #opaque_t git_odb_writepack -}
+{-  #opaque_t git_odb_writepack -}
 {- typedef struct git_refdb git_refdb; -}
 #opaque_t git_refdb
 {- typedef struct git_refdb_backend git_refdb_backend; -}
-{- #opaque_t git_refdb_backend -}
+{-  #opaque_t git_refdb_backend -}
 {- typedef struct git_repository git_repository; -}
 #opaque_t git_repository
 {- typedef struct git_object git_object; -}
@@ -70,7 +70,7 @@ import Bindings.Libgit2.Common
 {- typedef struct git_config git_config; -}
 #opaque_t git_config
 {- typedef struct git_config_backend git_config_backend; -}
-{- #opaque_t git_config_backend -}
+{-  #opaque_t git_config_backend -}
 {- typedef struct git_reflog_entry git_reflog_entry; -}
 #opaque_t git_reflog_entry
 {- typedef struct git_reflog git_reflog; -}
@@ -135,6 +135,6 @@ import Bindings.Libgit2.Common
 {- typedef struct git_push git_push; -}
 #opaque_t git_push
 {- typedef struct git_remote_head git_remote_head; -}
-{- #opaque_t git_remote_head -}
+{-  #opaque_t git_remote_head -}
 {- typedef struct git_remote_callbacks git_remote_callbacks; -}
-{- #opaque_t git_remote_callbacks -}
+{-  #opaque_t git_remote_callbacks -}

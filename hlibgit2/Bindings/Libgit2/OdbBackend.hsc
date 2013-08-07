@@ -10,9 +10,9 @@ import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Indexer
 {- struct git_odb_stream; -}
-{- #opaque_t git_odb_stream -}
+{-  #opaque_t git_odb_stream -}
 {- struct git_odb_writepack; -}
-{- #opaque_t git_odb_writepack -}
+{-  #opaque_t git_odb_writepack -}
 {- typedef int (* git_odb_foreach_cb)(const git_oid * id,
                                    void * payload); -}
 #callback git_odb_foreach_cb , Ptr (<git_oid>) -> Ptr () -> IO CInt

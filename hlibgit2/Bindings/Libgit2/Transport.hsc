@@ -123,7 +123,7 @@ import Bindings.Libgit2.Types
 #num GIT_SERVICE_RECEIVEPACK_LS
 #num GIT_SERVICE_RECEIVEPACK
 {- struct git_smart_subtransport; -}
-{- #opaque_t git_smart_subtransport -}
+{-  #opaque_t git_smart_subtransport -}
 {- typedef struct git_smart_subtransport_stream {
             struct git_smart_subtransport * subtransport;
             int (* read)(struct git_smart_subtransport_stream * stream,
