@@ -96,8 +96,8 @@ import           Prelude hiding (FilePath, mapM_, catch)
 import           System.IO.Unsafe
 
 debug :: MonadIO m => String -> m ()
-debug = liftIO . putStrLn
---debug = const (return ())
+--debug = liftIO . putStrLn
+debug = const (return ())
 
 newtype ObjectLength = ObjectLength { getObjectLength :: Int64 }
                      deriving (Eq, Show, Generic)
