@@ -96,8 +96,8 @@ import           Prelude hiding (FilePath, mapM_, catch)
 import           System.IO.Unsafe
 
 debug :: MonadIO m => String -> m ()
-debug = liftIO . putStrLn
---debug = const (return ())
+--debug = liftIO . putStrLn
+debug = const (return ())
 
 newtype ObjectLength = ObjectLength { getObjectLength :: Int64 }
                      deriving (Eq, Show, Generic)
@@ -515,9 +515,12 @@ testFileS3 dets filepath = do
         Just r  -> return r
         Nothing -> do
             debug $ "Aws.headObject: " ++ show filepath
-            isJust . readResponse
-                <$> aws (configuration dets) (s3configuration dets)
-                        (httpManager dets) (Aws.headObject bucket path)
+            resp <- aws (configuration dets) (s3configuration dets)
+                (httpManager dets) (Aws.headObject bucket path)
+            hor <- readResponseIO resp
+            -- If we reach this point, it means the answer was 200 OK, which
+            -- means the object exists.
+            return True
 
 getFileS3 :: OdbS3Details -> Text -> Maybe (Int64,Int64)
           -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
