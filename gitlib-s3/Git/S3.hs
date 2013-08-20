@@ -515,7 +515,7 @@ testFileS3 dets filepath = do
         Just r  -> return r
         Nothing -> do
             debug $ "Aws.headObject: " ++ show filepath
-            resp <- aws (configuration dets) (s3configuration dets)
+            resp <- awsRetry (configuration dets) (s3configuration dets)
                 (httpManager dets) (Aws.headObject bucket path)
             hor <- readResponseIO resp
             -- If we reach this point, it means the answer was 200 OK, which
