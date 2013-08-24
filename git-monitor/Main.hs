@@ -11,7 +11,6 @@
 module Main where
 
 import           Control.Concurrent (threadDelay)
-import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Trans.Class
@@ -29,7 +28,8 @@ import qualified Data.Text as TL
 import qualified Data.Text.Lazy as TL
 #endif
 import           Data.Time
-import           Filesystem (getModified, isDirectory, isFile, canonicalizePath)
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import           Filesystem (isDirectory, canonicalizePath)
 import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git hiding (Options)
 import           Git.Libgit2 (LgRepository, lgFactory, withLibGitDo)
@@ -42,6 +42,7 @@ import           System.Log.Formatter (tfLogFormatter)
 import           System.Log.Handler (setFormatter)
 import           System.Log.Handler.Simple (streamHandler)
 import           System.Log.Logger
+import           System.Posix.Files hiding (isDirectory)
 
 toStrict :: TL.Text -> T.Text
 #if MIN_VERSION_shelly(1, 0, 0)
@@ -117,10 +118,10 @@ doMain opts = do
         infoL $ "Saving snapshots under " ++ fileStr gd
         infoL $ "Working tree: " ++ fileStr wd
         ref <- lookupReference "HEAD"
-        void $ case ref of
+        case ref of
             Just (RefSymbolic name) -> do
                 infoL $ "Tracking branch " ++ T.unpack name
-                start wd (toStrict userName) (toStrict userEmail) name
+                void $ start wd (toStrict userName) (toStrict userEmail) name
             _ -> do
                 infoL "Cannot use git-monitor if no branch is checked out"
                 liftIO $ threadDelay (interval opts * 1000000)
@@ -158,11 +159,12 @@ doMain opts = do
         -- Begin the snapshotting process, which continues indefinitely until
         -- the process is stopped.  It is safe to cancel this process at any
         -- time, typically using SIGINT (C-c) or even SIGKILL.
-        snapshotTree opts wd userName userEmail ref sref sc toid ft
+        mutateTreeOid toid $
+            snapshotTree opts wd userName userEmail ref sref sc toid ft
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
---   checks the filesystem for changes to Git-tracked files, and snapshots
---   any changes that have occurred in them.
+--   checks the filesystem for changes to Git-tracked files, and snapshots any
+--   changes that have occurred in them.
 snapshotTree :: MonadGit m
              => Options
              -> FilePath
@@ -173,16 +175,17 @@ snapshotTree :: MonadGit m
              -> Commit (LgRepository m)
              -> TreeOid (LgRepository m)
              -> Map Text (FileEntry (LgRepository m))
-             -> LgRepository m ()
+             -> TreeT (LgRepository m) ()
 snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     -- Read the current working tree's state on disk
-    ft' <- readFileTree ref wd False
+    ft' <- lift $ readFileTree ref wd False
 
     -- Prune files which have been removed since the last interval, and find
     -- files which have been added or changed
-    toid' <- mutateTreeOid toid $ do
-        Map.foldlWithKey' (\a p e -> a >> scanOldEntry ft' p e) (return ()) ft
-        Map.foldlWithKey' (\a p e -> a >> scanNewEntry ft p e) (return ()) ft'
+    Map.foldlWithKey' (\a p e -> a >> scanOldEntry ft' p e) (return ()) ft
+    Map.foldlWithKey' (\a p e -> a >> scanNewEntry ft p e) (return ()) ft'
+
+    toid' <- currentTreeOid
 
     -- If the snapshot tree changed, create a new commit to reflect it
     sc' <- if toid /= toid'
@@ -196,10 +199,10 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
                   msg = "Snapshot at "
                      ++ formatTime defaultTimeLocale "%F %T %Z" now
 
-              c <- createCommit [commitOid sc] toid'
-                                sig sig (T.pack msg) (Just sref)
-              infoL $ "Commit "
-                   ++ (T.unpack . renderObjOid . commitOid $ c)
+              c <- lift $ createCommit [commitOid sc] toid'
+                  sig sig (T.pack msg) (Just sref)
+              lift $ infoL $ "Commit "
+                  ++ (T.unpack . renderObjOid . commitOid $ c)
               return c
           else return sc
 
@@ -207,11 +210,11 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     liftIO $ threadDelay (interval opts * 1000000)
 
     -- Rinse, wash, repeat.
-    ref' <- lookupReference "HEAD"
+    ref' <- lift $ lookupReference "HEAD"
     let curRef = case ref' of Just (RefSymbolic ref'') -> ref''; _ -> ""
     if ref /= curRef
-        then infoL $ "Branch changed to " ++ T.unpack curRef
-                  ++ ", restarting"
+        then lift $ infoL $ "Branch changed to " ++ T.unpack curRef
+            ++ ", restarting"
         else loop sc' toid' ft'
 
   where
@@ -291,18 +294,19 @@ readModTime :: MonadGit m
             -> LgRepository m (Maybe (FileEntry (LgRepository m)))
 readModTime wdir getHash fp oid kind = do
     let path = wdir </> fromText (fromStrict fp)
-    debugL $ "Checking file: " ++ fileStr path
-    exists <- liftIO $ isFile path
-    if exists
+        fstr = fileStr path
+    debugL $ "Checking file: " ++ fstr
+    status <- liftIO $ getSymbolicLinkStatus fstr
+    if isRegularFile status
         then Just <$>
              (FileEntry
-                  <$> liftIO (getModified path)
+                  <$> pure (posixSecondsToUTCTime
+                            (realToFrac (modificationTime status)))
                   <*> pure oid
                   <*> pure kind
                   <*> if getHash
-                      then do contents <- liftIO $ evaluate
-                                              =<< B.readFile (fileStr path)
-                              hashContents (BlobString contents)
+                      then hashContents . BlobString
+                          =<< liftIO (B.readFile fstr)
                       else return oid)
         else return Nothing
 
