@@ -7,6 +7,7 @@ module Git.Tree.Builder
        , mutateTree
        , mutateTreeOid
        , currentTree
+       , currentTreeOid
        , withTree
        , withTreeOid
        , dropEntry
