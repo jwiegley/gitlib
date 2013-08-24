@@ -119,7 +119,15 @@ data ObjectInfo = ObjectInfo
       , infoType   :: ObjectType
       , infoPath   :: Maybe FilePath
       , infoData   :: Maybe ByteString
-      } deriving (Eq, Show)
+      } deriving Eq
+
+instance Show ObjectInfo where
+    show ObjectInfo {..} = "ObjectInfo {"
+                        ++ "infoLength = " ++ show infoLength
+                        ++ ", infoType = " ++ show infoType
+                        ++ ", infoPath = " ++ show infoPath
+                        ++ ", infoData = " ++ show (isJust infoData)
+                        ++ "}"
 
 fromSha :: SHA -> FilePath
 fromSha = fromText . shaToText
