@@ -1,5 +1,6 @@
 module Git.Commit where
 
+import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Data.Conduit
@@ -9,12 +10,12 @@ import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.List
 import           Data.Maybe
+import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
 import           Git.Tree
 import           Git.Types
 import           Prelude hiding (FilePath)
-import Debug.Trace
 
 commitTreeEntry :: Repository m
                 => Commit m
@@ -40,7 +41,10 @@ copyCommit cr mref needed = do
         let parents = commitParents commit
         (parentRefs,needed') <- foldM copyParent ([],needed) parents
         (tr,needed'') <- copyTree (commitTree commit) needed'
-        trace ("copyTree " ++ show (commitTree commit) ++ " => " ++ show tr) $ return ()
+        unless (renderObjOid (commitTree commit) == renderObjOid tr) $
+            failure $ BackendError $ "Error copying tree: "
+                <> renderObjOid (commitTree commit)
+                <> " /= " <> renderObjOid tr
 
         commit' <- createCommit (reverse parentRefs) tr
             (commitAuthor commit)
@@ -56,7 +60,9 @@ copyCommit cr mref needed = do
   where
     copyParent (prefs,needed') cref = do
         (cref2,needed'') <- copyCommit cref Nothing needed'
-        trace ("copyCommit " ++ show cref ++ " => " ++ show cref2) $ return ()
+        unless (renderObjOid cref == renderObjOid cref2) $
+            failure $ BackendError $ "Error copying commit: "
+                <> renderObjOid cref <> " /= " <> renderObjOid cref2
         let x = cref2 `seq` (cref2:prefs)
         return $ x `seq` needed'' `seq` (x,needed'')
 

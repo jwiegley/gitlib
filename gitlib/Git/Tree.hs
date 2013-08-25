@@ -1,15 +1,16 @@
 module Git.Tree where
 
+import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Trans.Class
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
+import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
 import           Git.Blob
 import           Git.Tree.Builder
 import           Git.Types
-import Debug.Trace
 
 copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               => TreeEntry m
@@ -17,7 +18,9 @@ copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               -> t m (TreeEntry (t m), HashSet Text)
 copyTreeEntry (BlobEntry oid kind) needed = do
     (b,needed') <- copyBlob oid needed
-    trace ("copyBlob " ++ show oid ++ " => " ++ show b) $ return ()
+    unless (renderObjOid oid == renderObjOid b) $
+        failure $ BackendError $ "Error copying blob: "
+            <> renderObjOid oid <> " /= " <> renderObjOid b
     return (BlobEntry b kind, needed')
 copyTreeEntry (CommitEntry oid) needed = do
     coid <- parseOid (renderObjOid oid)
