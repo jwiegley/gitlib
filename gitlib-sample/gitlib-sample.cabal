@@ -1,5 +1,5 @@
 Name:                gitlib-sample
-Version:             2.0.1.0
+Version:             2.1.0.0
 Synopsis:            Sample backend for gitlib showing the basic structure for any backend.
 License-file:        LICENSE
 License:             MIT
@@ -22,9 +22,9 @@ Source-repository head
 --     Hs-source-dirs: test
 --     Build-depends: 
 --           base >=3
---         , gitlib             >= 2.0.0.0
---         , gitlib-test        >= 2.0.0.0
---         , gitlib-sample      >= 2.0.0.0
+--         , gitlib             >= 2.1.0.0
+--         , gitlib-test        >= 2.1.0.0
+--         , gitlib-sample      >= 2.1.0.0
 --         , HUnit              >= 1.2.5
 --         , hspec              >= 1.4.4
 --         , hspec-expectations >= 0.3
@@ -34,9 +34,8 @@ Library
     ghc-options: -Wall
     build-depends:
           base                 >= 3 && < 5
-        , gitlib               >= 2.0.1.0
+        , gitlib               >= 2.1.0.0
         , failure              >= 0.2.0.1
-        , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1
         , transformers         >= 0.3.0.0
     exposed-modules:

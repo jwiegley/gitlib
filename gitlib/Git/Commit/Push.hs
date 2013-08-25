@@ -9,11 +9,13 @@ import           Data.List
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Text (Text)
+import           Data.Traversable (for)
 import           Git.Commit
-import           Git.Reference
 import           Git.Object
+import           Git.Reference
 import           Git.Types
 import           Prelude hiding (FilePath)
+import Debug.Trace
 
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works no matter which two
@@ -22,25 +24,18 @@ import           Prelude hiding (FilePath)
 pushCommit :: (Repository m, Repository (t m), MonadTrans t)
            => CommitOid m -> Text -> t m (CommitOid (t m))
 pushCommit coid remoteRefName = do
-    mrref <- resolveReference remoteRefName
-    commits1 <- mapM copyCommitOid =<< lift (listCommits Nothing coid)
-    fastForward <- case mrref of
-        Nothing -> return (Just Nothing)
-        Just rref
-            | rref `elem` commits1 -> do
-                roid <- lift $ copyCommitOid rref
-                return $ Just (Just roid)
-            | otherwise -> do
-                failure (PushNotFastForward $
-                         "SHA " <> renderObjOid rref
-                                <> " not found in remote")
-    case fastForward of
-        Nothing -> failure (PushNotFastForward "unexpected")
-        Just rref -> do
-            objs <- lift $ listAllObjects rref coid
-            shas <- mapM (return . renderOid . untagObjOid) objs
-            (cref,_) <- copyCommit coid Nothing (HashSet.fromList shas)
-            -- jww (2013-04-18): This is something the user must
-            -- decide to do
-            -- updateReference_ remoteRefName (RefObj cref)
-            return cref
+    commits <- mapM copyCommitOid =<< lift (listCommits Nothing coid)
+    mrref   <- resolveReference remoteRefName
+    mrref'  <- for mrref $ \rref ->
+        if rref `elem` commits
+        then lift $ copyCommitOid rref
+        else failure $ PushNotFastForward
+                     $ "SHA " <> renderObjOid rref
+                    <> " not found in remote"
+    objs <- lift $ listAllObjects mrref' coid
+    let shas = HashSet.fromList $ map (renderOid . untagObjOid) objs
+    (cref,_) <- copyCommit coid Nothing shas
+    trace ("copyCommit " ++ show coid ++ " => " ++ show cref) $ return ()
+    -- jww (2013-04-18): This is something the user must decide to do
+    -- updateReference_ remoteRefName (RefObj cref)
+    return cref

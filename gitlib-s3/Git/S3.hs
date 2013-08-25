@@ -28,8 +28,6 @@ module Git.S3
 
 import           Aws
 import           Aws.Core
-import           Aws.S3 hiding (ObjectInfo, bucketName,
-                                getBucket, headObject, getObject, putObject)
 import qualified Aws.S3 as Aws
 import           Bindings.Libgit2.Errors
 import           Bindings.Libgit2.Odb
@@ -39,8 +37,7 @@ import           Bindings.Libgit2.Refs
 import           Bindings.Libgit2.Types
 import           Control.Applicative
 import           Control.Concurrent.STM hiding (orElse)
-import           Control.Exception
-import qualified Control.Exception.Lifted as Exc
+import           Control.Exception.Lifted
 import           Control.Lens ((??))
 import           Control.Monad
 import           Control.Monad.IO.Class
@@ -54,11 +51,12 @@ import           Data.Attempt
 import           Data.Bifunctor
 import qualified Data.Binary as Bin
 import           Data.Binary as Bin
-import           Data.ByteString as B hiding (putStrLn, foldr, map)
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
-import           Data.Conduit.Binary
+import           Data.Conduit.Binary hiding (drop)
 import qualified Data.Conduit.List as CList
 import           Data.Default
 import           Data.Foldable (for_)
@@ -70,12 +68,11 @@ import qualified Data.List as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text as T hiding (foldr, map)
-import qualified Data.Text.Encoding as E
+import           Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import           Data.Time.Clock
 import           Data.Traversable (for)
-import           Filesystem
-import           Filesystem.Path.CurrentOS hiding (encode, decode)
 import           Foreign.C.String
 import           Foreign.C.Types
 import           Foreign.ForeignPtr
@@ -92,7 +89,9 @@ import           Git.Libgit2.Backend
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 import           Network.HTTP.Conduit hiding (Response)
-import           Prelude hiding (FilePath, mapM_, catch)
+import           Prelude hiding (mapM_, catch)
+import           System.Directory
+import           System.FilePath.Posix
 import           System.IO.Unsafe
 
 debug :: MonadIO m => String -> m ()
@@ -130,7 +129,7 @@ instance Show ObjectInfo where
                         ++ "}"
 
 fromSha :: SHA -> FilePath
-fromSha = fromText . shaToText
+fromSha = T.unpack . shaToText
 
 data ObjectStatus = ObjectLoose
                   | ObjectLooseMetaKnown ObjectLength ObjectType
@@ -202,8 +201,8 @@ data BackendCallbacks = BackendCallbacks
       --   if it succeeds, a Just Left on error, or Nothing if the method is not
       --   mocked.
 
-    , updateRef  :: Text -> Text -> IO ()
-    , resolveRef :: Text -> IO (Maybe Text)
+    , updateRef  :: Git.RefName -> Text -> IO ()
+    , resolveRef :: Git.RefName -> IO (Maybe Text)
 
     , acquireLock :: Text -> IO Text
     , releaseLock :: Text -> IO ()
@@ -277,7 +276,7 @@ data OdbS3Details = OdbS3Details
     , bucketName      :: Text
     , objectPrefix    :: Text
     , configuration   :: Configuration
-    , s3configuration :: S3Configuration NormalQuery
+    , s3configuration :: Aws.S3Configuration NormalQuery
     , callbacks       :: BackendCallbacks
       -- In the 'knownObjects' map, if the object is not present, we must query
       -- via the 'lookupObject' callback above.  If it is present, it can be
@@ -329,7 +328,7 @@ fromLength = ObjectLength . fromIntegral
 
 wrap :: (Show a, MonadIO m, MonadBaseControl IO m)
      => String -> m a -> m a -> m a
-wrap msg f g = Exc.catch
+wrap msg f g = catch
     (do debug $ msg ++ "..."
         r <- f
         debug $ msg ++ "...done, result = " ++ show r
@@ -339,7 +338,7 @@ wrap msg f g = Exc.catch
                g
 
 orElse :: (MonadIO m, MonadBaseControl IO m) => m a -> m a -> m a
-orElse f g = Exc.catch f $ \e -> do
+orElse f g = catch f $ \e -> do
     liftIO $ putStrLn "A callback operation failed"
     liftIO $ print (e :: SomeException)
     g
@@ -499,16 +498,16 @@ listBucketS3 dets = do
         res <- awsRetry (configuration dets) (s3configuration dets)
                    (httpManager dets)
                    ((Aws.getBucket bucket)
-                        { gbPrefix = Just prefix
-                        , gbMarker = mmarker })
+                        { Aws.gbPrefix = Just prefix
+                        , Aws.gbMarker = mmarker })
         gbr <- readResponseIO res
-        let contents = map objectKey (gbrContents gbr)
+        let contents = map Aws.objectKey (Aws.gbrContents gbr)
         case contents of
             [] -> return []
             _  -> (++) <$> pure contents
                       <*> makeRequest bucket prefix
                               (Just (Prelude.last contents))
-                              (gbrIsTruncated gbr)
+                              (Aws.gbrIsTruncated gbr)
 
 testFileS3 :: OdbS3Details -> Text -> ResourceT IO Bool
 testFileS3 dets filepath = do
@@ -525,27 +524,27 @@ testFileS3 dets filepath = do
             debug $ "Aws.headObject: " ++ show filepath
             resp <- aws (configuration dets) (s3configuration dets)
                 (httpManager dets) (Aws.headObject bucket path)
-            hor <- readResponseIO resp
+            _hor <- readResponseIO resp
             -- If we reach this point, it means the answer was 200 OK, which
             -- means the object exists.
             return True
 
-getFileS3 :: OdbS3Details -> Text -> Maybe (Int64,Int64)
+getFileS3 :: OdbS3Details -> FilePath -> Maybe (Int64,Int64)
           -> ResourceT IO (ResumableSource (ResourceT IO) ByteString)
 getFileS3 dets filepath range = do
-    debug $ "getFileS3: " ++ show filepath
+    debug $ "getFileS3: " ++ filepath
 
     let bucket = bucketName dets
-        path   = T.append (objectPrefix dets) filepath
+        path   = T.unpack (objectPrefix dets) <> filepath
 
     cbResult <- wrapGetObject (getObject (callbacks dets))
-                    bucket path range `orElse` return Nothing
+                    bucket (T.pack path) range `orElse` return Nothing
     case cbResult of
         Just (Right r) -> fst <$> (sourceLbs r $$+ Data.Conduit.Binary.take 0)
         _ -> do
             debug $ "Aws.getObject: " ++ show filepath ++ " " ++ show range
             res <- awsRetry (configuration dets) (s3configuration dets)
-                       (httpManager dets) (Aws.getObject bucket path)
+                       (httpManager dets) (Aws.getObject bucket (T.pack path))
                            { Aws.goResponseContentRange =
                                   bimap fromIntegral fromIntegral <$> range }
             gor <- readResponseIO res
@@ -645,7 +644,11 @@ mirrorRefsToS3 be = do
     refs  <- mapM Git.lookupReference names
     liftIO $ writeRefs be (M.fromList (L.zip names refs))
 
-observePackObjects :: OdbS3Details -> Text -> FilePath -> Bool -> Ptr C'git_odb
+observePackObjects :: OdbS3Details
+                   -> Text
+                   -> FilePath
+                   -> Bool
+                   -> Ptr C'git_odb
                    -> IO [SHA]
 observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
     debug $ "observePackObjects: " ++ show idxFile
@@ -717,13 +720,13 @@ cacheLoadObject dets sha ce metadataOnly = do
         | metadataOnly =
             return . Just $ ObjectInfo len typ (Just path) Nothing
         | otherwise = do
-            exists <- liftIO $ isFile path
+            exists <- liftIO $ doesFileExist path
             if exists
                 then Just <$> (ObjectInfo
                                <$> pure len
                                <*> pure typ
                                <*> pure (Just path)
-                               <*> (Just <$> B.readFile (pathStr path)))
+                               <*> (Just <$> B.readFile path))
                 else go LooseRemote
 
     go (PackedRemote packSha) = do
@@ -742,7 +745,8 @@ cacheLoadObject dets sha ce metadataOnly = do
             packLoadObject dets sha packSha packPath idxPath metadataOnly
 
     packLoadObject _dets sha packSha packPath idxPath metadataOnly = do
-        bothExist <- liftIO $ (&&) <$> isFile packPath <*> isFile idxPath
+        bothExist <- liftIO $ (&&) <$> doesFileExist packPath
+                                  <*> doesFileExist idxPath
         if bothExist
             then do
                 liftIO $ debug $ "getObjectFromPack "
@@ -759,13 +763,13 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     go >>= cacheUpdateEntry dets sha
   where
     go | Just path <- infoPath = do
-           for_ infoData $ B.writeFile (pathStr path)
+           for_ infoData $ B.writeFile path
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
        | Just bytes <- infoData = do
            let path = tempDirectory dets </> fromSha sha
-           B.writeFile (pathStr path) bytes
+           B.writeFile path bytes
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
@@ -825,12 +829,12 @@ remoteObjectExists dets sha =
 remoteReadFile :: OdbS3Details -> FilePath -> ResourceT IO (Maybe ObjectInfo)
 remoteReadFile dets path = do
     debug $ "remoteReadFile " ++ show path
-    exists <- liftIO $ isFile path
+    exists <- liftIO $ doesFileExist path
     when exists $ do
         debug $ "remoteReadFile: removing " ++ show path
         liftIO $ removeFile path
     blocks <- do
-        result <- getFileS3 dets (pathText (filename path)) Nothing
+        result <- getFileS3 dets (takeFileName path) Nothing
         result $$+- CList.consume
     debug $ "remoteReadFile: downloaded " ++ show path
     case blocks of
@@ -870,7 +874,7 @@ remoteReadPackFile :: OdbS3Details -> Text -> Bool
 remoteReadPackFile dets packSha readPackAndIndex = do
     debug $ "remoteReadPackFile " ++ show packSha
     let tmpDir   = tempDirectory dets
-        packPath = tmpDir </> fromText ("pack-" <> packSha <> ".pack")
+        packPath = tmpDir </> ("pack-" <> T.unpack packSha <> ".pack")
         idxPath  = replaceExtension packPath "idx"
 
     runMaybeT $ do
@@ -878,11 +882,11 @@ remoteReadPackFile dets packSha readPackAndIndex = do
         -- "True ||" here, but right now this is not working with the current
         -- libgit2.
         when (True || readPackAndIndex) $ do
-            exists <- liftIO $ isFile packPath
+            exists <- liftIO $ doesFileExist packPath
             void $ if exists
                    then return (Just ())
                    else download packPath
-        exists <- liftIO $ isFile idxPath
+        exists <- liftIO $ doesFileExist idxPath
         void $ if exists
                then return (Just ())
                else download idxPath
@@ -892,9 +896,8 @@ remoteReadPackFile dets packSha readPackAndIndex = do
         minfo <- lift $ remoteReadFile dets path
         for minfo $ \ObjectInfo {..} ->
             expectingJust
-                ("failed to download data for " <> pathText path)
-                infoData
-                >>= liftIO . B.writeFile (pathStr path)
+                ("failed to download data for " <> T.pack path) infoData
+                >>= liftIO . B.writeFile path
 
 remoteWriteFile :: OdbS3Details -> Text -> ObjectType -> ByteString
                 -> ResourceT IO ()
@@ -935,22 +938,21 @@ remoteStoreObject _ _ _ =
 remoteCatalogContents :: OdbS3Details -> ResourceT IO ()
 remoteCatalogContents dets = do
     debug "remoteCatalogContents"
-    items <- listBucketS3 dets
+    items <- map T.unpack <$> listBucketS3 dets
     for_ items $ \item -> case () of
-        () | ".idx" `T.isSuffixOf` item -> do
-                let packName = fromText item
-                    packSha  = T.drop 5 (pathText (basename packName))
+        () | ".idx" `L.isSuffixOf` item -> do
+                let packSha = T.pack . drop 5 . takeBaseName $ item
                 debug $ "remoteCatalogContents: found pack file "
                      ++ show packSha
                 mpaths <- remoteReadPackFile dets packSha False
-                for_ mpaths $ \(_,idxPath) -> liftIO $ do
+                for_ mpaths $ \(_, idxPath) -> liftIO $ do
                     shas <- catalogPackFile dets packSha idxPath
                     callbackRegisterPackFile dets packSha shas
 
-           | ".pack" `T.isSuffixOf` item -> return ()
+           | ".pack" `L.isSuffixOf` item -> return ()
 
-           | T.length item == 40 -> liftIO $ do
-                sha <- Git.textToSha . pathText . basename . fromText $ item
+           | length item == 40 -> liftIO $ do
+                sha <- Git.textToSha . T.pack . takeBaseName $ item
                 cacheUpdateEntry dets sha LooseRemote
                 callbackRegisterCacheEntry dets sha LooseRemote
 
@@ -1031,10 +1033,10 @@ writePackFile dets bytes = do
     (packSha, packPath, idxPath) <- lgBuildPackIndex dir bytes
 
     runResourceT $
-        remoteWriteFile dets (pathText (filename packPath)) plainFile bytes
-    (runResourceT .
-     remoteWriteFile dets (pathText (filename idxPath)) plainFile)
-        =<< B.readFile (pathStr idxPath)
+        remoteWriteFile dets (T.pack (takeFileName packPath)) plainFile bytes
+    runResourceT
+        . remoteWriteFile dets (T.pack (takeFileName idxPath)) plainFile
+        =<< B.readFile idxPath
 
     -- This updates the local cache and remote registry with knowledge of
     -- every object in the pack file.
@@ -1132,10 +1134,10 @@ freeCallback be = do
     wrapShuttingDown (shuttingDown (callbacks dets)) `orElse` return ()
 
     let tmpDir = tempDirectory dets
-    exists <- isDirectory tmpDir
+    exists <- doesDirectoryExist tmpDir
     when exists $ do
         debug $ "S3.freeCallback: removing tree " ++ show tmpDir
-        removeTree tmpDir `orElse` return ()
+        removeDirectoryRecursive tmpDir `orElse` return ()
 
     backend <- peek be
     freeHaskellFunPtr (c'git_odb_backend'read backend)
@@ -1183,7 +1185,7 @@ foreign import ccall "&packFreeCallback"
   packFreeCallbackPtr :: FunPtr F'git_odb_writepack_free_callback
 
 odbS3Backend :: Git.MonadGit m
-             => S3Configuration NormalQuery
+             => Aws.S3Configuration NormalQuery
              -> Configuration
              -> Manager
              -> Text
@@ -1205,8 +1207,8 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = liftIO $ do
   writePackCommitFun <- mk'git_odb_writepack_commit_callback packCommitCallback
 
   objects   <- newTVarIO M.empty
-  dirExists <- isDirectory dir
-  unless dirExists $ createTree dir
+  dirExists <- doesDirectoryExist dir
+  unless dirExists $ createDirectoryIfMissing True dir
 
   let odbS3details = OdbS3Details
           { httpManager     = manager
@@ -1271,12 +1273,12 @@ addS3Backend repo bucket prefix access secret
     odbS3   <- liftIO $ odbS3Backend
         (case mockAddr of
             Nothing   -> defServiceConfig
-            Just addr -> (Aws.s3 HTTP (E.encodeUtf8 addr) False) {
+            Just addr -> (Aws.s3 HTTP (T.encodeUtf8 addr) False) {
                                Aws.s3Port         = 10001
-                             , Aws.s3RequestStyle = PathStyle })
+                             , Aws.s3RequestStyle = Aws.PathStyle })
         (Configuration Timestamp Credentials {
-              accessKeyID     = E.encodeUtf8 access
-            , secretAccessKey = E.encodeUtf8 secret }
+              accessKeyID     = T.encodeUtf8 access
+            , secretAccessKey = T.encodeUtf8 secret }
          (defaultLog level))
         manager bucket prefix dir callbacks
     void $ liftIO $ odbBackendAdd repo odbS3 100

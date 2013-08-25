@@ -14,10 +14,11 @@ import           Data.Text (Text)
 import           Git.Tree
 import           Git.Types
 import           Prelude hiding (FilePath)
+import Debug.Trace
 
 commitTreeEntry :: Repository m
                 => Commit m
-                -> Text
+                -> TreeFilePath
                 -> m (Maybe (TreeEntry m))
 commitTreeEntry c path = flip treeEntry path =<< lookupTree (commitTree c)
 
@@ -26,7 +27,7 @@ copyCommitOid = parseObjOid . renderObjOid
 
 copyCommit :: (Repository m, Repository (t m), MonadTrans t)
            => CommitOid m
-           -> Maybe Text
+           -> Maybe RefName
            -> HashSet Text
            -> t m (CommitOid (t m), HashSet Text)
 copyCommit cr mref needed = do
@@ -39,6 +40,7 @@ copyCommit cr mref needed = do
         let parents = commitParents commit
         (parentRefs,needed') <- foldM copyParent ([],needed) parents
         (tr,needed'') <- copyTree (commitTree commit) needed'
+        trace ("copyTree " ++ show (commitTree commit) ++ " => " ++ show tr) $ return ()
 
         commit' <- createCommit (reverse parentRefs) tr
             (commitAuthor commit)
@@ -54,6 +56,7 @@ copyCommit cr mref needed = do
   where
     copyParent (prefs,needed') cref = do
         (cref2,needed'') <- copyCommit cref Nothing needed'
+        trace ("copyCommit " ++ show cref ++ " => " ++ show cref2) $ return ()
         let x = cref2 `seq` (cref2:prefs)
         return $ x `seq` needed'' `seq` (x,needed'')
 

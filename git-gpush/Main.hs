@@ -32,8 +32,7 @@ import qualified Git.Libgit2 as Lg
 import qualified Git.CmdLine as Cli
 #endif
 import           Options.Applicative
-import           Prelude hiding (FilePath, null)
-import           Shelly
+import           Shelly hiding (FilePath)
 
 #if USE_LIBGIT2
 factory :: RepositoryFactory Lg.LgRepository IO Lg.Repository
@@ -56,8 +55,6 @@ fromStrict = id
 #else
 fromStrict = TL.fromStrict
 #endif
-
-instance Read FilePath
 
 data Options = Options
     { verbose    :: Bool
@@ -95,7 +92,7 @@ main = withBackendDo factory $ execParser opts >>= pushToGitHub
 
 pushToGitHub :: Options -> IO ()
 pushToGitHub opts = do
-    gd <- fromText . TL.init <$> sh opts (run "git" ["rev-parse", "--git-dir"])
+    gd <- TL.unpack . TL.init <$> sh opts (run "git" ["rev-parse", "--git-dir"])
 
     remoteName <- case remote opts of
         Nothing -> sh opts $ getRemoteName gd

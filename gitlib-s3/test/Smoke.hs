@@ -15,8 +15,6 @@ import           Control.Monad.IO.Class
 import           Data.Default (def)
 import           Data.Maybe (fromMaybe, isNothing)
 import           Data.Text as T
-import           Filesystem
-import           Filesystem.Path.CurrentOS
 import qualified Git as Git
 import qualified Git.Libgit2 as Lg
 import qualified Git.S3 as S3
@@ -24,6 +22,8 @@ import qualified Git.Smoke as Git
 import           System.Environment
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
+import           System.Directory
+import           System.FilePath.Posix
 
 s3Factory :: Git.MonadGit m
           => Git.RepositoryFactory Lg.LgRepository m Lg.Repository
@@ -37,10 +37,10 @@ s3Factory = Lg.lgFactory
             let bucket    = T.pack <$> lookup "S3_BUCKET" env
                 accessKey = T.pack <$> lookup "AWS_ACCESS_KEY" env
                 secretKey = T.pack <$> lookup "AWS_SECRET_KEY" env
-            cwd <- getWorkingDirectory
+            cwd <- getCurrentDirectory
             svc <- S3.s3MockService
             let tmpDir = cwd </> "s3cache"
-            createDirectory True tmpDir
+            createDirectoryIfMissing True tmpDir
             S3.addS3Backend
                 repo
                 (fromMaybe "test-bucket" bucket)

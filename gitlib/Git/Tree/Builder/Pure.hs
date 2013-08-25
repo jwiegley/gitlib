@@ -5,12 +5,11 @@ module Git.Tree.Builder.Pure
 
 import           Control.Applicative
 import           Data.Monoid
-import           Data.Text
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import           Git
 
-type EntryHashMap m = HashMap Text (TreeEntry m)
+type EntryHashMap m = HashMap TreeFilePath (TreeEntry m)
 
 -- | Create a new, empty tree.
 --
@@ -34,7 +33,7 @@ newPureTreeBuilder reader writer mtree = do
 
 makePureBuilder :: Repository m
                 => Maybe (TreeOid m)
-                -> HashMap Text (TreeBuilder m)
+                -> HashMap TreeFilePath (TreeBuilder m)
                 -> (Maybe (Tree m) -> m (TreeBuilder m))
                 -> EntryHashMap m
                 -> (EntryHashMap m -> m (TreeOid m))

@@ -12,7 +12,6 @@ import           Data.Tagged
 import           Data.Text as T
 import           Data.Text.Encoding as T
 import           Git.Types
-import           Prelude hiding (FilePath)
 
 createBlobUtf8 :: Repository m => Text -> m (BlobOid m)
 createBlobUtf8 = createBlob . BlobString . T.encodeUtf8
@@ -33,7 +32,8 @@ blobContentsToByteString (BlobSizedStream bs _) =
 blobToByteString :: Repository m => Blob m -> m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
 
-treeBlobEntries :: Repository m => Tree m -> m [(Text, BlobOid m, BlobKind)]
+treeBlobEntries :: Repository m
+                => Tree m -> m [(TreeFilePath, BlobOid m, BlobKind)]
 treeBlobEntries tree = do
     entries <- listTreeEntries tree
     return $ Prelude.foldr f [] entries

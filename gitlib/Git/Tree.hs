@@ -2,7 +2,6 @@ module Git.Tree where
 
 import           Control.Monad
 import           Control.Monad.Trans.Class
-import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Tagged
@@ -10,7 +9,7 @@ import           Data.Text (Text)
 import           Git.Blob
 import           Git.Tree.Builder
 import           Git.Types
-import           Prelude hiding (FilePath)
+import Debug.Trace
 
 copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               => TreeEntry m
@@ -18,6 +17,7 @@ copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               -> t m (TreeEntry (t m), HashSet Text)
 copyTreeEntry (BlobEntry oid kind) needed = do
     (b,needed') <- copyBlob oid needed
+    trace ("copyBlob " ++ show oid ++ " => " ++ show b) $ return ()
     return (BlobEntry b kind, needed')
 copyTreeEntry (CommitEntry oid) needed = do
     coid <- parseOid (renderObjOid oid)
@@ -46,7 +46,7 @@ copyTree tr needed = do
   where
     doCopyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
                     => HashSet Text
-                    -> (Text, TreeEntry m)
+                    -> (TreeFilePath, TreeEntry m)
                     -> TreeT (t m) (HashSet Text)
     doCopyTreeEntry set (_, TreeEntry {}) = return set
     doCopyTreeEntry set (fp, ent) = do

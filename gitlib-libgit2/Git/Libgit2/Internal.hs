@@ -18,8 +18,6 @@ import qualified Data.Text.ICU.Convert as U
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
-import           Filesystem.Path.CurrentOS ((</>))
-import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
 import           Foreign.C.Types
 import           Foreign.ForeignPtr
@@ -30,7 +28,7 @@ import qualified Git
 import           Git.Libgit2.Backend
 import           Git.Libgit2.Trace
 import           Git.Libgit2.Types
-import           Prelude hiding (FilePath)
+import           System.FilePath.Posix
 
 type ObjPtr a = Maybe (ForeignPtr a)
 
@@ -42,19 +40,16 @@ data Base m a b = Base
 addTracingBackend :: Git.MonadGit m => LgRepository m ()
 addTracingBackend = do
     repo <- lgGet
-    case F.toText (repoPath repo </> "objects") of
-        Left p -> error $ "Object directory does not exist: " ++ T.unpack p
-        Right p ->
-            liftIO $ withCString (T.unpack p) $ \objectsDir ->
-                alloca $ \loosePtr -> do
-                    r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
-                    when (r < 0) $
-                        error "Failed to create loose objects backend"
+    liftIO $ withCString (repoPath repo </> "objects") $ \objectsDir ->
+        alloca $ \loosePtr -> do
+            r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
+            when (r < 0) $
+                error "Failed to create loose objects backend"
 
-                    loosePtr' <- peek loosePtr
-                    backend   <- traceBackend loosePtr'
-                    void $ odbBackendAdd repo backend 3
-                    return ()
+            loosePtr' <- peek loosePtr
+            backend   <- traceBackend loosePtr'
+            void $ odbBackendAdd repo backend 3
+            return ()
 
 coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
 coidPtrToOid coidptr = do

@@ -31,15 +31,14 @@ import           Control.Monad.Fix
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.State
-import           Data.Function
+import qualified Data.ByteString as B
+import           Data.Char
 import qualified Data.HashMap.Strict as HashMap
-import           Data.List
-import           Data.Maybe
 import           Data.Monoid
 import           Data.Text (Text)
-import qualified Data.Text as T
+import           Data.Word
 import           Git.Types
-import           Prelude hiding (FilePath)
+import           System.Posix.ByteString.FilePath
 
 data ModifyTreeResult m = TreeEntryNotFound
                         | TreeEntryDeleted
@@ -76,7 +75,7 @@ instance (Functor m, MonadPlus m) => Alternative (TreeT m) where
     (<|>) = mplus
 
 instance (MonadPlus m) => MonadPlus (TreeT m) where
-    mzero       = TreeT $ mzero
+    mzero       = TreeT mzero
     m `mplus` n = TreeT $ runTreeT m `mplus` runTreeT n
 
 instance (MonadFix m) => MonadFix (TreeT m) where
@@ -95,7 +94,7 @@ putBuilder :: Monad m => TreeBuilder m -> TreeT m ()
 putBuilder = TreeT . put
 
 data BuilderAction = GetEntry | PutEntry | DropEntry
-                   deriving (Eq, Show)
+    deriving (Eq, Show)
 
 emptyTreeId :: Text
 emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -106,13 +105,13 @@ emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 --   This is a complex algorithm which has been rewritten many times, so I
 --   will try to guide you through it as best I can.
 queryTreeBuilder :: Repository m
-                  => TreeBuilder m
-                  -> Text
-                  -> BuilderAction
-                  -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
-                  -> m (TreeBuilder m, Maybe (TreeEntry m))
+                 => TreeBuilder m
+                 -> TreeFilePath
+                 -> BuilderAction
+                 -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
+                 -> m (TreeBuilder m, Maybe (TreeEntry m))
 queryTreeBuilder builder path kind f = do
-    (mtb, mtresult) <- walk (BuilderUnchanged builder) (splitPath path)
+    (mtb, mtresult) <- walk (BuilderUnchanged builder) (splitDirectories path)
     return (fromBuilderMod mtb, fromModifyTreeResult mtresult)
   where
     walk _ [] = error "queryTreeBuilder called without a path"
@@ -185,6 +184,21 @@ queryTreeBuilder builder path kind f = do
             { mtbPendingUpdates =
                    HashMap.insert name sbm (mtbPendingUpdates tb) }
 
+    pathSeparator :: Word8
+    pathSeparator = fromIntegral $ ord '/'
+
+    isPathSeparator :: Word8 -> Bool
+    isPathSeparator = (== pathSeparator)
+
+    splitDirectories :: RawFilePath -> [RawFilePath]
+    splitDirectories x
+        | B.null x = []
+        | isPathSeparator (B.head x) = let (root,rest) = B.splitAt 1 x
+                                        in root : splitter rest
+        | otherwise = splitter x
+      where
+        splitter = filter (not . B.null) . B.split pathSeparator
+
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
 writeTreeBuilder :: Repository m
@@ -222,36 +236,36 @@ writeTreeBuilder builder = do
             Just tref -> mtbPutEntry tb tb k (TreeEntry tref)
         return $ bm <> bm'
 
-getEntry :: Repository m => Text -> TreeT m (Maybe (TreeEntry m))
+getEntry :: Repository m => TreeFilePath -> TreeT m (Maybe (TreeEntry m))
 getEntry path = do
     tb <- getBuilder
     snd <$> lift (queryTreeBuilder tb path GetEntry
                   (toModifyTreeResult TreeEntryPersistent))
 
-putEntry :: Repository m => Text -> TreeEntry m -> TreeT m ()
+putEntry :: Repository m => TreeFilePath -> TreeEntry m -> TreeT m ()
 putEntry path ent = do
     tb  <- getBuilder
     tb' <- fst <$> lift (queryTreeBuilder tb path PutEntry
                          (const (TreeEntryMutated ent)))
     putBuilder tb'
 
-dropEntry :: Repository m => Text -> TreeT m ()
+dropEntry :: Repository m => TreeFilePath -> TreeT m ()
 dropEntry path = do
     tb  <- getBuilder
     tb' <- fst <$> lift (queryTreeBuilder tb path DropEntry
                          (const TreeEntryDeleted))
     putBuilder tb'
 
-putBlob' :: Repository m => Text -> BlobOid m -> BlobKind -> TreeT m ()
+putBlob' :: Repository m => TreeFilePath -> BlobOid m -> BlobKind -> TreeT m ()
 putBlob' path b kind = putEntry path (BlobEntry b kind)
 
-putBlob :: Repository m => Text -> BlobOid m -> TreeT m ()
+putBlob :: Repository m => TreeFilePath -> BlobOid m -> TreeT m ()
 putBlob path b = putBlob' path b PlainBlob
 
-putTree :: Repository m => Text -> TreeOid m -> TreeT m ()
+putTree :: Repository m => TreeFilePath -> TreeOid m -> TreeT m ()
 putTree path t = putEntry path (TreeEntry t)
 
-putCommit :: Repository m => Text -> CommitOid m -> TreeT m ()
+putCommit :: Repository m => TreeFilePath -> CommitOid m -> TreeT m ()
 putCommit path c = putEntry path (CommitEntry c)
 
 doWithTree :: Repository m => Maybe (Tree m) -> TreeT m a -> m (a, TreeOid m)
@@ -289,6 +303,3 @@ withNewTree = doWithTree Nothing
 
 createTree :: Repository m => TreeT m a -> m (TreeOid m)
 createTree action = snd <$> withNewTree action
-
-splitPath :: Text -> [Text]
-splitPath = T.splitOn "/"

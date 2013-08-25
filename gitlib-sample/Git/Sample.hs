@@ -23,8 +23,6 @@ import           Control.Applicative
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader
-import           Filesystem.Path.CurrentOS as F
-import           Prelude hiding (FilePath)
 import qualified Git
 
 data Void
@@ -124,6 +122,6 @@ closeSampleRepository :: Git.MonadGit m => Repository -> m ()
 closeSampleRepository = const (return ())
 
 defaultSampleOptions :: Git.RepositoryOptions
-defaultSampleOptions = Git.RepositoryOptions F.empty False False
+defaultSampleOptions = Git.RepositoryOptions "" False False
 
 -- Sample.hs

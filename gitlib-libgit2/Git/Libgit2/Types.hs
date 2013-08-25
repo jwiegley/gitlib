@@ -21,12 +21,8 @@ import           Control.Monad.Trans.Reader
 import           Data.Conduit
 import           Data.IORef
 import           Data.Monoid
-import           Data.Text (Text)
-import           Data.Text as T (pack, unpack)
-import           Filesystem.Path.CurrentOS (FilePath, toText)
 import           Foreign.ForeignPtr
 import qualified Git
-import           Prelude hiding (FilePath)
 import           System.IO.Unsafe
 
 data Repository = Repository
@@ -41,18 +37,8 @@ repoPath = Git.repoPath . repoOptions
 instance Eq Repository where
   x == y = repoPath x == repoPath y && repoObj x == repoObj y
 
-pathText :: FilePath -> Text
-pathText = go . toText
-  where
-    go (Left e) =
-        throw . Git.BackendError $ "Could not render path: " <> T.pack (show e)
-    go (Right p) = p
-
-pathStr :: FilePath -> String
-pathStr = T.unpack . pathText
-
 instance Show Repository where
-  show x = "Repository " <> pathStr (repoPath x)
+  show x = "Repository " <> repoPath x
 
 newtype LgRepository m a = LgRepository
     { lgRepositoryReaderT :: ReaderT Repository m a }

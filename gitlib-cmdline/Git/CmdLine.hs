@@ -25,6 +25,7 @@ import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import qualified Data.ByteString as B
 import           Data.Conduit hiding (MonadBaseControl)
+import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
@@ -41,13 +42,11 @@ import qualified Data.Text as TL
 import qualified Data.Text.Lazy as TL
 #endif
 import           Data.Time
-import           Data.Tuple
-import qualified Filesystem as F
 import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
 import qualified Git.Tree.Builder.Pure as Pure
-import           Prelude hiding (FilePath)
-import           Shelly hiding (trace)
+import           Shelly hiding (FilePath, trace)
+import           System.Directory
 import           System.Exit
 import           System.IO.Unsafe
 import           System.Locale (defaultTimeLocale)
@@ -124,7 +123,8 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     -- remoteFetch      = error "Not defined: CmdLineRepository.remoteFetch"
 
     deleteRepository =
-        cliGet >>= liftIO . F.removeTree . Git.repoPath . repoOptions
+        cliGet >>= liftIO
+            . removeDirectoryRecursive . Git.repoPath . repoOptions
 
 mkOid :: Git.MonadGit m
       => forall o. TL.Text -> CmdLineRepository m (Tagged o Git.SHA)
@@ -149,7 +149,7 @@ git_ :: [TL.Text] -> Sh ()
 git_ = run_ "git"
 
 doRunGit :: Git.MonadGit m
-         => (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
+         => (F.FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
          -> CmdLineRepository m a
 doRunGit f args act = do
     repo <- cliGet
@@ -175,11 +175,8 @@ cliRepoDoesExist remoteURI = do
              then Right ()
              else Left $ Git.RepositoryCannotAccess remoteURI
 
-cliFilePathToURI :: Git.MonadGit m => FilePath -> m Text
-cliFilePathToURI =
-    fmap (T.append "file://localhost" . toStrict . toTextIgnore)
-        . liftIO
-        . F.canonicalizePath
+cliFilePathToURI :: Git.MonadGit m => FilePath -> m FilePath
+cliFilePathToURI = fmap ("file://localhost" <>) . liftIO . canonicalizePath
 
 cliPushCommit :: Git.MonadGit m
               => CommitOid m -> Text -> Text -> Maybe FilePath
@@ -187,14 +184,12 @@ cliPushCommit :: Git.MonadGit m
 cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
     repo <- cliGet
     merr <- shellyNoDir $ silently $ errExit False $ do
-        case msshCmd of
-            Nothing -> return ()
-            Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
-                               =<< liftIO (F.canonicalizePath sshCmd)
+        for_ msshCmd $ \sshCmd ->
+            setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
 
         eres <- cliRepoDoesExist remoteNameOrURI
         case eres of
-            Left e -> return (Just e)
+            Left e -> return $ Just e
             Right () -> do
                 git_ $ [ "--git-dir", repoPath repo ]
                     <> [ "push", fromStrict remoteNameOrURI
@@ -235,10 +230,8 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     leftHead <- cliResolveRef "HEAD"
 
     eres <- shellyNoDir $ silently $ errExit False $ do
-        case msshCmd of
-            Nothing     -> return ()
-            Just sshCmd -> setenv "GIT_SSH" . toTextIgnore
-                               =<< liftIO (F.canonicalizePath sshCmd)
+        for_ msshCmd $ \sshCmd ->
+            setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
 
         eres <- cliRepoDoesExist remoteNameOrURI
         case eres of
@@ -284,8 +277,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
             <$> getOid "HEAD"
             <*> pure leftHead
             <*> pure rightHead
-            <*> pure (Map.fromList . filter (isConflict . snd)
-                                   . Map.toList $ xs)
+            <*> pure (Map.filter isConflict xs)
 
     isConflict (Git.Deleted, Git.Deleted) = False
     isConflict (_, Git.Unchanged)         = False
@@ -293,17 +285,23 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     isConflict _                          = True
 
     handleFile repo fp (Git.Deleted, Git.Deleted) =
-        git_ [ "--git-dir", repoPath repo, "rm", "--cached", fromStrict fp ]
+        git_ [ "--git-dir", repoPath repo, "rm", "--cached"
+             , fromStrict . T.decodeUtf8 $ fp
+             ]
     handleFile repo fp (Git.Unchanged, Git.Deleted) =
-        git_ [ "--git-dir", repoPath repo, "rm", "--cached", fromStrict fp ]
+        git_ [ "--git-dir", repoPath repo, "rm", "--cached"
+             , fromStrict . T.decodeUtf8 $ fp
+             ]
     handleFile repo fp (_, _) =
-        git_ [ "--git-dir", repoPath repo, "add", fromStrict fp ]
+        git_ [ "--git-dir", repoPath repo, "add"
+             , fromStrict . T.decodeUtf8 $ fp
+             ]
 
     getOid name = do
         mref <- cliResolveRef name
         case mref of
-            Nothing  -> failure (Git.BackendError $
-                                 T.append "Reference missing: " name)
+            Nothing  -> failure $ Git.BackendError
+                                $ T.append "Reference missing: " name
             Just ref -> return ref
 
     charToModKind 'M' = Just Git.Modified
@@ -316,7 +314,9 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
         Map.fromList
             . map (\(f, (l, r)) -> (f, getModKinds l r))
             . filter (\(_, (l, r)) -> ((&&) `on` isJust) l r)
-            . map (\l -> (toStrict $ TL.drop 3 l,
+            -- jww (2013-08-25): What is the correct way to interpret the
+            -- output from "git status"?
+            . map (\l -> (T.encodeUtf8 . toStrict . TL.drop 3 $ l,
                           (charToModKind (TL.index l 0),
                            charToModKind (TL.index l 1))))
             . init
@@ -417,11 +417,11 @@ cliReadTree (CmdLineTree (Git.renderObjOid -> sha)) = do
         <$> mapM cliParseLsTree (L.init (TL.splitOn "\NUL" contents))
 
 cliParseLsTree :: Git.MonadGit m
-               => TL.Text -> CmdLineRepository m (Text, TreeEntry m)
+               => TL.Text -> CmdLineRepository m (Git.TreeFilePath, TreeEntry m)
 cliParseLsTree line =
     let [prefix,path] = TL.splitOn "\t" line
         [mode,kind,sha] = TL.words prefix
-    in liftM2 (,) (return (toStrict path)) $ case kind of
+    in liftM2 (,) (return (T.encodeUtf8 . toStrict $ path)) $ case kind of
         "blob"   -> do
             oid <- mkOid sha
             return $ Git.BlobEntry oid $ case mode of
@@ -431,7 +431,7 @@ cliParseLsTree line =
                 _        -> Git.UnknownBlob
         "commit" -> Git.CommitEntry <$> mkOid sha
         "tree"   -> Git.TreeEntry <$> mkOid sha
-        _ -> failure (Git.BackendError "This cannot happen")
+        _ -> failure $ Git.BackendError "This cannot happen"
 
 cliWriteTree :: Git.MonadGit m
              => Pure.EntryHashMap (CmdLineRepository m)
@@ -443,22 +443,28 @@ cliWriteTree entMap = do
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
     mkOid (TL.init oid)
   where
-    renderLine (path, Git.BlobEntry (Git.renderObjOid -> sha) kind) =
-        return $ TL.concat [ case kind of
-                                  Git.PlainBlob      -> "100644"
-                                  Git.ExecutableBlob -> "100755"
-                                  Git.SymlinkBlob    -> "120000"
-                                  Git.UnknownBlob    -> "100000"
-                           , " blob ", fromStrict sha, "\t", fromStrict path ]
-    renderLine (path, Git.CommitEntry coid) = do
-        return $ TL.concat [ "160000 commit "
-                           , fromStrict (Git.renderObjOid coid), "\t"
-                           , fromStrict path ]
-    renderLine (path, Git.TreeEntry toid) = do
+    renderLine (fromStrict . T.decodeUtf8 -> path,
+                Git.BlobEntry (Git.renderObjOid -> sha) kind) =
+        return $ TL.concat
+            [ case kind of
+                   Git.PlainBlob      -> "100644"
+                   Git.ExecutableBlob -> "100755"
+                   Git.SymlinkBlob    -> "120000"
+                   Git.UnknownBlob    -> "100000"
+            , " blob ", fromStrict sha, "\t", path
+            ]
+    renderLine (fromStrict . T.decodeUtf8 -> path, Git.CommitEntry coid) = do
+        return $ TL.concat
+            [ "160000 commit "
+            , fromStrict (Git.renderObjOid coid), "\t"
+            , path
+            ]
+    renderLine (fromStrict . T.decodeUtf8 -> path, Git.TreeEntry toid) = do
         return $ TL.concat
             [ "040000 tree "
             , fromStrict (Git.renderObjOid toid), "\t"
-            , fromStrict path ]
+            , path
+            ]
 
 cliLookupTree :: Git.MonadGit m => TreeOid m -> CmdLineRepository m (Tree m)
 cliLookupTree oid@(Git.renderObjOid -> sha) = do
@@ -470,7 +476,9 @@ cliLookupTree oid@(Git.renderObjOid -> sha) = do
         then return $ CmdLineTree oid
         else failure (Git.ObjectLookupFailed sha 40)
 
-cliTreeEntry :: Git.MonadGit m => Tree m -> Text
+cliTreeEntry :: Git.MonadGit m
+             => Tree m
+             -> Git.TreeFilePath
              -> CmdLineRepository m (Maybe (TreeEntry m))
 cliTreeEntry tree fp = do
     repo <- cliGet
@@ -478,7 +486,8 @@ cliTreeEntry tree fp = do
         contents <- git $ [ "--git-dir", repoPath repo
                           , "ls-tree", "-z"
                           , fromStrict (Git.renderObjOid (Git.treeOid tree))
-                          , "--", fromStrict fp ]
+                          , "--", fromStrict . T.decodeUtf8 $ fp
+                          ]
         ec <- lastExitCode
         return $ if ec == 0
                  then Just $ L.init (TL.splitOn "\NUL" contents)
@@ -493,7 +502,7 @@ cliTreeEntry tree fp = do
 
 cliListTreeEntries :: Git.MonadGit m
                    => Tree m
-                   -> CmdLineRepository m [(Text, TreeEntry m)]
+                   -> CmdLineRepository m [(Git.TreeFilePath, TreeEntry m)]
 cliListTreeEntries tree = do
     contents <- runGit [ "ls-tree", "-t", "-r", "-z"
                        , fromStrict (Git.renderObjOid (Git.treeOid tree)) ]
@@ -671,7 +680,7 @@ data Repository = Repository
     }
 
 repoPath :: Repository -> TL.Text
-repoPath = toTextIgnore . Git.repoPath . repoOptions
+repoPath = TL.pack . Git.repoPath . repoOptions
 
 newtype CmdLineRepository m a = CmdLineRepository
     { cmdLineRepositoryReaderT :: ReaderT Repository m a }
@@ -738,17 +747,14 @@ cliFactory = Git.RepositoryFactory
 openCliRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
 openCliRepository opts = do
     let path = Git.repoPath opts
-    exists <- liftIO $ F.isDirectory path
-    case F.toText path of
-        Left e -> failure (Git.BackendError e)
-        Right p -> do
-            when (not exists && Git.repoAutoCreate opts) $ do
-                liftIO $ F.createTree (fromText (fromStrict p))
-                shellyNoDir $ silently $
-                    git_ $ ["--git-dir", fromStrict p]
-                        <> ["--bare" | Git.repoIsBare opts]
-                        <> ["init"]
-            return Repository { repoOptions = opts }
+    exists <- liftIO $ doesDirectoryExist path
+    when (not exists && Git.repoAutoCreate opts) $ do
+        liftIO $ createDirectoryIfMissing True path
+        shellyNoDir $ silently $
+            git_ $ ["--git-dir", TL.pack path]
+                <> ["--bare" | Git.repoIsBare opts]
+                <> ["init"]
+    return Repository { repoOptions = opts }
 
 runCliRepository :: Git.MonadGit m => Repository -> CmdLineRepository m a -> m a
 runCliRepository repo action =

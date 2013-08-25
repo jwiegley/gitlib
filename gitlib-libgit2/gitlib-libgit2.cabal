@@ -1,5 +1,5 @@
 Name:                gitlib-libgit2
-Version:             2.0.2.1
+Version:             2.1.0.0
 Synopsis:            Libgit2 backend for gitlib
 License-file:        LICENSE
 License:             MIT
@@ -23,9 +23,9 @@ Test-suite smoke
     Hs-source-dirs: test
     Build-depends: 
           base >=3
-        , gitlib             >= 2.0.1.0
-        , gitlib-test        >= 2.0.0.0
-        , gitlib-libgit2     >= 2.0.2.1
+        , gitlib             >= 2.1.0.0
+        , gitlib-test        >= 2.1.0.0
+        , gitlib-libgit2     >= 2.1.0.0
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3
@@ -36,17 +36,17 @@ Library
     ghc-options: -Wall
     build-depends:
           base                 >= 3 && < 5
-        , gitlib               >= 2.0.1.0
-        , hlibgit2             >= 0.18.0.9
+        , gitlib               >= 2.1.0.0
+        , hlibgit2             >= 0.18.0.10
         , attempt              >= 0.4.0
         , binary               >= 0.5.1.0
         , bytestring           >= 0.9.2.1
         , base16-bytestring    >= 0.1.1.5
         , conduit              >= 0.5.5
         , containers           >= 0.4.2
-        , data-default         >= 0.5.0
         , directory            >= 1.1.0.2
         , failure              >= 0.2.0.1
+        , filepath             >= 1.3.0
         , hashable             >= 1.1.2.5
         , hex                  >= 0.1.2
         , lifted-base          >= 0.2.0.2
@@ -56,8 +56,6 @@ Library
         , parallel-io          >= 0.3.2.1
         , pointless-fun        >= 1.1.0.1
         , resourcet            >= 0.4.6
-        , system-fileio        >= 0.3.9
-        , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1
         , text                 >= 0.11.2
         , text-icu             >= 0.6.3
@@ -65,6 +63,7 @@ Library
         , time                 >= 1.4
         , transformers         >= 0.3.0.0
         , transformers-base    >= 0.4.1
+        , unix                 >= 2.5
         , unordered-containers >= 0.2.3
     exposed-modules:
         Git.Libgit2

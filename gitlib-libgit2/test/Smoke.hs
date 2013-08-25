@@ -9,7 +9,7 @@
 module Main where
 
 import           Control.Exception (finally)
-import qualified Git as Git
+import qualified Git
 import qualified Git.Smoke as Git
 import qualified Git.Libgit2 as Lg
 import           Test.Hspec.Runner

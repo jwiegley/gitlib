@@ -10,28 +10,25 @@
 
 module Git.Smoke where
 
-import           Control.Applicative
-import           Control.Exception
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Control
-import           Data.List (sort)
-import           Data.Monoid
-import           Data.Tagged
-import qualified Data.Text as T (Text, pack)
-import qualified Data.Text.Encoding as T (decodeUtf8)
-import           Data.Time
-import           Data.Time.Clock.POSIX
-import           Data.Typeable
-import           Filesystem.Path.CurrentOS (FilePath, fromText, toText,
-                                            filename)
-import           Git
-import           Prelude hiding (FilePath, putStr)
-import           Test.HUnit
-import           Test.Hspec (Spec, Example, describe, it)
-import           Test.Hspec.Expectations
-import           Test.Hspec.HUnit ()
+import Control.Applicative
+import Control.Exception
+import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Control
+import Data.List (sort)
+import Data.Monoid
+import Data.Tagged
+import Data.Text (Text)
+import Data.Time
+import Data.Time.Clock.POSIX
+import Data.Typeable
+import Git
+import Prelude hiding (putStr)
+import Test.HUnit
+import Test.Hspec (Spec, Example, describe, it)
+import Test.Hspec.Expectations
+import Test.Hspec.HUnit ()
 
 sampleCommit :: Repository m => TreeOid m -> Signature -> m (Commit m)
 sampleCommit tr sig =
@@ -236,11 +233,11 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
               , signatureEmail = "user1@email.org"
               , signatureWhen  = fakeTime 1348981883 }
       tree <- createTree $ do
-          putBlob "One"            =<< lift (createBlobUtf8 "One\n")
-          putBlob "Two"            =<< lift (createBlobUtf8 "Two\n")
-          putBlob "Files/Three"    =<< lift (createBlobUtf8 "Three\n")
-          putBlob "More/Four"      =<< lift (createBlobUtf8 "Four\n")
-          putBlob "Five/More/Four" =<< lift (createBlobUtf8 "Five\n")
+          mkBlob "One"
+          mkBlob "Two"
+          mkBlob "Files/Three"
+          mkBlob "More/Four"
+          mkBlob "Five/More/Four"
       createCommit [] tree sig sig "Initial commit" (Just masterRef)
 
       tree' <- lookupTree tree
@@ -259,29 +256,29 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   treeit "adds a file" pr
       [ Bl "one"
       ] $ do
-          putBlob "one" =<< lift (createBlobUtf8 "one\n")
+          mkBlob "one"
 
   treeit "adds two files" pr
       [ Bl "one"
       , Bl "two"
       ] $ do
-          putBlob "one" =<< lift (createBlobUtf8 "one\n")
-          putBlob "two" =<< lift (createBlobUtf8 "two\n")
+          mkBlob "one"
+          mkBlob "two"
 
   treeit "adds three files" pr
       [ Bl "one"
       , Bl "three"
       , Bl "two"
       ] $ do
-          putBlob "one" =<< lift (createBlobUtf8 "one\n")
-          putBlob "two" =<< lift (createBlobUtf8 "two\n")
-          putBlob "three" =<< lift (createBlobUtf8 "three\n")
+          mkBlob "one"
+          mkBlob "two"
+          mkBlob "three"
 
   treeit "adds a file at a subpath" pr
       [ Tr "a"
       , Bl "a/one"
       ] $ do
-          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
+          mkBlob "a/one"
 
   treeit "adds a file at a deep subpath" pr
       [ Tr "a"
@@ -291,7 +288,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       , Tr "a/b/c/d/e"
       , Bl "a/b/c/d/e/one"
       ] $ do
-          putBlob "a/b/c/d/e/one" =<< lift (createBlobUtf8 "one\n")
+          mkBlob "a/b/c/d/e/one"
 
   treeit "adds files at multiple depths" pr
       [ Tr "a"
@@ -305,11 +302,11 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       , Bl "a/b/two"
       , Bl "a/one"
       ] $ do
-          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
-          putBlob "a/b/two" =<< lift (createBlobUtf8 "two\n")
-          putBlob "a/b/c/three" =<< lift (createBlobUtf8 "three\n")
-          putBlob "a/b/c/d/four" =<< lift (createBlobUtf8 "four\n")
-          putBlob "a/b/c/d/e/five" =<< lift (createBlobUtf8 "five\n")
+          mkBlob "a/one"
+          mkBlob "a/b/two"
+          mkBlob "a/b/c/three"
+          mkBlob "a/b/c/d/four"
+          mkBlob "a/b/c/d/e/five"
 
   treeit "adds files at mixed depths" pr
       [ Tr "a"
@@ -333,22 +330,22 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       , Tr "k/l/m/n/o"
       , Bl "k/l/m/n/o/five"
       ] $ do
-          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
-          putBlob "b/c/two" =<< lift (createBlobUtf8 "two\n")
-          putBlob "d/e/f/three" =<< lift (createBlobUtf8 "three\n")
-          putBlob "g/h/i/j/four" =<< lift (createBlobUtf8 "four\n")
-          putBlob "k/l/m/n/o/five" =<< lift (createBlobUtf8 "five\n")
+          mkBlob "a/one"
+          mkBlob "b/c/two"
+          mkBlob "d/e/f/three"
+          mkBlob "g/h/i/j/four"
+          mkBlob "k/l/m/n/o/five"
 
   treeit "adds and drops a file" pr
       [] $ do
-          putBlob "one" =<< lift (createBlobUtf8 "one\n")
+          mkBlob "one"
           dropEntry "one"
 
   treeit "adds two files and drops one" pr
       [ Bl "one"
       ] $ do
-          putBlob "one" =<< lift (createBlobUtf8 "one\n")
-          putBlob "two" =<< lift (createBlobUtf8 "two\n")
+          mkBlob "one"
+          mkBlob "two"
           dropEntry "two"
 
   treeit "adds and drops files at mixed depths" pr
@@ -363,12 +360,12 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       , Tr "g/h/i/j"
       , Bl "g/h/i/j/four"
       ] $ do
-          putBlob "a/one" =<< lift (createBlobUtf8 "one\n")
-          putBlob "b/c/two" =<< lift (createBlobUtf8 "two\n")
-          putBlob "b/c/three" =<< lift (createBlobUtf8 "three\n")
-          putBlob "d/e/f/three" =<< lift (createBlobUtf8 "three\n")
-          putBlob "g/h/i/j/four" =<< lift (createBlobUtf8 "four\n")
-          putBlob "k/l/m/n/o/five" =<< lift (createBlobUtf8 "five\n")
+          mkBlob "a/one"
+          mkBlob "b/c/two"
+          mkBlob "b/c/three"
+          mkBlob "d/e/f/three"
+          mkBlob "g/h/i/j/four"
+          mkBlob "k/l/m/n/o/five"
           dropEntry "b/c/three"
           dropEntry "d/e/f/three"
           dropEntry "k/l"
@@ -376,33 +373,28 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   where
     fakeTime secs = utcToZonedTime utc (posixSecondsToUTCTime secs)
 
-data Kind = Bl T.Text | Tr T.Text deriving (Eq, Show)
+data Kind = Bl TreeFilePath | Tr TreeFilePath deriving (Eq, Show)
 
 isBlobKind :: Kind -> Bool
 isBlobKind (Bl _) = True
 isBlobKind _      = False
 
-kindPath :: Kind -> T.Text
+kindPath :: Kind -> TreeFilePath
 kindPath (Bl path) = path
 kindPath (Tr path) = path
 
-data TreeitException = TreeitException T.Text deriving (Eq, Show, Typeable)
+data TreeitException = TreeitException Text deriving (Eq, Show, Typeable)
 
 instance Exception TreeitException
 
-mkBlob :: Repository m => T.Text -> TreeT m ()
-mkBlob path =
-    putBlob path
-        =<< lift (createBlobUtf8 (baseFilename (fromText path) <> "\n"))
-
-baseFilename :: FilePath -> T.Text
-baseFilename = either id id . toText . filename
+mkBlob :: Repository m => TreeFilePath -> TreeT m ()
+mkBlob path = putBlob path =<< lift (createBlob $ BlobString $ path <> "\n")
 
 doTreeit :: (MonadBaseControl IO m, MonadIO m,
              MonadTrans t, MonadGit (t m), Repository (t m))
        => String -> RepositoryFactory t m c -> [Kind] -> TreeT (t m) a -> m ()
 doTreeit label pr kinds action = withNewRepository pr fullPath $ do
-    tref <- createTree $ action
+    tref <- createTree action
     tree <- lookupTree tref
     forM_ kinds $ \kind -> do
         let path = kindPath kind
@@ -411,8 +403,7 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
             Just (BlobEntry boid _) -> do
                 liftIO $ isBlobKind kind @?= True
                 bs <- lookupBlob boid >>= blobToByteString
-                liftIO $ T.decodeUtf8 bs
-                    @?= baseFilename (fromText path) <> "\n"
+                liftIO $ bs @?= path <> "\n"
             Just (TreeEntry _) ->
                 liftIO $ isBlobKind kind @?= False
             Nothing ->
@@ -423,7 +414,7 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     paths <- map fst <$> listTreeEntries tree
     liftIO $ sort paths @?= map kindPath kinds
   where
-    fullPath  = fromText (T.pack (normalize label)) <> ".git"
+    fullPath  = normalize label <> ".git"
     normalize = map (\x -> if x == ' ' then '-' else x)
 
 treeit :: (Example (m ()), MonadTrans t, MonadGit m,

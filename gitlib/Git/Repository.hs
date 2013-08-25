@@ -5,11 +5,8 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Data.Conduit
-import           Data.Function
-import           Filesystem
-import           Filesystem.Path.CurrentOS hiding (null, concat)
 import           Git.Types
-import           Prelude hiding (FilePath)
+import           System.Directory
 import           System.Mem
 
 withNewRepository :: (Repository (t m), MonadGit (t m),
@@ -18,8 +15,8 @@ withNewRepository :: (Repository (t m), MonadGit (t m),
                   -> FilePath -> t m a -> m a
 withNewRepository factory path action = do
     liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
+        exists <- doesDirectoryExist path
+        when exists $ removeDirectoryRecursive path
 
     -- we want exceptions to leave the repo behind
     a <- withRepository' factory (defaultOptions factory)
@@ -29,8 +26,8 @@ withNewRepository factory path action = do
         } action
 
     liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
+        exists <- doesDirectoryExist path
+        when exists $ removeDirectoryRecursive path
 
     return a
 
@@ -46,9 +43,8 @@ withNewRepository' factory path action =
             } action
   where
     recover = liftIO $ do
-        exists <- isDirectory path
-        when exists $ removeTree path
-
+        exists <- doesDirectoryExist path
+        when exists $ removeDirectoryRecursive path
 
 withBackendDo :: (MonadIO m, MonadBaseControl IO m)
               => RepositoryFactory t m a -> m b -> m b

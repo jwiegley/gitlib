@@ -3,7 +3,6 @@ module Git.Types where
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
-import           Control.Monad
 import           Control.Monad.IO.Class
 import qualified Data.Binary as Bin
 import           Data.ByteString (ByteString)
@@ -11,12 +10,9 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
 import           Data.Conduit
 import           Data.Default
-import           Data.Function
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
-import           Data.List
 import           Data.Map (Map)
-import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
@@ -24,8 +20,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Typeable
-import           Filesystem.Path.CurrentOS hiding (null, concat)
-import           Prelude hiding (FilePath)
+import           System.Posix.ByteString.FilePath
 
 data RepositoryFacts = RepositoryFacts
     { hasSymbolicReferences :: !Bool
@@ -33,6 +28,12 @@ data RepositoryFacts = RepositoryFacts
 
 type MonadGit m = (Failure GitException m, Applicative m,
                    MonadIO m, MonadBaseControl IO m)
+
+type RefName = Text
+type CommitAuthor = Text
+type CommitEmail = Text
+type CommitMessage = Text
+type TreeFilePath = RawFilePath
 
 -- | 'Repository' is the central point of contact between user code and Git
 --   data objects.  Every object must belong to some repository.
@@ -47,11 +48,11 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     deleteRepository :: m ()
 
     -- References
-    createReference :: Text -> RefTarget m -> m ()
-    lookupReference :: Text -> m (Maybe (RefTarget m))
-    updateReference :: Text -> RefTarget m -> m ()
-    deleteReference :: Text -> m ()
-    listReferences  :: m [Text]
+    createReference :: RefName -> RefTarget m -> m ()
+    lookupReference :: RefName -> m (Maybe (RefTarget m))
+    updateReference :: RefName -> RefTarget m -> m ()
+    deleteReference :: RefName -> m ()
+    listReferences  :: m [RefName]
 
     -- Object lookup
     lookupCommit  :: CommitOid m -> m (Commit m)
@@ -69,15 +70,16 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     newTreeBuilder :: Maybe (Tree m) -> m (TreeBuilder m)
 
     treeOid   :: Tree m -> TreeOid m
-    treeEntry :: Tree m -> Text -> m (Maybe (TreeEntry m))
-    listTreeEntries :: Tree m -> m [(Text, TreeEntry m)]
+    treeEntry :: Tree m -> TreeFilePath -> m (Maybe (TreeEntry m))
+    listTreeEntries :: Tree m -> m [(TreeFilePath, TreeEntry m)]
 
     -- Creating other objects
     hashContents :: BlobContents m -> m (BlobOid m)
     createBlob   :: BlobContents m -> m (BlobOid m)
     createCommit :: [CommitOid m] -> TreeOid m
-                 -> Signature -> Signature -> Text -> Maybe Text -> m (Commit m)
-    createTag :: CommitOid m -> Signature -> Text -> Text -> m (Tag m)
+                 -> Signature -> Signature -> CommitMessage -> Maybe RefName
+                 -> m (Commit m)
+    createTag :: CommitOid m -> Signature -> CommitMessage -> Text -> m (Tag m)
 
     -- -- Pack files
     -- buildPackFile :: FilePath -> [Either (CommitOid m) (TreeOid m)]
@@ -197,14 +199,15 @@ treeEntryToOid (CommitEntry coid) = untag coid
 
 data TreeBuilder m = TreeBuilder
     { mtbBaseTreeOid    :: Maybe (TreeOid m)
-    , mtbPendingUpdates :: HashMap Text (TreeBuilder m)
+    , mtbPendingUpdates :: HashMap TreeFilePath (TreeBuilder m)
     , mtbNewBuilder     :: Maybe (Tree m) -> m (TreeBuilder m)
     , mtbWriteContents  :: TreeBuilder m -> m (ModifiedBuilder m, TreeOid m)
-    , mtbLookupEntry    :: Text -> m (Maybe (TreeEntry m))
+    , mtbLookupEntry    :: TreeFilePath -> m (Maybe (TreeEntry m))
     , mtbEntryCount     :: m Int
-    , mtbPutEntry       :: TreeBuilder m -> Text -> TreeEntry m
+    , mtbPutEntry       :: TreeBuilder m -> TreeFilePath -> TreeEntry m
                         -> m (ModifiedBuilder m)
-    , mtbDropEntry      :: TreeBuilder m -> Text -> m (ModifiedBuilder m)
+    , mtbDropEntry      :: TreeBuilder m -> TreeFilePath
+                        -> m (ModifiedBuilder m)
     }
 
 data ModifiedBuilder m = ModifiedBuilder (TreeBuilder m)
@@ -228,7 +231,7 @@ data Commit m = Commit
     , commitTree      :: !(TreeOid m)
     , commitAuthor    :: !Signature
     , commitCommitter :: !Signature
-    , commitLog       :: !Text
+    , commitLog       :: !CommitMessage
     , commitEncoding  :: !Text
     }
 
@@ -236,8 +239,8 @@ lookupCommitParents :: Repository m => Commit m -> m [Commit m]
 lookupCommitParents = mapM lookupCommit . commitParents
 
 data Signature = Signature
-    { signatureName  :: !Text
-    , signatureEmail :: !Text
+    { signatureName  :: !CommitAuthor
+    , signatureEmail :: !CommitEmail
     , signatureWhen  :: !ZonedTime
     } deriving Show
 
@@ -291,7 +294,7 @@ untagObjOid (CommitObjOid oid) = untag oid
 untagObjOid (TagObjOid oid)    = untag oid
 
 {- $references -}
-data RefTarget m = RefObj !(CommitOid m) | RefSymbolic !Text
+data RefTarget m = RefObj !(CommitOid m) | RefSymbolic !RefName
 
 instance Repository m => Show (RefTarget m) where
     show (RefObj coid) = "RefObj#" ++ T.unpack (renderObjOid coid)
@@ -356,7 +359,8 @@ data MergeResult m
         { mergeCommit    :: CommitOid m
         , mergeHeadLeft  :: CommitOid m
         , mergeHeadRight :: CommitOid m
-        , mergeConflicts :: Map Text (ModificationKind, ModificationKind)
+        , mergeConflicts ::
+               Map TreeFilePath (ModificationKind, ModificationKind)
         }
 
 copyMergeResult :: (Repository m, MonadGit m, Repository n, MonadGit n)
@@ -395,23 +399,23 @@ data GitException = BackendError Text
                   | TranslationException Text
                   | TreeCreateFailed Text
                   | TreeBuilderCreateFailed
-                  | TreeBuilderInsertFailed Text
-                  | TreeBuilderRemoveFailed Text
+                  | TreeBuilderInsertFailed TreeFilePath
+                  | TreeBuilderRemoveFailed TreeFilePath
                   | TreeBuilderWriteFailed Text
                   | TreeLookupFailed
                   | TreeCannotTraverseBlob
                   | TreeCannotTraverseCommit
-                  | TreeEntryLookupFailed Text
+                  | TreeEntryLookupFailed TreeFilePath
                   | TreeUpdateFailed
                   | TreeWalkFailed
                   | TreeEmptyCreateFailed
                   | CommitCreateFailed
                   | CommitLookupFailed Text
-                  | ReferenceCreateFailed Text
-                  | ReferenceDeleteFailed Text
+                  | ReferenceCreateFailed RefName
+                  | ReferenceDeleteFailed RefName
                   | RefCannotCreateFromPartialOid
                   | ReferenceListingFailed
-                  | ReferenceLookupFailed Text
+                  | ReferenceLookupFailed RefName
                   | ObjectLookupFailed Text Int
                   | ObjectRefRequiresFullOid
                   | OidCopyFailed

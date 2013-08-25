@@ -70,13 +70,10 @@ import           Data.List as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text (Text)
+import           Data.Text (Text, pack, unpack)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as U
-import           Filesystem hiding (removeFile)
-import           Filesystem.Path.CurrentOS (FilePath, (</>))
-import qualified Filesystem.Path.CurrentOS as F
 import           Foreign.C.String
 import           Foreign.C.Types
 import qualified Foreign.Concurrent as FC
@@ -91,10 +88,11 @@ import           Foreign.Storable
 import qualified Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
-import           Prelude hiding (FilePath)
-import           System.Directory (removeFile)
+import           System.Directory
+import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
 import qualified System.IO.Unsafe as SU
+import           System.Posix.ByteString.FilePath
 import           Unsafe.Coerce
 
 debug :: MonadIO m => String -> m ()
@@ -114,7 +112,7 @@ mkOid = OidPtr
 lgParseOidIO :: Text -> Int -> IO (Maybe Oid)
 lgParseOidIO str len = do
     oid <- liftIO $ mallocForeignPtr
-    r <- liftIO $ withCString (T.unpack str) $ \cstr ->
+    r <- liftIO $ withCString (unpack str) $ \cstr ->
         withForeignPtr oid $ \ptr ->
             if len == 40
                 then c'git_oid_fromstr ptr cstr
@@ -135,7 +133,7 @@ lgParseOid str
     len = T.length str
 
 lgRenderOid :: Git.Oid (LgRepository m) -> Text
-lgRenderOid = T.pack . show
+lgRenderOid = pack . show
 
 instance Show OidPtr where
     show (getOid -> coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
@@ -188,7 +186,7 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
 
     createCommit p t a c l r = lgWrap $ lgCreateCommit p t a c l r
 
-    deleteRepository = lgGet >>= liftIO . removeTree . repoPath
+    deleteRepository = lgGet >>= liftIO . removeDirectoryRecursive . repoPath
 
     -- buildPackFile   = lgBuildPackFile
     -- buildPackIndex  = lgBuildPackIndexWrapper
@@ -265,11 +263,11 @@ lgLookupBlob oid =
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
-lgTreeEntry :: Git.MonadGit m => Tree m -> Text
+lgTreeEntry :: Git.MonadGit m => Tree m -> Git.TreeFilePath
             -> LgRepository m (Maybe (TreeEntry m))
 lgTreeEntry (LgTree Nothing) _ = return Nothing
 lgTreeEntry (LgTree (Just tree)) fp = liftIO $ alloca $ \entryPtr ->
-    withCString (T.unpack fp) $ \pathStr ->
+    withFilePath fp $ \pathStr ->
         withForeignPtr tree $ \treePtr -> do
             r <- c'git_tree_entry_bypath entryPtr treePtr pathStr
             if r < 0
@@ -287,7 +285,7 @@ lgTreeOid (LgTree (Just tree)) = SU.unsafePerformIO $ liftIO $ do
 
 lgListTreeEntries :: Git.MonadGit m
                   => Tree m
-                  -> LgRepository m [(Text, TreeEntry m)]
+                  -> LgRepository m [(Git.TreeFilePath, TreeEntry m)]
 lgListTreeEntries (LgTree Nothing) = return []
 lgListTreeEntries (LgTree (Just tree)) = do
     liftIO $ withForeignPtr tree $ \tr -> do
@@ -301,9 +299,9 @@ lgListTreeEntries (LgTree (Just tree)) = do
 
   where
     callback ior root te _ = do
-        fp    <- peekCString root
+        fp    <- peekFilePath root
         cname <- c'git_tree_entry_name te
-        name  <- T.pack . (fp <>) <$> peekCString cname
+        name  <- (fp <>) <$> peekFilePath cname
         entry <- entryToTreeEntry te
         seq name $ seq entry $ modifyIORef ior $ \xs -> (name,entry):xs
         return 0
@@ -354,12 +352,12 @@ lgNewTreeBuilder mtree = do
                 { Git.mtbBaseTreeOid = Git.treeOid <$> mtree }
 
 lgPutEntry :: Git.MonadGit m
-           => ForeignPtr C'git_treebuilder -> Text -> TreeEntry m
+           => ForeignPtr C'git_treebuilder -> Git.TreeFilePath -> TreeEntry m
            -> LgRepository m ()
 lgPutEntry builder key (treeEntryToOid -> (oid,mode)) = do
     r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
         withForeignPtr builder $ \ptr ->
-        withCString (T.unpack key) $ \name ->
+        withFilePath key $ \name ->
             c'git_treebuilder_insert nullPtr ptr name coid
                 (fromIntegral mode)
     when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed key)
@@ -377,18 +375,19 @@ treeEntryToOid (Git.TreeEntry toid) =
     (untag toid, 0o040000)
 
 lgDropEntry :: Git.MonadGit m
-            => ForeignPtr C'git_treebuilder -> Text -> LgRepository m ()
+            => ForeignPtr C'git_treebuilder -> Git.TreeFilePath
+            -> LgRepository m ()
 lgDropEntry builder key = do
     void $ liftIO $ withForeignPtr builder $ \ptr ->
-        withCString (T.unpack key) $ c'git_treebuilder_remove ptr
+        withFilePath key $ c'git_treebuilder_remove ptr
 
 lgLookupBuilderEntry :: Git.MonadGit m
                      => ForeignPtr C'git_treebuilder
-                     -> Text
+                     -> Git.TreeFilePath
                      -> LgRepository m (Maybe (TreeEntry m))
 lgLookupBuilderEntry builderPtr name = do
-    entry <- liftIO $ withForeignPtr builderPtr $ \builder -> do
-        withCString (T.unpack name) (c'git_treebuilder_get builder)
+    entry <- liftIO $ withForeignPtr builderPtr $ \builder ->
+        withFilePath name $ c'git_treebuilder_get builder
     if entry == nullPtr
         then return Nothing
         else Just <$> liftIO (entryToTreeEntry entry)
@@ -420,7 +419,7 @@ lgWriteBuilder tb = do
             errPtr <- c'giterr_last
             err    <- peek errPtr
             peekCString (c'git_error'message err)
-        failure (Git.TreeBuilderWriteFailed $ T.pack $
+        failure (Git.TreeBuilderWriteFailed $ pack $
                  "c'git_treebuilder_write failed with " ++ show r3
                  ++ ": " ++ errStr)
     return $ Tagged (mkOid coid)
@@ -458,7 +457,7 @@ lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
              -> LgRepository m (Tree m)
 lgLookupTree len (getOid . untag -> oid) = do
     str <- liftIO $ withForeignPtr oid $ \oidPtr -> oidToStr oidPtr
-    if str == T.unpack Git.emptyTreeId
+    if str == unpack Git.emptyTreeId
         then return (LgTree Nothing)
         else do
             -- jww (2013-01-28): Verify the oid here
@@ -545,7 +544,7 @@ lgLookupObject (Git.renderOid -> str)
         mfptr <- liftIO $ do
             fptr <- mallocForeignPtr
             withForeignPtr fptr $ \ptr ->
-                withCString (T.unpack str) $ \cstr -> do
+                withCString (unpack str) $ \cstr -> do
                     r <- if len == 40
                          then c'git_oid_fromstr ptr cstr
                          else c'git_oid_fromstrn ptr cstr (fromIntegral len)
@@ -660,8 +659,8 @@ lgCreateCommit :: Git.MonadGit m
                -> TreeOid m
                -> Git.Signature
                -> Git.Signature
-               -> Text
-               -> Maybe Text
+               -> Git.CommitMessage
+               -> Maybe Git.RefName
                -> LgRepository m (Commit m)
 lgCreateCommit pptrs tree author committer logText ref = do
     repo <- lgGet
@@ -711,12 +710,13 @@ withForeignPtrs fos io = do
     mapM_ touchForeignPtr fos
     return r
 
-lgLookupRef :: Git.MonadGit m => Text -> LgRepository m (Maybe (RefTarget m))
+lgLookupRef :: Git.MonadGit m
+            => Git.RefName -> LgRepository m (Maybe (RefTarget m))
 lgLookupRef name = do
     repo <- lgGet
     liftIO $ alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
-              withCString (T.unpack name) $ \namePtr ->
+              withCString (unpack name) $ \namePtr ->
                 c'git_reference_lookup ptr repoPtr namePtr
         if r < 0
             then return Nothing
@@ -734,13 +734,13 @@ lgLookupRef name = do
             return (Just targ)
 
 lgUpdateRef :: Git.MonadGit m
-            => Text -> Git.RefTarget (LgRepository m)
+            => Git.RefName -> Git.RefTarget (LgRepository m)
             -> LgRepository m ()
 lgUpdateRef name refTarg = do
     repo <- lgGet
     r <- liftIO $ alloca $ \ptr ->
         withForeignPtr (repoObj repo) $ \repoPtr ->
-        withCString (T.unpack name) $ \namePtr -> do
+        withCString (unpack name) $ \namePtr -> do
             case refTarg of
                 Git.RefObj oid ->
                     withForeignPtr (getOid (untag oid)) $ \coidPtr ->
@@ -748,7 +748,7 @@ lgUpdateRef name refTarg = do
                                                coidPtr (fromBool True)
 
                 Git.RefSymbolic symName ->
-                    withCString (T.unpack symName) $ \symPtr ->
+                    withCString (unpack symName) $ \symPtr ->
                         c'git_reference_symbolic_create ptr repoPtr namePtr
                                                         symPtr (fromBool True)
     when (r < 0) $ do
@@ -757,16 +757,17 @@ lgUpdateRef name refTarg = do
             err    <- peek errPtr
             peekCString (c'git_error'message err)
         failure (Git.ReferenceCreateFailed $ name <> " => "
-                 <> T.pack (show refTarg) <> ": " <> T.pack errStr)
+                 <> pack (show refTarg) <> ": " <> pack errStr)
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
 
-lgResolveRef :: Git.MonadGit m => Text -> LgRepository m (Maybe (CommitOid m))
+lgResolveRef :: Git.MonadGit m
+             => Git.RefName -> LgRepository m (Maybe (CommitOid m))
 lgResolveRef name = do
     repo <- lgGet
     oid <- liftIO $ alloca $ \ptr ->
-        withCString (T.unpack name) $ \namePtr ->
+        withCString (unpack name) $ \namePtr ->
         withForeignPtr (repoObj repo) $ \repoPtr -> do
             r <- c'git_reference_name_to_id ptr repoPtr namePtr
             if r < 0
@@ -779,11 +780,11 @@ lgResolveRef name = do
 
 --renameRef = c'git_reference_rename
 
-lgDeleteRef :: Git.MonadGit m => Text -> LgRepository m ()
+lgDeleteRef :: Git.MonadGit m => Git.RefName -> LgRepository m ()
 lgDeleteRef name = do
     repo <- lgGet
     r <- liftIO $ alloca $ \ptr ->
-        withCString (T.unpack name) $ \namePtr ->
+        withCString (unpack name) $ \namePtr ->
         withForeignPtr (repoObj repo) $ \repoPtr -> do
             r <- c'git_reference_lookup ptr repoPtr namePtr
             if r < 0
@@ -839,7 +840,7 @@ gitStrArray2List gitStrs = do
 
   r0 <- Foreign.Marshal.Array.peekArray count strings
   r1 <- sequence $ fmap peekCString r0
-  return $ fmap T.pack r1
+  return $ fmap pack r1
 
 flagsToInt :: ListFlags -> CUInt
 flagsToInt flags = (if listFlagOid flags      then 1 else 0)
@@ -847,8 +848,7 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
                  + (if listFlagPacked flags   then 4 else 0)
                  + (if listFlagHasPeel flags  then 8 else 0)
 
-listRefNames :: Git.MonadGit m
-             => ListFlags -> LgRepository m [Text]
+listRefNames :: Git.MonadGit m => ListFlags -> LgRepository m [Git.RefName]
 listRefNames flags = do
     repo <- lgGet
     refs <- liftIO $ alloca $ \c'refs ->
@@ -861,15 +861,14 @@ listRefNames flags = do
                     return (Just refs)
     maybe (failure Git.ReferenceListingFailed) return refs
 
-lgListRefs :: Git.MonadGit m
-              => LgRepository m [Text]
+lgListRefs :: Git.MonadGit m => LgRepository m [Git.RefName]
 lgListRefs = listRefNames allRefsFlag
 
 -- foreachRefCallback :: CString -> Ptr () -> IO CInt
 -- foreachRefCallback name payload = do
 --   (callback,results) <- deRefStablePtr =<< peek (castPtr payload)
 --   nameStr <- peekCString name
---   result <- callback (T.pack nameStr)
+--   result <- callback (pack nameStr)
 --   modifyIORef results (\xs -> result:xs)
 --   return 0
 
@@ -923,10 +922,10 @@ lgBuildPackFile :: Git.MonadGit m
 lgBuildPackFile dir oids = do
     repo <- lgGet
     liftIO $ do
-        (filePath, fHandle) <- openBinaryTempFile (pathStr dir) "pack"
+        (filePath, fHandle) <- openBinaryTempFile dir "pack"
         hClose fHandle
         go repo filePath
-        return . F.fromText . T.pack $ filePath
+        return filePath
   where
     go repo path = runResourceT $ do
         delKey <- register $ removeFile path
@@ -974,18 +973,17 @@ lgBuildPackIndexWrapper :: Git.MonadGit m
                         -> LgRepository m (Text, FilePath, FilePath)
 lgBuildPackIndexWrapper = (liftIO .) . lgBuildPackIndex
 
-lgBuildPackIndex :: FilePath -> B.ByteString
-                 -> IO (Text, FilePath, FilePath)
+lgBuildPackIndex :: FilePath -> B.ByteString -> IO (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
     (,,) <$> pure sha
-         <*> pure (dir </> F.fromText ("pack-" <> sha <> ".pack"))
-         <*> pure (dir </> F.fromText ("pack-" <> sha <> ".idx"))
+         <*> pure (dir </> ("pack-" <> unpack sha <> ".pack"))
+         <*> pure (dir </> ("pack-" <> unpack sha <> ".idx"))
   where
     go dir bytes = alloca $ \idxPtrPtr -> runResourceT $ do
         debug "Allocate a new indexer stream"
         (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
-            withCString (pathStr dir) $ \dirStr -> do
+            withCString dir $ \dirStr -> do
                 r <- c'git_indexer_stream_new idxPtrPtr dirStr
                          nullFunPtr nullPtr
                 checkResult r "c'git_indexer_stream_new failed"
@@ -1073,7 +1071,7 @@ lgCopyPackFile packFile = do
                       (c'git_odb_writepack'free writepack) writepackPtr)
         writepack <- liftIO $ peek writepackPtr
 
-        bs <- liftIO $ B.readFile (pathStr packFile)
+        bs <- liftIO $ B.readFile packFile
         debug $ "Writing pack file " ++ show packFile ++ " into odb"
         debug $ "Writing " ++ show (B.length bs) ++ " pack bytes into odb"
         liftIO $ BU.unsafeUseAsCStringLen bs $
@@ -1103,7 +1101,7 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 
     debug $ "Load pack index " ++ show idxPath ++ " into temporary odb"
     (_,backendPtr) <- allocate
-        (do r <- withCString (pathStr idxPath) $ \idxPathStr ->
+        (do r <- withCString idxPath $ \idxPathStr ->
                 c'git_odb_backend_one_pack backendPtrPtr idxPathStr
             checkResult r "c'git_odb_backend_one_pack failed"
             peek backendPtrPtr)
@@ -1176,8 +1174,8 @@ lgRemoteFetch :: Git.MonadGit m => Text -> Text -> LgRepository m ()
 lgRemoteFetch uri fetchSpec = do
     xferRepo <- lgGet
     liftIO $ withForeignPtr (repoObj xferRepo) $ \repoPtr ->
-        withCString (T.unpack uri) $ \uriStr ->
-        withCString (T.unpack fetchSpec) $ \fetchStr ->
+        withCString (unpack uri) $ \uriStr ->
+        withCString (unpack fetchSpec) $ \fetchStr ->
             alloca $ runResourceT . go repoPtr uriStr fetchStr
   where
     go repoPtr uriStr fetchStr remotePtrPtr = do
@@ -1206,15 +1204,10 @@ lgFactory = Git.RepositoryFactory
     , Git.shutdownBackend = shutdownLgBackend
     }
 
-withFilePath :: FilePath -> (CString -> IO a) -> IO a
-withFilePath fp f = case F.toText fp of
-    Left _  -> error $ "Could not translate path: " ++ show fp
-    Right p -> withCString (T.unpack p) f
-
 openLgRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
 openLgRepository opts = do
     let path = Git.repoPath opts
-    p <- liftIO $ isDirectory path
+    p <- liftIO $ doesDirectoryExist path
     liftIO $ openRepositoryWith path $
         if not (Git.repoAutoCreate opts) || p
         then c'git_repository_open
@@ -1223,7 +1216,7 @@ openLgRepository opts = do
   where
     openRepositoryWith path fn = do
         fptr <- alloca $ \ptr ->
-            withFilePath path $ \str -> do
+            withCString path $ \str -> do
                 r <- fn ptr str
                 when (r < 0) $
                     error $ "Could not open repository " ++ show path

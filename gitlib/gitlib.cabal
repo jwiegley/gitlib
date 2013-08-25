@@ -1,5 +1,5 @@
 Name:                gitlib
-Version:             2.0.1.1
+Version:             2.1.0.0
 Synopsis:            API library for working with Git repositories
 License-file:        LICENSE
 License:             MIT
@@ -46,15 +46,15 @@ Library
         , conduit              >= 1.0.0
         , containers           >= 0.4.2.1
         , data-default         >= 0.5.0
+        , directory            >= 1.1.0.2
         , failure              >= 0.2.0.1
         , hashable             >= 1.1.2.5
         , lifted-base          >= 0.2
-        , system-fileio        >= 0.3.11
-        , system-filepath      >= 0.4.7
         , tagged               >= 0.2.3.1
         , text                 >= 0.11.2
         , time                 >= 1.4
         , transformers         >= 0.3.0.0
+        , unix                 >= 2.5
         , unordered-containers >= 0.2.3.0
     exposed-modules:
         Git

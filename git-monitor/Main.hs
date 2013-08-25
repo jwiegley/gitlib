@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
-
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -15,12 +14,12 @@ import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
+import qualified Data.ByteString.Char8 as B8
 import           Data.Foldable (foldlM)
 import           Data.Function (fix)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
-import           Data.Text (Text)
 import qualified Data.Text as T
 #if MIN_VERSION_shelly(1, 0, 0)
 import qualified Data.Text as TL
@@ -29,20 +28,19 @@ import qualified Data.Text.Lazy as TL
 #endif
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import           Filesystem (isDirectory, canonicalizePath)
-import           Filesystem.Path.CurrentOS (FilePath, (</>), parent, null)
 import           Git hiding (Options)
 import           Git.Libgit2 (LgRepository, lgFactory, withLibGitDo)
 import           Options.Applicative
-import           Prelude hiding (FilePath, null)
-import           Shelly (toTextIgnore, fromText, silently, shelly, run)
+import           Shelly (silently, shelly, run)
+import           System.Directory
+import           System.FilePath.Posix
 import           System.IO (stderr)
 import           System.Locale (defaultTimeLocale)
 import           System.Log.Formatter (tfLogFormatter)
 import           System.Log.Handler (setFormatter)
 import           System.Log.Handler.Simple (streamHandler)
 import           System.Log.Logger
-import           System.Posix.Files hiding (isDirectory)
+import           System.Posix.Files
 
 toStrict :: TL.Text -> T.Text
 #if MIN_VERSION_shelly(1, 0, 0)
@@ -58,14 +56,12 @@ fromStrict = id
 fromStrict = TL.fromStrict
 #endif
 
-instance Read FilePath
-
 data Options = Options
     { quiet      :: Bool
     , verbose    :: Bool
     , debug      :: Bool
-    , gitDir     :: String
-    , workingDir :: String
+    , gitDir     :: FilePath
+    , workingDir :: FilePath
     , interval   :: Int
     , resume     :: Bool
     }
@@ -103,20 +99,20 @@ doMain opts = do
         (,) <$> (TL.init <$> run "git" ["config", "user.name"])
             <*> (TL.init <$> run "git" ["config", "user.email"])
 
-    let gDir = fromText (TL.pack (gitDir opts))
-    isDir <- isDirectory gDir
+    let gDir = gitDir opts
+    isDir <- doesDirectoryExist gDir
     gd    <- if isDir
              then return gDir
              else shelly $ silently $
-                  fromText . TL.init <$> run "git" ["rev-parse", "--git-dir"]
+                  TL.unpack . TL.init <$> run "git" ["rev-parse", "--git-dir"]
 
-    let wDir = fromText (TL.pack (workingDir opts))
-        wd   = if null wDir then parent gd else wDir
+    let wDir = workingDir opts
+        wd   = if null wDir then takeDirectory gd else wDir
 
     -- Make sure we're in a known branch, and if so, let it begin
     forever $ withRepository lgFactory gd $ do
-        infoL $ "Saving snapshots under " ++ fileStr gd
-        infoL $ "Working tree: " ++ fileStr wd
+        infoL $ "Saving snapshots under " ++ gd
+        infoL $ "Working tree: " ++ wd
         ref <- lookupReference "HEAD"
         case ref of
             Just (RefSymbolic name) -> do
@@ -168,13 +164,13 @@ doMain opts = do
 snapshotTree :: MonadGit m
              => Options
              -> FilePath
-             -> Text
-             -> Text
-             -> Text
-             -> Text
+             -> CommitAuthor
+             -> CommitEmail
+             -> RefName
+             -> RefName
              -> Commit (LgRepository m)
              -> TreeOid (LgRepository m)
-             -> Map Text (FileEntry (LgRepository m))
+             -> Map TreeFilePath (FileEntry (LgRepository m))
              -> TreeT (LgRepository m) ()
 snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     -- Read the current working tree's state on disk
@@ -219,35 +215,33 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
 
   where
     scanOldEntry :: MonadGit m
-                 => Map Text (FileEntry (LgRepository m))
-                 -> Text
+                 => Map TreeFilePath (FileEntry (LgRepository m))
+                 -> TreeFilePath
                  -> FileEntry (LgRepository m)
                  -> TreeT (LgRepository m) ()
     scanOldEntry ft fp _ = case Map.lookup fp ft of
         Nothing -> do
-            lift . infoL $ "Removed: " <> T.unpack fp
+            lift . infoL $ "Removed: " <> B8.unpack fp
             dropEntry fp
         _ -> return ()
 
     scanNewEntry :: MonadGit m
-                 => Map Text (FileEntry (LgRepository m))
-                 -> Text
+                 => Map TreeFilePath (FileEntry (LgRepository m))
+                 -> TreeFilePath
                  -> FileEntry (LgRepository m)
                  -> TreeT (LgRepository m) ()
     scanNewEntry ft fp (FileEntry mt oid kind _) =
         case Map.lookup fp ft of
             Nothing -> do
-                lift . infoL $ "Added to snapshot: " ++ T.unpack fp
+                lift . infoL $ "Added to snapshot: " ++ B8.unpack fp
                 putBlob' fp oid kind
             Just (FileEntry oldMt oldOid oldKind fileOid)
                 | oid /= oldOid || kind /= oldKind -> do
-                    lift . infoL $ "Changed: " ++ T.unpack fp
+                    lift . infoL $ "Changed: " ++ B8.unpack fp
                     putBlob' fp oid kind
                 | mt /= oldMt || oid /= fileOid -> do
-                    path <- fileStr <$>
-                            liftIO (canonicalizePath
-                                    (wd </> fromText (fromStrict fp)))
-                    lift . infoL $ "Changed: " ++ T.unpack fp
+                    lift . infoL $ "Changed: " ++ B8.unpack fp
+                    path <- liftIO $ canonicalizePath (wd </> B8.unpack fp)
                     contents <- liftIO $ B.readFile path
                     newOid   <- lift $ createBlob (BlobString contents)
                     putBlob' fp newOid kind
@@ -260,10 +254,10 @@ data FileEntry m = FileEntry
     , fileChecksum :: BlobOid m
     }
 
-type FileTree m = Map Text (FileEntry m)
+type FileTree m = Map TreeFilePath (FileEntry m)
 
 readFileTree :: MonadGit m
-             => Text
+             => RefName
              -> FilePath
              -> Bool
              -> LgRepository m (FileTree (LgRepository m))
@@ -281,22 +275,21 @@ readFileTree' :: MonadGit m
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
     foldlM (\m (fp,oid,kind) -> do
-                 fent <- readModTime wdir getHash fp oid kind
+                 fent <- readModTime wdir getHash (B8.unpack fp) oid kind
                  return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
 readModTime :: MonadGit m
             => FilePath
             -> Bool
-            -> Text
+            -> FilePath
             -> BlobOid (LgRepository m)
             -> BlobKind
             -> LgRepository m (Maybe (FileEntry (LgRepository m)))
 readModTime wdir getHash fp oid kind = do
-    let path = wdir </> fromText (fromStrict fp)
-        fstr = fileStr path
-    debugL $ "Checking file: " ++ fstr
-    status <- liftIO $ getSymbolicLinkStatus fstr
+    let path = wdir </> fp
+    debugL $ "Checking file: " ++ path
+    status <- liftIO $ getSymbolicLinkStatus path
     if isRegularFile status
         then Just <$>
              (FileEntry
@@ -306,12 +299,9 @@ readModTime wdir getHash fp oid kind = do
                   <*> pure kind
                   <*> if getHash
                       then hashContents . BlobString
-                          =<< liftIO (B.readFile fstr)
+                          =<< liftIO (B.readFile path)
                       else return oid)
         else return Nothing
-
-fileStr :: FilePath -> String
-fileStr = TL.unpack . toTextIgnore
 
 infoL :: (Repository m, MonadIO m) => String -> m ()
 infoL = liftIO . infoM "git-monitor"
