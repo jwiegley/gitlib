@@ -35,8 +35,6 @@ Library
     build-depends:
           base                 >= 3 && < 5
         , gitlib               >= 2.1.0.0
-        , failure              >= 0.2.0.1
-        , tagged               >= 0.2.3.1
         , transformers         >= 0.3.0.0
     exposed-modules:
         Git.Sample

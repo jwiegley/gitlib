@@ -31,7 +31,6 @@ Library
     , parsec               >= 3.1.3
     , process-extras       >= 0.2.0
     , shelly               >= 0.14
-    , system-fileio        >= 0.3.11
     , system-filepath      >= 0.4.7
     , tagged               >= 0.4.4
     , time                 >= 1.4
@@ -53,7 +52,6 @@ Test-suite smoke
     , gitlib             >= 2.1.0.0
     , gitlib-test        >= 2.1.0.0
     , gitlib-cmdline     >= 2.1.0.0
-    , HUnit              >= 1.2.5
     , hspec              >= 1.4.4
     , hspec-expectations >= 0.3
     , system-filepath    >= 0.4.7
