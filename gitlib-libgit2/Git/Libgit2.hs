@@ -96,8 +96,8 @@ import           System.Posix.ByteString.FilePath
 import           Unsafe.Coerce
 
 debug :: MonadIO m => String -> m ()
---debug = liftIO . putStrLn
-debug = const (return ())
+debug = liftIO . putStrLn
+--debug = const (return ())
 
 type Oid = OidPtr
 
