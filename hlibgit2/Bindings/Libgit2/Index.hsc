@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
+{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 #include <bindings.dsl.h>
 #include <git2.h>
 module Bindings.Libgit2.Index where
