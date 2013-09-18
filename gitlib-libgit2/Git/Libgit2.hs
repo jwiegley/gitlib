@@ -96,8 +96,8 @@ import           System.Posix.ByteString.FilePath
 import           Unsafe.Coerce
 
 debug :: MonadIO m => String -> m ()
-debug = liftIO . putStrLn
---debug = const (return ())
+--debug = liftIO . putStrLn
+debug = const (return ())
 
 type Oid = OidPtr
 
@@ -111,7 +111,7 @@ mkOid = OidPtr
 
 lgParseOidIO :: Text -> Int -> IO (Maybe Oid)
 lgParseOidIO str len = do
-    oid <- liftIO $ mallocForeignPtr
+    oid <- liftIO mallocForeignPtr
     r <- liftIO $ withCString (unpack str) $ \cstr ->
         withForeignPtr oid $ \ptr ->
             if len == 40
@@ -279,7 +279,7 @@ lgTreeOid (LgTree Nothing) =
     SU.unsafePerformIO . liftIO $
         Tagged . fromJust <$> lgParseOidIO Git.emptyTreeId 40
 lgTreeOid (LgTree (Just tree)) = SU.unsafePerformIO $ liftIO $ do
-    toid  <- withForeignPtr tree $ c'git_tree_id
+    toid  <- withForeignPtr tree c'git_tree_id
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
@@ -287,7 +287,7 @@ lgListTreeEntries :: Git.MonadGit m
                   => Tree m
                   -> LgRepository m [(Git.TreeFilePath, TreeEntry m)]
 lgListTreeEntries (LgTree Nothing) = return []
-lgListTreeEntries (LgTree (Just tree)) = do
+lgListTreeEntries (LgTree (Just tree)) =
     liftIO $ withForeignPtr tree $ \tr -> do
         ior <- newIORef []
         r <- bracket
@@ -377,7 +377,7 @@ treeEntryToOid (Git.TreeEntry toid) =
 lgDropEntry :: Git.MonadGit m
             => ForeignPtr C'git_treebuilder -> Git.TreeFilePath
             -> LgRepository m ()
-lgDropEntry builder key = do
+lgDropEntry builder key =
     void $ liftIO $ withForeignPtr builder $ \ptr ->
         withFilePath key $ c'git_treebuilder_remove ptr
 
@@ -394,12 +394,12 @@ lgLookupBuilderEntry builderPtr name = do
 
 lgBuilderEntryCount :: Git.MonadGit m
                     => ForeignPtr C'git_treebuilder -> LgRepository m Int
-lgBuilderEntryCount tb = do
+lgBuilderEntryCount tb =
     fromIntegral <$> liftIO (withForeignPtr tb c'git_treebuilder_entrycount)
 
 lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
 lgTreeEntryCount (LgTree Nothing) = return 0
-lgTreeEntryCount (LgTree (Just tree)) = do
+lgTreeEntryCount (LgTree (Just tree)) =
     fromIntegral <$> liftIO (withForeignPtr tree c'git_tree_entrycount)
 
 lgWriteBuilder :: Git.MonadGit m
@@ -615,7 +615,7 @@ lgSourceObjects
     => Maybe (CommitOid m) -> CommitOid m -> Bool
     -> Source (LgRepository m) (ObjectOid m)
 lgSourceObjects mhave need alsoTrees = do
-    repo   <- lift $ lgGet
+    repo   <- lift lgGet
     walker <- liftIO $ alloca $ \pptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
                 c'git_revwalk_new pptr repoPtr
@@ -740,7 +740,7 @@ lgUpdateRef name refTarg = do
     repo <- lgGet
     r <- liftIO $ alloca $ \ptr ->
         withForeignPtr (repoObj repo) $ \repoPtr ->
-        withCString (unpack name) $ \namePtr -> do
+        withCString (unpack name) $ \namePtr ->
             case refTarg of
                 Git.RefObj oid ->
                     withForeignPtr (getOid (untag oid)) $ \coidPtr ->
