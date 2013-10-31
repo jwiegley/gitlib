@@ -75,12 +75,14 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
                 else lookupPrefixFn ptr repoPtr oidPtr (fromIntegral len)
         if r < 0
             then do
-              err    <- c'giterr_last
-              errmsg <- peekCString . c'git_error'message =<< peek err
-              oidStr <- withForeignPtr oid oidToStr
-              return $ Left $
-                  T.concat [ "Could not lookup ", T.pack oidStr
-                           , ": ", T.pack errmsg ]
+              oidStr <- withForeignPtr oid (flip oidToStr len)
+              let args = ["Could not lookup ", T.pack oidStr]
+              err <- c'giterr_last
+              if err == nullPtr
+                  then return $ Left $ T.concat args
+                  else do
+                      errmsg <- peekCString . c'git_error'message =<< peek err
+                      return $ Left $ T.concat $ args ++ [": ", T.pack errmsg]
             else do
               ptr'     <- peek ptr
               coid     <- c'git_object_id (castPtr ptr')

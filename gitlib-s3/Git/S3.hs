@@ -344,7 +344,7 @@ orElse f g = catch f $ \e -> do
 
 coidToJSON :: ForeignPtr C'git_oid -> A.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $
-                      fmap A.toJSON . oidToStr
+    fmap A.toJSON . flip oidToStr 40
 
 pokeByteString :: ByteString -> Ptr (Ptr b) -> ObjectLength -> IO ()
 pokeByteString bytes data_p (fromIntegral . getObjectLength -> len) = do

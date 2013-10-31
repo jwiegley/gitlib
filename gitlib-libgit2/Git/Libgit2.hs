@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -54,7 +55,7 @@ import           Control.Applicative
 import           Control.Exception
 import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
-import           Control.Monad
+import           Control.Monad hiding (forM, mapM, sequence)
 import           Control.Monad.IO.Class
 import           Control.Monad.Loops
 import           Control.Monad.Trans.Class
@@ -73,6 +74,7 @@ import           Data.Text (Text, pack, unpack)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.ICU.Convert as U
+import           Data.Traversable
 import           Foreign.C.String
 import           Foreign.C.Types
 import qualified Foreign.Concurrent as FC
@@ -87,6 +89,7 @@ import           Foreign.Storable
 import qualified Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
+import           Prelude hiding (mapM, sequence)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
@@ -100,13 +103,16 @@ debug = const (return ())
 
 type Oid = OidPtr
 
-data OidPtr = OidPtr { getOid :: ForeignPtr C'git_oid }
+data OidPtr = OidPtr
+    { getOid    :: ForeignPtr C'git_oid
+    , getOidLen :: Int           -- the number of digits, not bytes
+    }
 
 instance Git.IsOid OidPtr where
     renderOid = lgRenderOid
 
 mkOid :: ForeignPtr C'git_oid -> OidPtr
-mkOid = OidPtr
+mkOid fptr = OidPtr fptr 40
 
 lgParseOidIO :: Text -> Int -> IO (Maybe Oid)
 lgParseOidIO str len = do
@@ -114,11 +120,11 @@ lgParseOidIO str len = do
     r <- liftIO $ withCString (unpack str) $ \cstr ->
         withForeignPtr oid $ \ptr ->
             if len == 40
-                then c'git_oid_fromstr ptr cstr
-                else c'git_oid_fromstrn ptr cstr (fromIntegral len)
+            then c'git_oid_fromstr ptr cstr
+            else c'git_oid_fromstrn ptr cstr (fromIntegral len)
     return $ if r < 0
              then Nothing
-             else Just (mkOid oid)
+             else Just (OidPtr oid len)
 
 lgParseOid :: Git.MonadGit m => Text -> LgRepository m Oid
 lgParseOid str
@@ -135,19 +141,14 @@ lgRenderOid :: Git.Oid (LgRepository m) -> Text
 lgRenderOid = pack . show
 
 instance Show OidPtr where
-    show (getOid -> coid) = SU.unsafePerformIO $ withForeignPtr coid oidToStr
+    show OidPtr {..} = SU.unsafePerformIO $
+        withForeignPtr getOid (flip oidToStr getOidLen)
 
 instance Ord OidPtr where
     (getOid -> coid1) `compare` (getOid -> coid2) =
         SU.unsafePerformIO $
         withForeignPtr coid1 $ \coid1Ptr ->
-        withForeignPtr coid2 $ \coid2Ptr -> do
-            r <- c'git_oid_cmp coid1Ptr coid2Ptr
-            return $ if r < 0
-                     then LT
-                     else if r > 0
-                          then GT
-                          else EQ
+        withForeignPtr coid2 $ fmap (`compare` 0) . c'git_oid_cmp coid1Ptr
 
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
@@ -168,8 +169,8 @@ instance Git.MonadGit m => Git.Repository (LgRepository m) where
     updateReference   = lgUpdateRef
     deleteReference   = lgDeleteRef
     listReferences    = lgListRefs
-    lookupCommit      = lgLookupCommit 40
-    lookupTree        = lgLookupTree 40
+    lookupCommit      = lgLookupCommit
+    lookupTree        = lgLookupTree
     lookupBlob        = lgLookupBlob
     lookupTag         = error "Not implemented: LgRepository.lookupTag"
     lookupObject      = lgLookupObject
@@ -253,11 +254,8 @@ lgObjToBlob oid ptr = do
 lgLookupBlob :: Git.MonadGit m => BlobOid m
              -> LgRepository m (Git.Blob (LgRepository m))
 lgLookupBlob oid =
-    lookupObject'
-        (getOid (untag oid))
-        40
-        c'git_blob_lookup
-        c'git_blob_lookup_prefix
+    lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
+        c'git_blob_lookup c'git_blob_lookup_prefix
         $ \_ obj _ -> withForeignPtr obj $ lgObjToBlob oid
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
@@ -353,7 +351,8 @@ lgNewTreeBuilder mtree = do
 lgPutEntry :: Git.MonadGit m
            => ForeignPtr C'git_treebuilder -> Git.TreeFilePath -> TreeEntry m
            -> LgRepository m ()
-lgPutEntry builder key (treeEntryToOid -> (oid,mode)) = do
+lgPutEntry builder key (treeEntryToOid -> (oid, mode)) = do
+    debug $ "lgPutEntry: oidLen = " ++ show (getOidLen oid)
     r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
         withForeignPtr builder $ \ptr ->
         withFilePath key $ \name ->
@@ -452,18 +451,14 @@ lgCloneBuilder fptr =
             failure (Git.BackendError "Could not insert entry in treebuilder")
         return 0
 
-lgLookupTree :: Git.MonadGit m => Int -> Tagged (Tree m) Oid
-             -> LgRepository m (Tree m)
-lgLookupTree len (getOid . untag -> oid) = do
-    str <- liftIO $ withForeignPtr oid $ \oidPtr -> oidToStr oidPtr
-    if str == unpack Git.emptyTreeId
-        then return (LgTree Nothing)
-        else do
-            -- jww (2013-01-28): Verify the oid here
-            fptr <- lookupObject' oid len
-                  c'git_tree_lookup c'git_tree_lookup_prefix $
-                  \_coid obj _ -> return obj
-            return $ LgTree (Just fptr)
+lgLookupTree :: Git.MonadGit m => TreeOid m -> LgRepository m (Tree m)
+lgLookupTree (untag -> oid)
+    | show oid == unpack Git.emptyTreeId = return $ LgTree Nothing
+    | otherwise = do
+        fptr <- lookupObject' (getOid oid) (getOidLen oid)
+            c'git_tree_lookup c'git_tree_lookup_prefix $
+                \_coid obj _ -> return obj
+        return $ LgTree (Just fptr)
 
 entryToTreeEntry :: Ptr C'git_tree_entry -> IO (TreeEntry m)
 entryToTreeEntry entry = do
@@ -521,13 +516,10 @@ lgObjToCommit oid c = do
         }
 
 lgLookupCommit :: Git.MonadGit m
-               => Int -> CommitOid m -> LgRepository m (Commit m)
-lgLookupCommit len oid =
-  lookupObject'
-      (getOid (untag oid))
-      len
-      c'git_commit_lookup
-      c'git_commit_lookup_prefix
+               => CommitOid m -> LgRepository m (Commit m)
+lgLookupCommit oid =
+  lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
+      c'git_commit_lookup c'git_commit_lookup_prefix
       $ \_ obj _ -> withForeignPtr obj $ lgObjToCommit oid
 
 data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
@@ -537,49 +529,31 @@ data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
 
 lgLookupObject :: Git.MonadGit m
                => Oid -> LgRepository m (Git.Object (LgRepository m))
-lgLookupObject (Git.renderOid -> str)
-    | len > 40 = failure (Git.ObjectLookupFailed str len)
-    | otherwise = do
-        mfptr <- liftIO $ do
-            fptr <- mallocForeignPtr
-            withForeignPtr fptr $ \ptr ->
-                withCString (unpack str) $ \cstr -> do
-                    r <- if len == 40
-                         then c'git_oid_fromstr ptr cstr
-                         else c'git_oid_fromstrn ptr cstr (fromIntegral len)
-                    return $ if r < 0 then Nothing else Just fptr
-
-        case mfptr of
-            Nothing   -> failure (Git.ObjectLookupFailed str len)
-            Just fptr -> go fptr
-  where
-    len = T.length str
-    go fptr = do
-        (oid,typ,fptr) <-
-            lookupObject' fptr len
-                (\x y z -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
-                (\x y z l ->
-                  c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
-                $ \_ fptr y -> do
-                    coid <- c'git_object_id y
-                    oid  <- mkOid <$> coidPtrToOid coid
-                    typ  <- c'git_object_type y
-                    return (oid,typ,fptr)
-        case () of
-            () | typ == c'GIT_OBJ_BLOB   ->
-                    Git.BlobObj <$>
-                    liftIO (withForeignPtr fptr $ \y ->
-                             lgObjToBlob (Tagged oid) (castPtr y))
-               | typ == c'GIT_OBJ_TREE   ->
-                    -- A ForeignPtr C'git_object is bit-wise equivalent to a
-                    -- ForeignPtr C'git_tree.
-                    return $ Git.TreeObj (LgTree (Just (unsafeCoerce fptr)))
-               | typ == c'GIT_OBJ_COMMIT ->
-                    Git.CommitObj <$>
-                    liftIO (withForeignPtr fptr $ \y ->
-                             lgObjToCommit (Tagged oid) (castPtr y))
-               | typ == c'GIT_OBJ_TAG -> error "jww (2013-07-08): NYI"
-               | otherwise -> error $ "Unknown object type: " ++ show typ
+lgLookupObject oid = do
+    (oid', typ, fptr) <-
+        lookupObject' (getOid oid) (getOidLen oid)
+            (\x y z   -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
+            (\x y z l -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
+            $ \_ fptr y -> do
+                coid <- c'git_object_id y
+                oid' <- mkOid <$> coidPtrToOid coid
+                typ  <- c'git_object_type y
+                return (oid', typ, fptr)
+    case () of
+        () | typ == c'GIT_OBJ_BLOB   ->
+                Git.BlobObj <$>
+                liftIO (withForeignPtr fptr $ \y ->
+                         lgObjToBlob (Tagged oid') (castPtr y))
+           | typ == c'GIT_OBJ_TREE   ->
+                -- A ForeignPtr C'git_object is bit-wise equivalent to a
+                -- ForeignPtr C'git_tree.
+                return $ Git.TreeObj (LgTree (Just (unsafeCoerce fptr)))
+           | typ == c'GIT_OBJ_COMMIT ->
+                Git.CommitObj <$>
+                liftIO (withForeignPtr fptr $ \y ->
+                         lgObjToCommit (Tagged oid') (castPtr y))
+           | typ == c'GIT_OBJ_TAG -> error "jww (2013-07-08): NYI"
+           | otherwise -> error $ "Unknown object type: " ++ show typ
 
 lgExistsObject :: Git.MonadGit m => Oid -> LgRepository m Bool
 lgExistsObject oid = do
@@ -648,7 +622,7 @@ lgSourceObjects mhave need alsoTrees = do
             let coid = Tagged (mkOid oidPtr)
             yield $ Git.CommitObjOid coid
             when alsoTrees $ do
-                c <- lift $ lgLookupCommit 40 coid
+                c <- lift $ lgLookupCommit coid
                 yield $ Git.TreeObjOid (Git.commitTree c)
 
 -- | Write out a commit to its repository.  If it has already been written,
@@ -1122,43 +1096,46 @@ lgWithPackFile idxPath f = alloca $ \odbPtrPtr ->
 
 lgReadFromPack :: FilePath -> Git.SHA -> Bool
                -> IO (Maybe (C'git_otype, CSize, B.ByteString))
-lgReadFromPack idxPath sha metadataOnly =
-    alloca $ \objectPtrPtr ->
+lgReadFromPack idxPath sha metadataOnly = alloca $ \objectPtrPtr ->
     lgWithPackFile idxPath $ \odbPtr -> do
         foid <- liftIO $ shaToOid sha
         if metadataOnly
-            then liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
-                r <- withForeignPtr foid $
-                     c'git_odb_read_header sizePtr typPtr odbPtr
-                if r == 0
-                    then Just <$> ((,,) <$> peek typPtr
-                                        <*> peek sizePtr
-                                        <*> pure B.empty)
-                    else do
-                        unless (r == c'GIT_ENOTFOUND) $
-                            checkResult r "c'git_odb_read_header failed"
-                        return Nothing
+            then readMetadata odbPtr foid
+            else readObject odbPtr foid objectPtrPtr
+  where
+    readMetadata odbPtr foid =
+        liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
+            r <- withForeignPtr foid $
+                 c'git_odb_read_header sizePtr typPtr odbPtr
+            if r == 0
+                then Just <$> ((,,) <$> peek typPtr
+                                    <*> peek sizePtr
+                                    <*> pure B.empty)
+                else do
+                    unless (r == c'GIT_ENOTFOUND) $
+                        checkResult r "c'git_odb_read_header failed"
+                    return Nothing
+
+    readObject odbPtr foid objectPtrPtr = do
+        r <- liftIO $ withForeignPtr foid $
+             c'git_odb_read objectPtrPtr odbPtr
+        mr <-
+            if r == 0
+            then do
+                objectPtr <- liftIO $ peek objectPtrPtr
+                void $ register $ c'git_odb_object_free objectPtr
+                return $ Just objectPtr
             else do
-                r <- liftIO $ withForeignPtr foid $
-                     c'git_odb_read objectPtrPtr odbPtr
-                mr <- if r == 0
-                      then do
-                          objectPtr <- liftIO $ peek objectPtrPtr
-                          void $ register $ c'git_odb_object_free objectPtr
-                          return $ Just objectPtr
-                      else do
-                          unless (r == c'GIT_ENOTFOUND) $
-                              checkResult r "c'git_odb_read failed"
-                          return Nothing
-                case mr of
-                    Just objectPtr -> liftIO $ do
-                        typ <- c'git_odb_object_type objectPtr
-                        len <- c'git_odb_object_size objectPtr
-                        ptr <- c'git_odb_object_data objectPtr
-                        bytes <- curry B.packCStringLen (castPtr ptr)
-                                     (fromIntegral len)
-                        return $ Just (typ,len,bytes)
-                    Nothing -> return Nothing
+                unless (r == c'GIT_ENOTFOUND) $
+                    checkResult r "c'git_odb_read failed"
+                return Nothing
+        forM mr $ \objectPtr -> liftIO $ do
+            typ <- c'git_odb_object_type objectPtr
+            len <- c'git_odb_object_size objectPtr
+            ptr <- c'git_odb_object_data objectPtr
+            bytes <- curry B.packCStringLen (castPtr ptr)
+                         (fromIntegral len)
+            return (typ,len,bytes)
 
 lgRemoteFetch :: Git.MonadGit m => Text -> Text -> LgRepository m ()
 lgRemoteFetch uri fetchSpec = do

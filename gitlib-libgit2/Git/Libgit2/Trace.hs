@@ -5,15 +5,15 @@
 
 module Git.Libgit2.Trace where
 
-import           Bindings.Libgit2
-import           Control.Applicative
-import           Control.Monad
-import           Foreign.C.String
-import           Foreign.Marshal.Utils
-import           Foreign.Ptr
-import           Foreign.Storable
-import           Git.Libgit2.Backend
-import           Prelude hiding ((.), mapM_)
+import Bindings.Libgit2
+import Control.Applicative
+import Control.Monad
+import Foreign.C.String
+import Foreign.Marshal.Utils
+import Foreign.Ptr
+import Foreign.Storable
+import Git.Libgit2.Backend
+import Prelude hiding (mapM_)
 
 data TraceBackend = TraceBackend { traceParent :: C'git_odb_backend
                                  , traceNext   :: Ptr C'git_odb_backend }
@@ -31,12 +31,12 @@ instance Storable TraceBackend where
     pokeByteOff p (sizeOf (undefined :: C'git_odb_backend)) v1
     return ()
 
-oidToStr :: Ptr C'git_oid -> IO String
-oidToStr = c'git_oid_allocfmt >=> peekCString
+oidToStr :: Ptr C'git_oid -> Int -> IO String
+oidToStr oid len = c'git_oid_allocfmt oid >>= fmap (take len) . peekCString
 
 traceBackendReadCallback :: F'git_odb_backend_read_callback
 traceBackendReadCallback data_p len_p type_p be oid = do
-  oidStr <- oidToStr oid
+  oidStr <- oidToStr oid 40
   putStrLn $ "Read " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
@@ -50,7 +50,7 @@ traceBackendReadCallback data_p len_p type_p be oid = do
 
 traceBackendReadPrefixCallback :: F'git_odb_backend_read_prefix_callback
 traceBackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
-  oidStr <- oidToStr oid
+  oidStr <- oidToStr oid 40
   putStrLn $ "Read Prefix " ++ oidStr ++ " " ++ show len
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
@@ -66,7 +66,7 @@ traceBackendReadPrefixCallback out_oid oid_p len_p type_p be oid len = do
 
 traceBackendReadHeaderCallback :: F'git_odb_backend_read_header_callback
 traceBackendReadHeaderCallback len_p type_p be oid = do
-  oidStr <- oidToStr oid
+  oidStr <- oidToStr oid 40
   putStrLn $ "Read Header " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
@@ -82,7 +82,7 @@ traceBackendWriteCallback oid be obj_data len obj_type = do
   r <- c'git_odb_hash oid obj_data len obj_type
   case r of
     0 -> do
-      oidStr <- oidToStr oid
+      oidStr <- oidToStr oid 40
       putStrLn $ "Write " ++ oidStr ++ " len " ++ show len
       tb <- peek (castPtr be :: Ptr TraceBackend)
       tn <- peek (traceNext tb)
@@ -97,7 +97,7 @@ traceBackendWriteCallback oid be obj_data len obj_type = do
 
 traceBackendExistsCallback :: F'git_odb_backend_exists_callback
 traceBackendExistsCallback be oid confirmNotExists = do
-  oidStr <- oidToStr oid
+  oidStr <- oidToStr oid 40
   putStrLn $ "Exists " ++ oidStr
   tb <- peek (castPtr be :: Ptr TraceBackend)
   tn <- peek (traceNext tb)
