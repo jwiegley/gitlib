@@ -49,7 +49,6 @@ import           Control.Retry
 import           Data.Aeson as A
 import           Data.Attempt
 import           Data.Bifunctor
-import qualified Data.Binary as Bin
 import           Data.Binary as Bin
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -586,6 +585,15 @@ instance A.FromJSON (RefTarget m) where
       where
         go = return . mkOid . unsafePerformIO . strToOid
 
+        strToOid :: String -> IO (ForeignPtr C'git_oid)
+        strToOid oidStr = do
+            ptr <- mallocForeignPtr
+            withCString oidStr $ \cstr ->
+              withForeignPtr ptr $ \ptr' -> do
+                r <- c'git_oid_fromstr ptr' cstr
+                when (r < 0) $ throwIO Git.OidCopyFailed
+                return ptr
+
 instance Git.MonadGit m => A.ToJSON (RefTarget m) where
   toJSON (Git.RefSymbolic target) =
       object [ "symbolic-target" .= target ]
@@ -749,8 +757,7 @@ cacheLoadObject dets sha ce metadataOnly = do
                                   <*> doesFileExist idxPath
         if bothExist
             then do
-                liftIO $ debug $ "getObjectFromPack "
-                    ++ show packPath ++ " " ++ show sha
+                debug $ "getObjectFromPack " ++ show packPath ++ " " ++ show sha
                 mresult <- lgReadFromPack idxPath sha metadataOnly
                 for mresult $ \(typ, len, bytes) ->
                     return $ ObjectInfo (fromLength len) (fromType typ)

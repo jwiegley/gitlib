@@ -46,7 +46,6 @@ module Git.Libgit2
        , shaToOid
        , openLgRepository
        , runLgRepository
-       , strToOid
        , withLibGitDo
        ) where
 
@@ -1006,15 +1005,6 @@ lgBuildPackIndex dir bytes = do
         sha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
         debug $ "The hash used is: " ++ show (Git.shaToText sha)
         return (Git.shaToText sha)
-
-strToOid :: String -> IO (ForeignPtr C'git_oid)
-strToOid oidStr = do
-    ptr <- mallocForeignPtr
-    withCString oidStr $ \cstr ->
-      withForeignPtr ptr $ \ptr' -> do
-        r <- c'git_oid_fromstr ptr' cstr
-        when (r < 0) $ throwIO Git.OidCopyFailed
-        return ptr
 
 oidToSha :: Ptr C'git_oid -> IO Git.SHA
 oidToSha oidPtr =
