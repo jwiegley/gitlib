@@ -1066,12 +1066,31 @@ readCallback data_p len_p type_p be oid = do
             return (Just ())
 
 readPrefixCallback :: F'git_odb_backend_read_prefix_callback
-readPrefixCallback _out_oid _oid_p _len_p _type_p _be _oid _len =
-    wrap "S3.readPrefixCallback"
-        -- jww (2013-04-22): Not yet implemented.
-        (throwIO (Git.BackendError
-                  "S3.readPrefixCallback has not been implemented yet"))
+readPrefixCallback oid_p data_p len_p type_p be oid (fromIntegral -> len) = do
+    (dets, sha) <- unpackDetails be oid
+    wrap (T.unpack $ "S3.readPrefixCallback " <> T.take len (shaToText sha))
+        (maybe c'GIT_ENOTFOUND (const c'GIT_OK) <$> go dets sha True)
         (return c'GIT_ERROR)
+  where
+    go dets sha shouldLoop = do
+        objs <- readTVarIO (knownObjects dets)
+        let subSha = B.take (len `div` 2) (getSHA sha)
+        act . filter ((subSha ==) . B.take (len `div` 2) . getSHA)
+            . M.keys
+            $ objs
+      where
+        act [Git.SHA bs] = do
+            BU.unsafeUseAsCString bs $ c'git_oid_fromraw oid_p . castPtr
+            res <- readCallback data_p len_p type_p be oid_p
+            return $ if res == c'GIT_OK then Just () else Nothing
+        act _
+            | shouldLoop = do
+                -- This is destined to fail, since the sha is too short to
+                -- match anything exactly, but it will force cataloging to
+                -- happen.
+                _ <- accessObject dets sha True
+                go dets sha False
+            | otherwise = return Nothing
 
 readHeaderCallback :: F'git_odb_backend_read_header_callback
 readHeaderCallback len_p type_p be oid = do

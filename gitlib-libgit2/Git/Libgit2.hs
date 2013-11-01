@@ -98,8 +98,8 @@ import           System.Posix.ByteString.FilePath
 import           Unsafe.Coerce
 
 debug :: MonadIO m => String -> m ()
---debug = liftIO . putStrLn
-debug = const (return ())
+debug = liftIO . putStrLn
+--debug = const (return ())
 
 type Oid = OidPtr
 
@@ -256,7 +256,7 @@ lgLookupBlob :: Git.MonadGit m => BlobOid m
 lgLookupBlob oid =
     lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
         c'git_blob_lookup c'git_blob_lookup_prefix
-        $ \_ obj _ -> withForeignPtr obj $ lgObjToBlob oid
+        $ \boid obj _ -> withForeignPtr obj $ lgObjToBlob (Tagged (mkOid boid))
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
@@ -457,7 +457,7 @@ lgLookupTree (untag -> oid)
     | otherwise = do
         fptr <- lookupObject' (getOid oid) (getOidLen oid)
             c'git_tree_lookup c'git_tree_lookup_prefix $
-                \_coid obj _ -> return obj
+                \_ obj _ -> return obj
         return $ LgTree (Just fptr)
 
 entryToTreeEntry :: Ptr C'git_tree_entry -> IO (TreeEntry m)
@@ -520,7 +520,7 @@ lgLookupCommit :: Git.MonadGit m
 lgLookupCommit oid =
   lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
       c'git_commit_lookup c'git_commit_lookup_prefix
-      $ \_ obj _ -> withForeignPtr obj $ lgObjToCommit oid
+      $ \coid obj _ -> withForeignPtr obj $ lgObjToCommit (Tagged (mkOid coid))
 
 data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
                | TreePtr (ForeignPtr C'git_commit)
@@ -534,11 +534,9 @@ lgLookupObject oid = do
         lookupObject' (getOid oid) (getOidLen oid)
             (\x y z   -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
             (\x y z l -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
-            $ \_ fptr y -> do
-                coid <- c'git_object_id y
-                oid' <- mkOid <$> coidPtrToOid coid
-                typ  <- c'git_object_type y
-                return (oid', typ, fptr)
+            $ \coid fptr y -> do
+                typ <- c'git_object_type y
+                return (mkOid coid, typ, fptr)
     case () of
         () | typ == c'GIT_OBJ_BLOB   ->
                 Git.BlobObj <$>
@@ -597,17 +595,26 @@ lgSourceObjects mhave need alsoTrees = do
         ptr <- peek pptr
         newForeignPtr p'git_revwalk_free ptr
 
-    liftIO $ withForeignPtr (getOid (untag need)) $ \coid -> do
+    c <- lift $ lgLookupCommit need
+    let oid = untag (Git.commitOid c)
+
+    liftIO $ putStrLn $ "mhave = " ++ show mhave
+    liftIO $ putStrLn $ "need  = " ++ show need
+    liftIO $ putStrLn $ "oid   = " ++ show oid
+
+    liftIO $ withForeignPtr (getOid oid) $ \coid -> do
         r2 <- withForeignPtr walker $ flip c'git_revwalk_push coid
         when (r2 < 0) $
-            failure (Git.BackendError "Could not push oid on revwalker")
+            failure (Git.BackendError $ "Could not push oid "
+                         <> pack (show oid) <> " onto revwalker")
 
     case mhave of
         Nothing   -> return ()
         Just have -> liftIO $ withForeignPtr (getOid (untag have)) $ \coid -> do
             r2 <- withForeignPtr walker $ flip c'git_revwalk_hide coid
             when (r2 < 0) $
-                failure (Git.BackendError "Could not hide commit on revwalker")
+                failure (Git.BackendError $ "Could not hide commit "
+                             <> pack (show (untag have)) <> " from revwalker")
 
     liftIO $ withForeignPtr walker $ flip c'git_revwalk_sorting
         (fromIntegral ((1 :: Int) .|. (4 :: Int)))

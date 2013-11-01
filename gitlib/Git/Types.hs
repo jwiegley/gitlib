@@ -140,7 +140,7 @@ parseObjOid sha = Tagged <$> parseOid sha
 copyOid :: (Repository m, Repository n) => Oid m -> n (Oid n)
 copyOid = parseOid . renderOid
 
-newtype SHA = SHA B.ByteString deriving (Eq, Ord, Read)
+newtype SHA = SHA { getSHA :: B.ByteString } deriving (Eq, Ord, Read)
 
 shaToText :: SHA -> Text
 shaToText (SHA bs) = T.decodeUtf8 (B16.encode bs)
