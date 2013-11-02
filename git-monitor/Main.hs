@@ -29,7 +29,7 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
-import           Git.Libgit2 (LgRepository, lgFactory, withLibGitDo)
+import           Git.Libgit2 (LgRepository, lgFactory)
 import           Options.Applicative
 import           Shelly (silently, shelly, run)
 import           System.Directory
@@ -82,7 +82,7 @@ options = Options
                 <> help "Resumes using last set of snapshots")
 
 main :: IO ()
-main = withLibGitDo $ execParser opts >>= doMain
+main = execParser opts >>= doMain
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)

@@ -47,7 +47,6 @@ module Git.Libgit2
        , shaToOid
        , openLgRepository
        , runLgRepository
-       , withLibGitDo
        ) where
 
 import           Bindings.Libgit2
@@ -59,6 +58,7 @@ import           Control.Monad hiding (forM, mapM, sequence)
 import           Control.Monad.IO.Class
 import           Control.Monad.Loops
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
 import           Data.Bits ((.|.))
@@ -1202,9 +1202,11 @@ openLgRepository opts = do
                           , repoExcTrap = excTrap
                           }
 
-runLgRepository :: Repository -> LgRepository m a -> m a
+runLgRepository :: MonadBaseControl IO m
+                => Repository -> LgRepository m a -> m a
 runLgRepository repo action =
-    runReaderT (lgRepositoryReaderT action) repo
+    control $ \run -> withLibGitDo $ run $
+        runReaderT (lgRepositoryReaderT action) repo
 
 closeLgRepository :: Git.MonadGit m => Repository -> m ()
 closeLgRepository = const (return ())

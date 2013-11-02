@@ -23,7 +23,7 @@ import           Prelude hiding (FilePath)
 
 {- Examples of use:
 
->>> withLibGitDo $ withRepository lgFactory "/data/Home/fpco/gitlib" $ "f400bb98128804ddb5628641b88f851d6fcaf52c" ^! _oid._commit._tree._blob "README.md"
+>>> withRepository lgFactory "/data/Home/fpco/gitlib" $ "f400bb98128804ddb5628641b88f851d6fcaf52c" ^! _oid._commit._tree._blob "README.md"
 Just "gitlib\n======\n\nMain repository for gitlib and related projects. This is a mega-repo.\n"
 -}
 
