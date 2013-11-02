@@ -38,7 +38,6 @@ import           Data.Monoid
 import           Data.Text (Text)
 import           Data.Word
 import           Git.Types
-import           System.Posix.ByteString.FilePath
 
 data ModifyTreeResult m = TreeEntryNotFound
                         | TreeEntryDeleted

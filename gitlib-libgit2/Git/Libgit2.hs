@@ -94,12 +94,17 @@ import           System.Directory
 import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
 import qualified System.IO.Unsafe as SU
-import           System.Posix.ByteString.FilePath
 import           Unsafe.Coerce
 
 debug :: MonadIO m => String -> m ()
 debug = liftIO . putStrLn
 --debug = const (return ())
+
+withFilePath :: Git.RawFilePath -> (CString -> IO a) -> IO a
+withFilePath = B.useAsCString
+
+peekFilePath :: CString -> IO Git.RawFilePath
+peekFilePath = B.packCString
 
 type Oid = OidPtr
 

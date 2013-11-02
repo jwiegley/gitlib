@@ -20,7 +20,9 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Typeable
-import           System.Posix.ByteString.FilePath
+--import           System.Posix.ByteString.FilePath
+
+type RawFilePath = B.ByteString
 
 data RepositoryFacts = RepositoryFacts
     { hasSymbolicReferences :: !Bool
