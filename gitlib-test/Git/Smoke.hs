@@ -182,13 +182,13 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c2)
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
-      updateReference "refs/heads/master" (RefObj (commitOid c2))
+      updateReference "refs/heads/master" (RefObj (untag (commitOid c2)))
       hasSymRefs <- hasSymbolicReferences <$> facts
       when hasSymRefs $
           updateReference "HEAD" (RefSymbolic "refs/heads/master")
 
       Just c3 <- resolveReference "refs/heads/master"
-      let x = renderObjOid c3
+      let x = renderOid c3
       liftIO $ x @?= "967b647bd11990d1bb15ff5209ad44a002779454"
 
       refs <- listReferences

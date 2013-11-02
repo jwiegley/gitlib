@@ -8,6 +8,7 @@ import qualified Data.HashSet as HashSet
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
+import           Data.Tagged
 import           Data.Text (Text)
 import           Data.Traversable (for)
 import           Git.Commit
@@ -24,7 +25,7 @@ pushCommit :: (Repository m, Repository (t m), MonadTrans t)
            => CommitOid m -> Text -> t m (CommitOid (t m))
 pushCommit coid remoteRefName = do
     commits <- mapM copyCommitOid =<< lift (listCommits Nothing coid)
-    mrref   <- resolveReference remoteRefName
+    mrref   <- fmap Tagged `liftM` resolveReference remoteRefName
     mrref'  <- for mrref $ \rref ->
         if rref `elem` commits
         then lift $ copyCommitOid rref

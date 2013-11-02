@@ -131,7 +131,7 @@ mkOid :: Git.MonadGit m
 mkOid = fmap Tagged <$> Git.textToSha . toStrict
 
 shaToRef :: Git.MonadGit m => TL.Text -> CmdLineRepository m (RefTarget m)
-shaToRef = fmap Git.RefObj . mkOid
+shaToRef = fmap (Git.RefObj . untag) . mkOid
 
 parseCliTime :: String -> ZonedTime
 parseCliTime = fromJust . parseTime defaultTimeLocale "%s %z"
@@ -210,7 +210,7 @@ cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
             mcref <- Git.resolveReference remoteRefName
             case mcref of
                 Nothing   -> failure (Git.BackendError $ "git push failed")
-                Just cref -> return cref
+                Just cref -> return (Tagged cref)
         Just err -> failure err
 
 cliResetHard :: Git.MonadGit m => Text -> CmdLineRepository m ()
@@ -227,7 +227,7 @@ cliPullCommit :: Git.MonadGit m
                   (Git.MergeResult (CmdLineRepository m))
 cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     repo     <- cliGet
-    leftHead <- cliResolveRef "HEAD"
+    leftHead <- fmap Tagged <$> cliResolveRef "HEAD"
 
     eres <- shellyNoDir $ silently $ errExit False $ do
         for_ msshCmd $ \sshCmd ->
@@ -254,7 +254,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
         Left err -> failure err
         Right r  ->
             if r == 0
-                then Git.MergeSuccess <$> getOid "HEAD"
+                then Git.MergeSuccess <$> (Tagged <$> getOid "HEAD")
                 else case leftHead of
                     Nothing ->
                         failure (Git.BackendError
@@ -264,7 +264,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     -- jww (2013-05-15): This function should not overwrite head, but simply
     -- create a detached commit and return its id.
     recordMerge repo leftHead = do
-        rightHead <- getOid "MERGE_HEAD"
+        rightHead <- Tagged <$> getOid "MERGE_HEAD"
         xs <- shellyNoDir $ silently $ errExit False $ do
             xs <- returnConflict . TL.init
                   <$> git [ "--git-dir", repoPath repo
@@ -274,7 +274,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
                  , "commit", "-F", ".git/MERGE_MSG" ]
             return xs
         Git.MergeConflicted
-            <$> getOid "HEAD"
+            <$> (Tagged <$> getOid "HEAD")
             <*> pure leftHead
             <*> pure rightHead
             <*> pure (Map.filter isConflict xs)
@@ -585,7 +585,8 @@ cliCreateCommit parentOids treeOid author committer message ref = do
             , Git.commitEncoding  = "utf-8"
             }
     when (isJust ref) $
-        void $ cliUpdateRef (fromJust ref) (Git.RefObj (Git.commitOid commit))
+        void $ cliUpdateRef (fromJust ref)
+            (Git.RefObj (untag (Git.commitOid commit)))
 
     return commit
 
@@ -626,7 +627,7 @@ cliLookupRef refName = do
 cliUpdateRef :: Git.MonadGit m
              => Text -> Git.RefTarget (CmdLineRepository m)
              -> CmdLineRepository m ()
-cliUpdateRef refName (Git.RefObj (Git.renderObjOid -> sha)) =
+cliUpdateRef refName (Git.RefObj (Git.renderOid -> sha)) =
     runGit_ ["update-ref", fromStrict refName, fromStrict sha]
 
 cliUpdateRef refName (Git.RefSymbolic targetName) =
@@ -644,7 +645,8 @@ cliListRefs = do
         Just xs -> map (toStrict . fst) xs
 
 cliResolveRef :: Git.MonadGit m
-              => Text -> CmdLineRepository m (Maybe (CommitOid m))
+              => Text
+              -> CmdLineRepository m (Maybe (Git.Oid (CmdLineRepository m)))
 cliResolveRef refName = do
     repo <- cliGet
     (rev, ec) <- shellyNoDir $ silently $ errExit False $ do
@@ -654,7 +656,7 @@ cliResolveRef refName = do
         ec <- lastExitCode
         return (rev, ec)
     if ec == 0
-        then Just <$> mkOid (TL.init rev)
+        then Just <$> Git.textToSha (toStrict (TL.init rev))
         else return Nothing
 
 -- cliLookupTag :: TagOid -> CmdLineRepository Tag

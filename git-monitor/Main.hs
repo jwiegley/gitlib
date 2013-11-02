@@ -20,6 +20,7 @@ import           Data.Function (fix)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe
+import           Data.Tagged
 import qualified Data.Text as T
 #if MIN_VERSION_shelly(1, 0, 0)
 import qualified Data.Text as TL
@@ -147,7 +148,7 @@ doMain opts = do
                 then resolveReference sref
                 else return Nothing
         scr' <- maybe (fromJust <$> resolveReference "HEAD") return scr
-        sc   <- lookupCommit scr'
+        sc   <- lookupCommit (Tagged scr')
         let toid = commitTree sc
         tree <- lookupTree toid
         ft   <- readFileTree' tree wd (isNothing scr)
@@ -266,7 +267,7 @@ readFileTree ref wdir getHash = do
     case h of
         Nothing -> pure Map.empty
         Just h' -> do
-            tr <- lookupTree . commitTree =<< lookupCommit h'
+            tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
             readFileTree' tr wdir getHash
 
 readFileTree' :: MonadGit m

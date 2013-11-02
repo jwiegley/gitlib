@@ -710,7 +710,7 @@ lgLookupRef name = do
             typ  <- c'git_reference_type ref
             targ <- if typ == c'GIT_REF_OID
                     then do oidPtr <- c'git_reference_target ref
-                            Git.RefObj . Tagged . mkOid
+                            Git.RefObj . mkOid
                                 <$> coidPtrToOid oidPtr
                     else do targName <- c'git_reference_symbolic_target ref
                             Git.RefSymbolic . T.decodeUtf8
@@ -728,7 +728,7 @@ lgUpdateRef name refTarg = do
         withCString (unpack name) $ \namePtr ->
             case refTarg of
                 Git.RefObj oid ->
-                    withForeignPtr (getOid (untag oid)) $ \coidPtr ->
+                    withForeignPtr (getOid oid) $ \coidPtr ->
                         c'git_reference_create ptr repoPtr namePtr
                                                coidPtr (fromBool True)
 

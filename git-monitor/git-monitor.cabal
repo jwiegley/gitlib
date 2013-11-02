@@ -31,6 +31,7 @@ Executable git-monitor
                  , old-locale           >= 1.0.0.4
                  , optparse-applicative >= 0.5.2.1
                  , shelly               >= 0.14
+                 , tagged               >= 0.4.5
                  , text                 >= 0.11.2
                  , time                 >= 1.4
                  , transformers         >= 0.3.0.0

@@ -66,7 +66,6 @@ import           Data.Int (Int64)
 import qualified Data.List as L
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -583,7 +582,7 @@ instance A.FromJSON (RefTarget m) where
             Just _  -> Git.RefSymbolic <$> o .: "symbolic-target"
             Nothing -> Git.RefObj . go <$> o .: "oid-target"
       where
-        go = return . mkOid . unsafePerformIO . strToOid
+        go = mkOid . unsafePerformIO . strToOid
 
         strToOid :: String -> IO (ForeignPtr C'git_oid)
         strToOid oidStr = do
@@ -595,10 +594,8 @@ instance A.FromJSON (RefTarget m) where
                 return ptr
 
 instance Git.MonadGit m => A.ToJSON (RefTarget m) where
-  toJSON (Git.RefSymbolic target) =
-      object [ "symbolic-target" .= target ]
-  toJSON (Git.RefObj oid) =
-      object [ "oid-target" .= coidToJSON (getOid (unTagged oid)) ]
+  toJSON (Git.RefSymbolic target) = object [ "symbolic-target" .= target ]
+  toJSON (Git.RefObj oid) = object [ "oid-target" .= coidToJSON (getOid oid) ]
 
 readRefs :: Ptr C'git_odb_backend -> IO (Maybe (RefMap m))
 readRefs be = do
@@ -640,7 +637,7 @@ mirrorRefsFromS3 be = do
                 withCString (T.unpack target) $ \targetPtr ->
                     c'git_reference_symbolic_create ptr repoPtr namePtr
                         targetPtr 1
-            Just (Git.RefObj (Tagged coid)) ->
+            Just (Git.RefObj coid) ->
                 withForeignPtr (getOid coid) $ \coidPtr ->
                     c'git_reference_create ptr repoPtr namePtr coidPtr 1
             _ -> return 0

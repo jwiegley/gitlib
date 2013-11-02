@@ -296,14 +296,14 @@ untagObjOid (CommitObjOid oid) = untag oid
 untagObjOid (TagObjOid oid)    = untag oid
 
 {- $references -}
-data RefTarget m = RefObj !(CommitOid m) | RefSymbolic !RefName
+data RefTarget m = RefObj !(Oid m) | RefSymbolic !RefName
 
 instance Repository m => Show (RefTarget m) where
-    show (RefObj coid) = "RefObj#" ++ T.unpack (renderObjOid coid)
+    show (RefObj oid) = "RefObj#" ++ T.unpack (renderOid oid)
     show (RefSymbolic name) = "RefSymbolic#" ++ T.unpack name
 
 commitRefTarget :: Commit m -> RefTarget m
-commitRefTarget = RefObj . commitOid
+commitRefTarget = RefObj . untag . commitOid
 
 {- $merges -}
 data ModificationKind = Unchanged | Modified | Added | Deleted | TypeChanged

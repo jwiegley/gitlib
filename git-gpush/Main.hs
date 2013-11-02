@@ -106,7 +106,7 @@ pushToGitHub opts = do
 
     withRepository factory gd $ do
         cref <- fromJust <$> resolveReference "HEAD"
-        hc   <- lookupCommit cref
+        hc   <- lookupCommit (Tagged cref)
         rcoid <- Tagged <$> parseOid (toStrict remoteHead)
         objs <- listObjects (Just rcoid) (commitOid hc) False
         for_ objs $ \obj -> case obj of
