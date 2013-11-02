@@ -1180,6 +1180,7 @@ lgFactory = Git.RepositoryFactory
 
 openLgRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
 openLgRepository opts = do
+    startupLgBackend
     let path = Git.repoPath opts
     p <- liftIO $ doesDirectoryExist path
     liftIO $ openRepositoryWith path $
@@ -1202,11 +1203,10 @@ openLgRepository opts = do
                           , repoExcTrap = excTrap
                           }
 
-runLgRepository :: MonadBaseControl IO m
-                => Repository -> LgRepository m a -> m a
-runLgRepository repo action =
-    control $ \run -> withLibGitDo $ run $
-        runReaderT (lgRepositoryReaderT action) repo
+runLgRepository :: MonadIO m => Repository -> LgRepository m a -> m a
+runLgRepository repo action = do
+    startupLgBackend
+    runReaderT (lgRepositoryReaderT action) repo
 
 closeLgRepository :: Git.MonadGit m => Repository -> m ()
 closeLgRepository = const (return ())
