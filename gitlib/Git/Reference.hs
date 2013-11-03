@@ -1,6 +1,5 @@
 module Git.Reference where
 
-import Control.Applicative
 import Git.Types
 
 resolveReference :: Repository m => RefName -> m (Maybe (Oid m))
