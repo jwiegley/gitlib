@@ -8,18 +8,12 @@
 
 module Main where
 
-import           Control.Exception (finally)
-import qualified Git
-import qualified Git.Smoke as Git
 import qualified Git.Libgit2 as Lg
-import           Test.Hspec.Runner
+import qualified Git.Smoke as Git
 import           Test.Hspec.HUnit ()
+import           Test.Hspec.Runner
 
 main :: IO ()
-main = do
-    Git.startupBackend Lg.lgFactory
-    finally
-        (hspec $ Git.smokeTestSpec Lg.lgFactory Lg.lgFactory)
-        (Git.shutdownBackend Lg.lgFactory)
+main = hspec $ Git.smokeTestSpec Lg.lgFactory Lg.lgFactory
 
 -- Smoke.hs ends here
