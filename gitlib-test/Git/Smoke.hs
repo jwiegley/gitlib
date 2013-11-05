@@ -34,11 +34,11 @@ sampleCommit :: Repository m => TreeOid m -> Signature -> m (Commit m)
 sampleCommit tr sig =
     createCommit [] tr sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (Repository (t IO), MonadGit (t IO), MonadTrans t,
-                  Repository (t2 (t IO)), MonadGit (t2 (t IO)), MonadTrans t2,
-                  MonadBaseControl IO (t IO))
+smokeTestSpec :: (Repository t, MonadGit t,
+                  Repository t2, MonadGit t2,
+                  MonadBaseControl IO t)
               => RepositoryFactory t IO c
-              -> RepositoryFactory t2 (t IO) c2
+              -> RepositoryFactory t2 t c2
               -> Spec
 smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
@@ -391,8 +391,8 @@ mkBlob :: Repository m => TreeFilePath -> TreeT m ()
 mkBlob path = putBlob path =<< lift (createBlob $ BlobString $ path <> "\n")
 
 doTreeit :: (MonadBaseControl IO m, MonadIO m,
-             MonadTrans t, MonadGit (t m), Repository (t m))
-       => String -> RepositoryFactory t m c -> [Kind] -> TreeT (t m) a -> m ()
+             MonadGit t, Repository t)
+       => String -> RepositoryFactory t m c -> [Kind] -> TreeT t a -> m ()
 doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     tref <- createTree action
     tree <- lookupTree tref
@@ -417,14 +417,12 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     fullPath  = normalize label <> ".git"
     normalize = map (\x -> if x == ' ' then '-' else x)
 
-treeit :: (Example (m ()), MonadTrans t, MonadGit m,
-           MonadGit (t m), Repository (t m))
-       => String -> RepositoryFactory t m c -> [Kind] -> TreeT (t m) a -> Spec
+treeit :: (Example (m ()), MonadGit m, MonadGit t, Repository t)
+       => String -> RepositoryFactory t m c -> [Kind] -> TreeT t a -> Spec
 treeit label pr kinds action = it label $ doTreeit label pr kinds action
 
-treeitFail :: (MonadTrans t,
-               MonadGit (t IO), Repository (t IO))
-           => String -> RepositoryFactory t IO c -> [Kind] -> TreeT (t IO) a
+treeitFail :: (MonadGit t, Repository t)
+           => String -> RepositoryFactory t IO c -> [Kind] -> TreeT t a
            -> Spec
 treeitFail label pr kinds action =
     it label $ doTreeit label pr kinds action

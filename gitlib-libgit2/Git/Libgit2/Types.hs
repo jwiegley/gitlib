@@ -15,7 +15,8 @@ import           Control.Exception
 import           Control.Monad (liftM)
 import           Control.Monad.Base
 import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
+import           Control.Monad.Logger
+import           Control.Monad.Morph
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Data.Conduit
@@ -23,7 +24,6 @@ import           Data.IORef
 import           Data.Monoid
 import           Foreign.ForeignPtr
 import qualified Git
-import           System.IO.Unsafe
 
 data Repository = Repository
     { repoOptions :: Git.RepositoryOptions
@@ -48,15 +48,19 @@ instance (Monad m, MonadIO m, Applicative m)
          => MonadBase IO (LgRepository m) where
     liftBase = liftIO
 
-instance Monad m => MonadUnsafeIO (LgRepository m) where
-    unsafeLiftIO = return . unsafePerformIO
-
 instance Monad m => MonadThrow (LgRepository m) where
     -- monadThrow :: Exception e => e -> m a
     monadThrow = throw
 
+instance MonadLogger m => MonadLogger (LgRepository m) where
+    monadLoggerLog a b c d = LgRepository $ monadLoggerLog a b c d
+
 instance MonadTrans LgRepository where
     lift = LgRepository . ReaderT . const
+
+instance MFunctor LgRepository where
+    hoist nat m = LgRepository $ ReaderT $ \i ->
+        nat (runReaderT (lgRepositoryReaderT m) i)
 
 instance MonadTransControl LgRepository where
     newtype StT LgRepository a = StLgRepository
@@ -88,6 +92,8 @@ type RefTarget m   = Git.RefTarget (LgRepository m)
 
 type TreeBuilder m = Git.TreeBuilder (LgRepository m)
 type Options m     = Git.Options (LgRepository m)
+
+type MonadLg m     = (Git.MonadGit m, MonadLogger m)
 
 lgGet :: Monad m => LgRepository m Repository
 lgGet = LgRepository ask

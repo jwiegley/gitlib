@@ -38,7 +38,7 @@ import           Shelly hiding (FilePath)
 factory :: RepositoryFactory Lg.LgRepository IO Lg.Repository
 factory = Lg.lgFactory
 #else
-factory :: RepositoryFactory Cli.CmdLineRepository IO Cli.Repository
+factory :: RepositoryFactory (Cli.CmdLineRepository IO) IO Cli.Repository
 factory = Cli.cliFactory
 #endif
 

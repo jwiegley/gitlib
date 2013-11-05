@@ -12,6 +12,7 @@ module Main where
 import           Control.Concurrent (threadDelay)
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
+import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
 import qualified Data.ByteString.Char8 as B8
@@ -27,21 +28,37 @@ import qualified Data.Text as TL
 #else
 import qualified Data.Text.Lazy as TL
 #endif
+import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
-import           Git.Libgit2 (LgRepository, lgFactory)
+import           Git.Libgit2 (MonadLg, LgRepository, lgFactoryLogger)
+import           Language.Haskell.TH.Syntax hiding (lift)
 import           Options.Applicative
 import           Shelly (silently, shelly, run)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.IO (stderr)
 import           System.Locale (defaultTimeLocale)
+import           System.Log.FastLogger
 import           System.Log.Formatter (tfLogFormatter)
 import           System.Log.Handler (setFormatter)
 import           System.Log.Handler.Simple (streamHandler)
 import           System.Log.Logger
 import           System.Posix.Files
+
+logMLogger :: Loc -> LogSource -> LogLevel -> LogStr -> IO ()
+logMLogger _loc src lvl str =
+    logM (T.unpack src) (prio lvl) (convert str)
+  where
+    prio LevelDebug     = DEBUG
+    prio LevelInfo      = INFO
+    prio LevelWarn      = WARNING
+    prio LevelError     = ERROR
+    prio (LevelOther _) = INFO
+
+    convert (LS str) = str
+    convert (LB bs)  = T.unpack (T.decodeUtf8 bs)
 
 toStrict :: TL.Text -> T.Text
 #if MIN_VERSION_shelly(1, 0, 0)
@@ -111,17 +128,19 @@ doMain opts = do
         wd   = if null wDir then takeDirectory gd else wDir
 
     -- Make sure we're in a known branch, and if so, let it begin
-    forever $ withRepository lgFactory gd $ do
-        infoL $ "Saving snapshots under " ++ gd
-        infoL $ "Working tree: " ++ wd
-        ref <- lookupReference "HEAD"
-        case ref of
-            Just (RefSymbolic name) -> do
-                infoL $ "Tracking branch " ++ T.unpack name
-                void $ start wd (toStrict userName) (toStrict userEmail) name
-            _ -> do
-                infoL "Cannot use git-monitor if no branch is checked out"
-                liftIO $ threadDelay (interval opts * 1000000)
+    forever $ flip runLoggingT logMLogger $
+        withRepository lgFactoryLogger gd $ do
+            infoL $ "Saving snapshots under " ++ gd
+            infoL $ "Working tree: " ++ wd
+            ref <- lookupReference "HEAD"
+            case ref of
+                Just (RefSymbolic name) -> do
+                    infoL $ "Tracking branch " ++ T.unpack name
+                    void $ start wd (toStrict userName) (toStrict userEmail)
+                        name
+                _ -> do
+                    infoL "Cannot use git-monitor if no branch is checked out"
+                    liftIO $ threadDelay (interval opts * 1000000)
   where
     initLogging debugMode = do
         let level | debugMode = DEBUG
@@ -162,7 +181,7 @@ doMain opts = do
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots any
 --   changes that have occurred in them.
-snapshotTree :: MonadGit m
+snapshotTree :: MonadLg m
              => Options
              -> FilePath
              -> CommitAuthor
@@ -215,7 +234,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
         else loop sc' toid' ft'
 
   where
-    scanOldEntry :: MonadGit m
+    scanOldEntry :: MonadLg m
                  => Map TreeFilePath (FileEntry (LgRepository m))
                  -> TreeFilePath
                  -> FileEntry (LgRepository m)
@@ -226,7 +245,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
             dropEntry fp
         _ -> return ()
 
-    scanNewEntry :: MonadGit m
+    scanNewEntry :: MonadLg m
                  => Map TreeFilePath (FileEntry (LgRepository m))
                  -> TreeFilePath
                  -> FileEntry (LgRepository m)
@@ -257,7 +276,7 @@ data FileEntry m = FileEntry
 
 type FileTree m = Map TreeFilePath (FileEntry m)
 
-readFileTree :: MonadGit m
+readFileTree :: MonadLg m
              => RefName
              -> FilePath
              -> Bool
@@ -270,7 +289,7 @@ readFileTree ref wdir getHash = do
             tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
             readFileTree' tr wdir getHash
 
-readFileTree' :: MonadGit m
+readFileTree' :: MonadLg m
               => Tree (LgRepository m) -> FilePath -> Bool
               -> LgRepository m (FileTree (LgRepository m))
 readFileTree' tr wdir getHash = do
@@ -280,7 +299,7 @@ readFileTree' tr wdir getHash = do
                  return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
-readModTime :: MonadGit m
+readModTime :: MonadLg m
             => FilePath
             -> Bool
             -> FilePath

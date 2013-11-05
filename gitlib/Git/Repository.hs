@@ -9,10 +9,10 @@ import           Git.Types
 import           System.Directory
 import           System.Mem
 
-withNewRepository :: (Repository (t m), MonadGit (t m),
-                      MonadBaseControl IO m, MonadIO m, MonadTrans t)
+withNewRepository :: (Repository t, MonadGit t,
+                      MonadBaseControl IO m, MonadIO m)
                   => RepositoryFactory t m c
-                  -> FilePath -> t m a -> m a
+                  -> FilePath -> t a -> m a
 withNewRepository factory path action = do
     liftIO $ do
         exists <- doesDirectoryExist path
@@ -31,9 +31,9 @@ withNewRepository factory path action = do
 
     return a
 
-withNewRepository' :: (Repository (t m), MonadGit (t m),
-                       MonadBaseControl IO m, MonadIO m, MonadTrans t)
-                   => RepositoryFactory t m c -> FilePath -> t m a -> m a
+withNewRepository' :: (Repository t, MonadGit t,
+                       MonadBaseControl IO m, MonadIO m)
+                   => RepositoryFactory t m c -> FilePath -> t a -> m a
 withNewRepository' factory path action =
     Exc.bracket_ recover recover $
         withRepository' factory (defaultOptions factory)
@@ -52,11 +52,11 @@ withBackendDo fact f = do
     startupBackend fact
     Exc.finally f (liftIO performGC >> shutdownBackend fact)
 
-withRepository' :: (Repository (t m), MonadTrans t,
+withRepository' :: (Repository t,
                     MonadBaseControl IO m, MonadIO m)
                 => RepositoryFactory t m c
                 -> RepositoryOptions
-                -> t m a
+                -> t a
                 -> m a
 withRepository' factory opts action =
     Exc.bracket
@@ -64,11 +64,11 @@ withRepository' factory opts action =
         (closeRepository factory)
         (flip (runRepository factory) action)
 
-withRepository :: (Repository (t m), MonadTrans t,
+withRepository :: (Repository t,
                    MonadBaseControl IO m, MonadIO m)
                => RepositoryFactory t m c
                -> FilePath
-               -> t m a
+               -> t a
                -> m a
 withRepository factory path =
     withRepository' factory

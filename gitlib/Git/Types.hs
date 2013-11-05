@@ -109,11 +109,12 @@ data RepositoryOptions = RepositoryOptions
 instance Default RepositoryOptions where
     def = RepositoryOptions "" True True
 
-data RepositoryFactory t m c = RepositoryFactory
+data RepositoryFactory t m c
+    = RepositoryFactory
     { openRepository  :: RepositoryOptions -> m c
-    , runRepository   :: forall a. c -> t m a -> m a
+    , runRepository   :: forall a. c -> t a -> m a
     , closeRepository :: c -> m ()
-    , getRepository   :: t m c
+    , getRepository   :: t c
     , defaultOptions  :: !RepositoryOptions
     , startupBackend  :: m ()
     , shutdownBackend :: m ()

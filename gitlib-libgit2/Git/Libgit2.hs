@@ -17,7 +17,8 @@
 --   associated with the repository — such as the list of branches — is
 --   queried as needed.
 module Git.Libgit2
-       ( LgRepository(..)
+       ( MonadLg
+       , LgRepository(..)
        , BlobOid()
        , Commit()
        , CommitOid()
@@ -34,10 +35,10 @@ module Git.Libgit2
        , defaultLgOptions
        , lgBuildPackIndex
        , lgFactory
+       , lgFactoryLogger
        , lgForEachObject
        , lgGet
        , lgExcTrap
-       , lgLoadPackFileInMemory
        , lgBuildPackFile
        , lgReadFromPack
        , lgWithPackFile
@@ -47,6 +48,8 @@ module Git.Libgit2
        , shaToOid
        , openLgRepository
        , runLgRepository
+       , lgDebug
+       , lgWarn
        ) where
 
 import           Bindings.Libgit2
@@ -56,8 +59,9 @@ import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad hiding (forM, mapM, sequence)
 import           Control.Monad.IO.Class
+import           Control.Monad.Logger
 import           Control.Monad.Loops
-import           Control.Monad.Trans.Class
+import           Control.Monad.Morph hiding (embed)
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
@@ -89,6 +93,8 @@ import           Foreign.Storable
 import qualified Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
+import           Language.Haskell.TH.Syntax (Loc(..))
+
 import           Prelude hiding (mapM, sequence)
 import           System.Directory
 import           System.FilePath.Posix
@@ -96,9 +102,14 @@ import           System.IO (openBinaryTempFile, hClose)
 import qualified System.IO.Unsafe as SU
 import           Unsafe.Coerce
 
-debug :: MonadIO m => String -> m ()
---debug = liftIO . putStrLn
-debug = const (return ())
+defaultLoc :: Loc
+defaultLoc = Loc "<unknown>" "<unknown>" "<unknown>" (0,0) (0,0)
+
+lgDebug :: MonadLogger m => String -> m ()
+lgDebug = monadLoggerLog defaultLoc "Git" LevelDebug . pack
+
+lgWarn :: MonadLogger m => String -> m ()
+lgWarn = monadLoggerLog defaultLoc "Git" LevelWarn . pack
 
 withFilePath :: Git.RawFilePath -> (CString -> IO a) -> IO a
 withFilePath = B.useAsCString
@@ -131,7 +142,7 @@ lgParseOidIO str len = do
              then Nothing
              else Just (OidPtr oid len)
 
-lgParseOid :: Git.MonadGit m => Text -> LgRepository m Oid
+lgParseOid :: MonadLg m => Text -> LgRepository m Oid
 lgParseOid str
   | len > 40 = failure (Git.OidParseFailed str)
   | otherwise = do
@@ -147,7 +158,7 @@ lgRenderOid = pack . show
 
 instance Show OidPtr where
     show OidPtr {..} = SU.unsafePerformIO $
-        withForeignPtr getOid (flip oidToStr getOidLen)
+        withForeignPtr getOid (`oidToStr` getOidLen)
 
 instance Ord OidPtr where
     (getOid -> coid1) `compare` (getOid -> coid2) =
@@ -158,7 +169,7 @@ instance Ord OidPtr where
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
-instance Git.MonadGit m => Git.Repository (LgRepository m) where
+instance MonadLg m => Git.Repository (LgRepository m) where
     type Oid (LgRepository m)  = OidPtr
     data Tree (LgRepository m) = LgTree
         { lgTreePtr :: Maybe (ForeignPtr C'git_tree) }
@@ -207,7 +218,7 @@ lgWrap f = f `Exc.catch` \e -> do
     liftIO $ writeIORef etrap Nothing
     maybe (throw (e :: SomeException)) throw mexc
 
-lgHashContents :: Git.MonadGit m => Git.BlobContents (LgRepository m)
+lgHashContents :: MonadLg m => Git.BlobContents (LgRepository m)
                -> LgRepository m (BlobOid m)
 lgHashContents b = do
     ptr <- liftIO mallocForeignPtr
@@ -224,7 +235,7 @@ lgHashContents b = do
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the given string is 'empty', it is an error.
-lgCreateBlob :: Git.MonadGit m
+lgCreateBlob :: MonadLg m
              => Git.BlobContents (LgRepository m)
              -> LgRepository m (BlobOid m)
 lgCreateBlob b = do
@@ -245,7 +256,7 @@ lgCreateBlob b = do
                         c'git_blob_create_frombuffer
                           coid' repoPtr (castPtr cstr) (fromIntegral len))
 
-lgObjToBlob :: Git.MonadGit m
+lgObjToBlob :: MonadLg m
             => BlobOid m -> Ptr C'git_blob -> IO (Git.Blob (LgRepository m))
 lgObjToBlob oid ptr = do
     size <- c'git_blob_rawsize ptr
@@ -256,7 +267,7 @@ lgObjToBlob oid ptr = do
     bstr <- curry B.packCStringLen (castPtr buf) (fromIntegral size)
     return $ Git.Blob oid (Git.BlobString bstr)
 
-lgLookupBlob :: Git.MonadGit m => BlobOid m
+lgLookupBlob :: MonadLg m => BlobOid m
              -> LgRepository m (Git.Blob (LgRepository m))
 lgLookupBlob oid =
     lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
@@ -265,7 +276,7 @@ lgLookupBlob oid =
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
-lgTreeEntry :: Git.MonadGit m => Tree m -> Git.TreeFilePath
+lgTreeEntry :: MonadLg m => Tree m -> Git.TreeFilePath
             -> LgRepository m (Maybe (TreeEntry m))
 lgTreeEntry (LgTree Nothing) _ = return Nothing
 lgTreeEntry (LgTree (Just tree)) fp = liftIO $ alloca $ \entryPtr ->
@@ -276,7 +287,7 @@ lgTreeEntry (LgTree (Just tree)) fp = liftIO $ alloca $ \entryPtr ->
                 then return Nothing
                 else Just <$> (entryToTreeEntry =<< peek entryPtr)
 
-lgTreeOid :: Git.MonadGit m => Tree m -> TreeOid m
+lgTreeOid :: MonadLg m => Tree m -> TreeOid m
 lgTreeOid (LgTree Nothing) =
     SU.unsafePerformIO . liftIO $
         Tagged . fromJust <$> lgParseOidIO Git.emptyTreeId 40
@@ -285,7 +296,7 @@ lgTreeOid (LgTree (Just tree)) = SU.unsafePerformIO $ liftIO $ do
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
-lgListTreeEntries :: Git.MonadGit m
+lgListTreeEntries :: MonadLg m
                   => Tree m
                   -> LgRepository m [(Git.TreeFilePath, TreeEntry m)]
 lgListTreeEntries (LgTree Nothing) = return []
@@ -308,7 +319,7 @@ lgListTreeEntries (LgTree (Just tree)) =
         seq name $ seq entry $ modifyIORef ior $ \xs -> (name,entry):xs
         return 0
 
-lgMakeBuilder :: Git.MonadGit m
+lgMakeBuilder :: MonadLg m
               => ForeignPtr C'git_treebuilder -> TreeBuilder m
 lgMakeBuilder builder = Git.TreeBuilder
     { Git.mtbBaseTreeOid    = Nothing
@@ -328,7 +339,7 @@ lgMakeBuilder builder = Git.TreeBuilder
 --
 --   Since empty trees cannot exist in Git, attempting to write out an empty
 --   tree is a no-op.
-lgNewTreeBuilder :: Git.MonadGit m
+lgNewTreeBuilder :: MonadLg m
                  => Maybe (Tree m) -> LgRepository m (TreeBuilder m)
 lgNewTreeBuilder mtree = do
     mfptr <- liftIO $ alloca $ \pptr -> do
@@ -353,11 +364,10 @@ lgNewTreeBuilder mtree = do
             return (lgMakeBuilder fptr)
                 { Git.mtbBaseTreeOid = Git.treeOid <$> mtree }
 
-lgPutEntry :: Git.MonadGit m
+lgPutEntry :: MonadLg m
            => ForeignPtr C'git_treebuilder -> Git.TreeFilePath -> TreeEntry m
            -> LgRepository m ()
 lgPutEntry builder key (treeEntryToOid -> (oid, mode)) = do
-    debug $ "lgPutEntry: oidLen = " ++ show (getOidLen oid)
     r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
         withForeignPtr builder $ \ptr ->
         withFilePath key $ \name ->
@@ -377,14 +387,14 @@ treeEntryToOid (Git.CommitEntry coid) =
 treeEntryToOid (Git.TreeEntry toid) =
     (untag toid, 0o040000)
 
-lgDropEntry :: Git.MonadGit m
+lgDropEntry :: MonadLg m
             => ForeignPtr C'git_treebuilder -> Git.TreeFilePath
             -> LgRepository m ()
 lgDropEntry builder key =
     void $ liftIO $ withForeignPtr builder $ \ptr ->
         withFilePath key $ c'git_treebuilder_remove ptr
 
-lgLookupBuilderEntry :: Git.MonadGit m
+lgLookupBuilderEntry :: MonadLg m
                      => ForeignPtr C'git_treebuilder
                      -> Git.TreeFilePath
                      -> LgRepository m (Maybe (TreeEntry m))
@@ -395,17 +405,17 @@ lgLookupBuilderEntry builderPtr name = do
         then return Nothing
         else Just <$> liftIO (entryToTreeEntry entry)
 
-lgBuilderEntryCount :: Git.MonadGit m
+lgBuilderEntryCount :: MonadLg m
                     => ForeignPtr C'git_treebuilder -> LgRepository m Int
 lgBuilderEntryCount tb =
     fromIntegral <$> liftIO (withForeignPtr tb c'git_treebuilder_entrycount)
 
-lgTreeEntryCount :: Git.MonadGit m => Tree m -> LgRepository m Int
+lgTreeEntryCount :: MonadLg m => Tree m -> LgRepository m Int
 lgTreeEntryCount (LgTree Nothing) = return 0
 lgTreeEntryCount (LgTree (Just tree)) =
     fromIntegral <$> liftIO (withForeignPtr tree c'git_tree_entrycount)
 
-lgWriteBuilder :: Git.MonadGit m
+lgWriteBuilder :: MonadLg m
                => ForeignPtr C'git_treebuilder
                -> LgRepository m (TreeOid m)
 lgWriteBuilder tb = do
@@ -427,7 +437,7 @@ lgWriteBuilder tb = do
                  ++ ": " ++ errStr)
     return $ Tagged (mkOid coid)
 
-lgCloneBuilder :: Git.MonadGit m
+lgCloneBuilder :: MonadLg m
                => ForeignPtr C'git_treebuilder
                -> LgRepository m (ForeignPtr C'git_treebuilder)
 lgCloneBuilder fptr =
@@ -456,7 +466,7 @@ lgCloneBuilder fptr =
             failure (Git.BackendError "Could not insert entry in treebuilder")
         return 0
 
-lgLookupTree :: Git.MonadGit m => TreeOid m -> LgRepository m (Tree m)
+lgLookupTree :: MonadLg m => TreeOid m -> LgRepository m (Tree m)
 lgLookupTree (untag -> oid)
     | show oid == unpack Git.emptyTreeId = return $ LgTree Nothing
     | otherwise = do
@@ -485,7 +495,7 @@ entryToTreeEntry entry = do
              return $ Git.CommitEntry (Tagged (mkOid oid))
            | otherwise -> error "Unexpected"
 
-lgObjToCommit :: Git.MonadGit m
+lgObjToCommit :: MonadLg m
               => CommitOid m -> Ptr C'git_commit -> IO (Commit m)
 lgObjToCommit oid c = do
     enc    <- c'git_commit_message_encoding c
@@ -520,7 +530,7 @@ lgObjToCommit oid c = do
         , Git.commitEncoding  = "utf-8"
         }
 
-lgLookupCommit :: Git.MonadGit m
+lgLookupCommit :: MonadLg m
                => CommitOid m -> LgRepository m (Commit m)
 lgLookupCommit oid =
   lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
@@ -532,7 +542,7 @@ data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
                | CommitPtr (ForeignPtr C'git_commit)
                | TagPtr (ForeignPtr C'git_tag)
 
-lgLookupObject :: Git.MonadGit m
+lgLookupObject :: MonadLg m
                => Oid -> LgRepository m (Git.Object (LgRepository m))
 lgLookupObject oid = do
     (oid', typ, fptr) <-
@@ -558,7 +568,7 @@ lgLookupObject oid = do
            | typ == c'GIT_OBJ_TAG -> error "jww (2013-07-08): NYI"
            | otherwise -> error $ "Unknown object type: " ++ show typ
 
-lgExistsObject :: Git.MonadGit m => Oid -> LgRepository m Bool
+lgExistsObject :: MonadLg m => Oid -> LgRepository m Bool
 lgExistsObject oid = do
     repo <- lgGet
     result <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
@@ -587,7 +597,7 @@ lgForEachObject odbPtr f payload =
         (flip (c'git_odb_foreach odbPtr) payload)
 
 lgSourceObjects
-    :: Git.MonadGit m
+    :: MonadLg m
     => Maybe (CommitOid m) -> CommitOid m -> Bool
     -> Source (LgRepository m) (ObjectOid m)
 lgSourceObjects mhave need alsoTrees = do
@@ -639,7 +649,7 @@ lgSourceObjects mhave need alsoTrees = do
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-lgCreateCommit :: Git.MonadGit m
+lgCreateCommit :: MonadLg m
                => [CommitOid m]
                -> TreeOid m
                -> Git.Signature
@@ -695,7 +705,7 @@ withForeignPtrs fos io = do
     mapM_ touchForeignPtr fos
     return r
 
-lgLookupRef :: Git.MonadGit m
+lgLookupRef :: MonadLg m
             => Git.RefName -> LgRepository m (Maybe (RefTarget m))
 lgLookupRef name = do
     repo <- lgGet
@@ -718,7 +728,7 @@ lgLookupRef name = do
             c'git_reference_free ref
             return (Just targ)
 
-lgUpdateRef :: Git.MonadGit m
+lgUpdateRef :: MonadLg m
             => Git.RefName -> Git.RefTarget (LgRepository m)
             -> LgRepository m ()
 lgUpdateRef name refTarg = do
@@ -747,7 +757,7 @@ lgUpdateRef name refTarg = do
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
 
-lgResolveRef :: Git.MonadGit m
+lgResolveRef :: MonadLg m
              => Git.RefName -> LgRepository m (Maybe (CommitOid m))
 lgResolveRef name = do
     repo <- lgGet
@@ -765,7 +775,7 @@ lgResolveRef name = do
 
 --renameRef = c'git_reference_rename
 
-lgDeleteRef :: Git.MonadGit m => Git.RefName -> LgRepository m ()
+lgDeleteRef :: MonadLg m => Git.RefName -> LgRepository m ()
 lgDeleteRef name = do
     repo <- lgGet
     r <- liftIO $ alloca $ \ptr ->
@@ -833,7 +843,7 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
                  + (if listFlagPacked flags   then 4 else 0)
                  + (if listFlagHasPeel flags  then 8 else 0)
 
-listRefNames :: Git.MonadGit m => ListFlags -> LgRepository m [Git.RefName]
+listRefNames :: MonadLg m => ListFlags -> LgRepository m [Git.RefName]
 listRefNames flags = do
     repo <- lgGet
     refs <- liftIO $ alloca $ \c'refs ->
@@ -846,7 +856,7 @@ listRefNames flags = do
                     return (Just refs)
     maybe (failure Git.ReferenceListingFailed) return refs
 
-lgListRefs :: Git.MonadGit m => LgRepository m [Git.RefName]
+lgListRefs :: MonadLg m => LgRepository m [Git.RefName]
 lgListRefs = listRefNames allRefsFlag
 
 -- foreachRefCallback :: CString -> Ptr () -> IO CInt
@@ -901,7 +911,7 @@ lgListRefs = listRefNames allRefsFlag
 checkResult :: (Eq a, Num a, Failure Git.GitException m) => a -> Text -> m ()
 checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
 
-lgBuildPackFile :: Git.MonadGit m
+lgBuildPackFile :: MonadLg m
                 => FilePath -> [Either (CommitOid m) (TreeOid m)]
                 -> LgRepository m FilePath
 lgBuildPackFile dir oids = do
@@ -952,21 +962,24 @@ lgBuildPackFile dir oids = do
             r <- f oidPtr
             checkResult r msg
 
-lgBuildPackIndexWrapper :: Git.MonadGit m
+lift_ :: (Monad m, Functor (t m), MonadTrans t) => m a -> t m ()
+lift_ = void . lift
+
+lgBuildPackIndexWrapper :: MonadLg m
                         => FilePath
                         -> B.ByteString
                         -> LgRepository m (Text, FilePath, FilePath)
-lgBuildPackIndexWrapper = (liftIO .) . lgBuildPackIndex
+lgBuildPackIndexWrapper = (lift .) . lgBuildPackIndex
 
-lgBuildPackIndex :: FilePath -> B.ByteString -> IO (Text, FilePath, FilePath)
+lgBuildPackIndex :: (MonadLg m, MonadLogger m)
+                 => FilePath -> B.ByteString -> m (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
-    (,,) <$> pure sha
-         <*> pure (dir </> ("pack-" <> unpack sha <> ".pack"))
-         <*> pure (dir </> ("pack-" <> unpack sha <> ".idx"))
+    return (sha, dir </> ("pack-" <> unpack sha <> ".pack"),
+                 dir </> ("pack-" <> unpack sha <> ".idx"))
   where
-    go dir bytes = alloca $ \idxPtrPtr -> runResourceT $ do
-        debug "Allocate a new indexer stream"
+    go dir bytes = control $ \run -> alloca $ \idxPtrPtr -> runResourceT $ do
+        lift_ . run $ lgDebug "Allocate a new indexer stream"
         (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
             withCString dir $ \dirStr -> do
                 r <- c'git_indexer_stream_new idxPtrPtr dirStr
@@ -974,8 +987,9 @@ lgBuildPackIndex dir bytes = do
                 checkResult r "c'git_indexer_stream_new failed"
                 peek idxPtrPtr
 
-        debug $ "Add the incoming packfile data to the stream ("
-            ++ show (B.length bytes) ++ " bytes)"
+        lift_ . run $
+            lgDebug $ "Add the incoming packfile data to the stream ("
+                 ++ show (B.length bytes) ++ " bytes)"
         (_,statsPtr) <- allocate calloc free
         liftIO $ BU.unsafeUseAsCStringLen bytes $
             uncurry $ \dataPtr dataLen -> do
@@ -983,14 +997,16 @@ lgBuildPackIndex dir bytes = do
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_indexer_stream_add failed"
 
-        debug "Finalizing the stream"
+        lift_ . run $ lgDebug "Finalizing the stream"
         r <- liftIO $ c'git_indexer_stream_finalize idxPtr statsPtr
         checkResult r "c'git_indexer_stream_finalize failed"
 
-        debug "Discovering the hash used to identify the pack file"
+        lift_ . run $
+            lgDebug "Discovering the hash used to identify the pack file"
         sha <- liftIO $ oidToSha =<< c'git_indexer_stream_hash idxPtr
-        debug $ "The hash used is: " ++ show (Git.shaToText sha)
-        return (Git.shaToText sha)
+        lift_ . run $ lgDebug $ "The hash used is: " ++ show (Git.shaToText sha)
+
+        lift . run $ return (Git.shaToText sha)
 
 oidToSha :: Ptr C'git_oid -> IO Git.SHA
 oidToSha oidPtr =
@@ -1004,7 +1020,7 @@ shaToOid (Git.SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
         c'git_oid_fromraw ptr' (castPtr bytes)
         return ptr
 
-lgCopyPackFile :: Git.MonadGit m => FilePath -> LgRepository m ()
+lgCopyPackFile :: MonadLg m => FilePath -> LgRepository m ()
 lgCopyPackFile packFile = do
     -- jww (2013-04-23): This would be much more efficient (we already have
     -- the pack file on disk, why not just copy it?), but we have no way at
@@ -1022,20 +1038,21 @@ lgCopyPackFile packFile = do
     -- anything about the S3 backend.  As far as Libgit2 is concerned, the S3
     -- backend is just a black box with no special properties.
     repo <- lgGet
-    liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
+    control $ \run -> withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \odbPtrPtr ->
         alloca $ \statsPtr ->
-        alloca $ \writepackPtrPtr ->
-            runResourceT $ go repoPtr odbPtrPtr writepackPtrPtr statsPtr
+        alloca $ \writepackPtrPtr -> do
+            runResourceT $ go run repoPtr odbPtrPtr writepackPtrPtr statsPtr
+            run $ return ()
   where
-    go repoPtr odbPtrPtr writepackPtrPtr statsPtr = do
-        debug "Obtaining odb for repository"
+    go run repoPtr odbPtrPtr writepackPtrPtr statsPtr = do
+        lift_ . run $ lgDebug "Obtaining odb for repository"
         (_,odbPtr) <- flip allocate c'git_odb_free $ do
             r <- c'git_repository_odb odbPtrPtr repoPtr
             checkResult r "c'git_repository_odb failed"
             peek odbPtrPtr
 
-        debug "Opening pack writer into odb"
+        lift_ . run $ lgDebug "Opening pack writer into odb"
         (_,writepackPtr) <- allocate
             (do r <- c'git_odb_write_pack writepackPtrPtr odbPtr
                          nullFunPtr nullPtr
@@ -1048,8 +1065,10 @@ lgCopyPackFile packFile = do
         writepack <- liftIO $ peek writepackPtr
 
         bs <- liftIO $ B.readFile packFile
-        debug $ "Writing pack file " ++ show packFile ++ " into odb"
-        debug $ "Writing " ++ show (B.length bs) ++ " pack bytes into odb"
+        lift_ . run $
+            lgDebug $ "Writing pack file " ++ show packFile ++ " into odb"
+        lift_ . run $
+            lgDebug $ "Writing " ++ show (B.length bs) ++ " pack bytes into odb"
         liftIO $ BU.unsafeUseAsCStringLen bs $
             uncurry $ \dataPtr dataLen -> do
                 r <- mK'git_odb_writepack_add_callback
@@ -1058,24 +1077,26 @@ lgCopyPackFile packFile = do
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_odb_writepack'add failed"
 
-        debug "Committing pack into odb"
+        lift_ . run $ lgDebug "Committing pack into odb"
         r <- liftIO $ mK'git_odb_writepack_commit_callback
                  (c'git_odb_writepack'commit writepack) writepackPtr
                  statsPtr
         checkResult r "c'git_odb_writepack'commit failed"
 
-lgLoadPackFileInMemory :: FilePath
+lgLoadPackFileInMemory :: (MonadLg m, MonadUnsafeIO m, MonadThrow m,
+                           MonadLogger m)
+                       => FilePath
                        -> Ptr (Ptr C'git_odb_backend)
                        -> Ptr (Ptr C'git_odb)
-                       -> ResourceT IO (Ptr C'git_odb)
+                       -> ResourceT m (Ptr C'git_odb)
 lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
-    debug "Creating temporary, in-memory object database"
+    lgDebug "Creating temporary, in-memory object database"
     (freeKey,odbPtr) <- flip allocate c'git_odb_free $ do
         r <- c'git_odb_new odbPtrPtr
         checkResult r "c'git_odb_new failed"
         peek odbPtrPtr
 
-    debug $ "Load pack index " ++ show idxPath ++ " into temporary odb"
+    lgDebug $ "Load pack index " ++ show idxPath ++ " into temporary odb"
     (_,backendPtr) <- allocate
         (do r <- withCString idxPath $ \idxPathStr ->
                 c'git_odb_backend_one_pack backendPtrPtr idxPathStr
@@ -1092,28 +1113,32 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 
     -- Associate the new backend containing our single index file with the
     -- in-memory object database
-    debug "Associate odb with backend"
+    lgDebug "Associate odb with backend"
     r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
     checkResult r "c'git_odb_add_backend failed"
 
     return odbPtr
 
-lgWithPackFile :: FilePath -> (Ptr C'git_odb -> ResourceT IO a) -> IO a
-lgWithPackFile idxPath f = alloca $ \odbPtrPtr ->
-    alloca $ \backendPtrPtr -> runResourceT $ do
-        debug "Load pack file into an in-memory object database"
+lgWithPackFile :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
+               => FilePath -> (Ptr C'git_odb -> ResourceT m a) -> m a
+lgWithPackFile idxPath f = control $ \run ->
+    alloca $ \odbPtrPtr ->
+    alloca $ \backendPtrPtr -> run $ runResourceT $ do
+        lift $ lgDebug "Load pack file into an in-memory object database"
         odbPtr <- lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
-        debug "Calling function using in-memory odb"
+        lift $ lgDebug "Calling function using in-memory odb"
         f odbPtr
 
-lgReadFromPack :: FilePath -> Git.SHA -> Bool
-               -> IO (Maybe (C'git_otype, CSize, B.ByteString))
-lgReadFromPack idxPath sha metadataOnly = alloca $ \objectPtrPtr ->
-    lgWithPackFile idxPath $ \odbPtr -> do
-        foid <- liftIO $ shaToOid sha
-        if metadataOnly
-            then readMetadata odbPtr foid
-            else readObject odbPtr foid objectPtrPtr
+lgReadFromPack :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
+               => FilePath -> Git.SHA -> Bool
+               -> m (Maybe (C'git_otype, CSize, B.ByteString))
+lgReadFromPack idxPath sha metadataOnly =
+    control $ \run -> alloca $ \objectPtrPtr ->
+        run $ lgWithPackFile idxPath $ \odbPtr -> do
+            foid <- liftIO $ shaToOid sha
+            if metadataOnly
+                then readMetadata odbPtr foid
+                else readObject odbPtr foid objectPtrPtr
   where
     readMetadata odbPtr foid =
         liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
@@ -1149,7 +1174,7 @@ lgReadFromPack idxPath sha metadataOnly = alloca $ \objectPtrPtr ->
                          (fromIntegral len)
             return (typ,len,bytes)
 
-lgRemoteFetch :: Git.MonadGit m => Text -> Text -> LgRepository m ()
+lgRemoteFetch :: MonadLg m => Text -> Text -> LgRepository m ()
 lgRemoteFetch uri fetchSpec = do
     xferRepo <- lgGet
     liftIO $ withForeignPtr (repoObj xferRepo) $ \repoPtr ->
@@ -1171,19 +1196,33 @@ lgRemoteFetch uri fetchSpec = do
         r2 <- liftIO $ c'git_remote_download remotePtr nullFunPtr nullPtr
         checkResult r2 "c'git_remote_download failed"
 
-lgFactory :: Git.MonadGit m
-          => Git.RepositoryFactory LgRepository m Repository
+lgFactory :: MonadIO m
+          => Git.RepositoryFactory
+              (LgRepository (NoLoggingT m)) m Repository
 lgFactory = Git.RepositoryFactory
-    { Git.openRepository  = openLgRepository
-    , Git.runRepository   = runLgRepository
-    , Git.closeRepository = closeLgRepository
-    , Git.getRepository   = lgGet
-    , Git.defaultOptions  = defaultLgOptions
-    , Git.startupBackend  = startupLgBackend
-    , Git.shutdownBackend = shutdownLgBackend
+    { Git.openRepository   = runNoLoggingT . openLgRepository
+    , Git.runRepository    = \c m ->
+        runNoLoggingT $ runLgRepository c m
+    , Git.closeRepository  = runNoLoggingT . closeLgRepository
+    , Git.getRepository    = hoist NoLoggingT lgGet
+    , Git.defaultOptions   = defaultLgOptions
+    , Git.startupBackend   = runNoLoggingT startupLgBackend
+    , Git.shutdownBackend  = runNoLoggingT shutdownLgBackend
     }
 
-openLgRepository :: Git.MonadGit m => Git.RepositoryOptions -> m Repository
+lgFactoryLogger :: (MonadIO m, MonadLogger m)
+                => Git.RepositoryFactory (LgRepository m) m Repository
+lgFactoryLogger = Git.RepositoryFactory
+    { Git.openRepository   = openLgRepository
+    , Git.runRepository    = runLgRepository
+    , Git.closeRepository  = closeLgRepository
+    , Git.getRepository    = lgGet
+    , Git.defaultOptions   = defaultLgOptions
+    , Git.startupBackend   = startupLgBackend
+    , Git.shutdownBackend  = shutdownLgBackend
+    }
+
+openLgRepository :: MonadIO m => Git.RepositoryOptions -> m Repository
 openLgRepository opts = do
     startupLgBackend
     let path = Git.repoPath opts
@@ -1213,7 +1252,7 @@ runLgRepository repo action = do
     startupLgBackend
     runReaderT (lgRepositoryReaderT action) repo
 
-closeLgRepository :: Git.MonadGit m => Repository -> m ()
+closeLgRepository :: Monad m => Repository -> m ()
 closeLgRepository = const (return ())
 
 defaultLgOptions :: Git.RepositoryOptions
