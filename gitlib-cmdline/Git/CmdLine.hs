@@ -107,8 +107,8 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     lookupCommit     = cliLookupCommit
     lookupTree       = cliLookupTree
     lookupBlob       = cliLookupBlob
-    lookupTag        = error "Not defined CmdLineRepository.cliLookupTag"
-    lookupObject     = error "Not defined CmdLineRepository.cliLookupObject"
+    lookupTag        = error "Not defined cliLookupTag"
+    lookupObject     = error "Not defined cliLookupObject"
     existsObject     = cliExistsObject
     sourceObjects    = cliSourceObjects
     newTreeBuilder   = Pure.newPureTreeBuilder cliReadTree cliWriteTree
@@ -125,6 +125,8 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
     deleteRepository =
         cliGet >>= liftIO
             . removeDirectoryRecursive . Git.repoPath . repoOptions
+
+    diffContentsWithTree = error "Not defined cliDiffContentsWithTree"
 
 mkOid :: Git.MonadGit m
       => forall o. TL.Text -> CmdLineRepository m (Tagged o Git.SHA)
@@ -383,7 +385,7 @@ cliExistsObject (Git.shaToText -> sha) = do
 
 cliSourceObjects :: Git.MonadGit m
                  => Maybe (CommitOid m) -> CommitOid m -> Bool
-                 -> Source (CmdLineRepository m) (ObjectOid m)
+                 -> Producer (CmdLineRepository m) (ObjectOid m)
 cliSourceObjects mhave need alsoTrees = do
     shas <- lift $ doRunGit run
             ([ "--no-pager", "log", "--format=%H %T" ]

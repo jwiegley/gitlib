@@ -6,7 +6,6 @@ import           Control.Failure
 import           Control.Monad.IO.Class
 import qualified Data.Binary as Bin
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Base16 as B16
 import           Data.Conduit
 import           Data.Default
@@ -22,7 +21,7 @@ import           Data.Time
 import           Data.Typeable
 --import           System.Posix.ByteString.FilePath
 
-type RawFilePath = B.ByteString
+type RawFilePath = ByteString
 
 data RepositoryFacts = RepositoryFacts
     { hasSymbolicReferences :: !Bool
@@ -66,7 +65,7 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     sourceObjects :: Maybe (CommitOid m)    -- ^ A commit we may already have
                   -> CommitOid m            -- ^ The commit we need
                   -> Bool                   -- ^ Include commit trees also?
-                  -> Source m (ObjectOid m) -- ^ All the objects in between
+                  -> Producer m (ObjectOid m) -- ^ All the objects in between
 
     -- Working with trees
     newTreeBuilder :: Maybe (Tree m) -> m (TreeBuilder m)
@@ -74,6 +73,9 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     treeOid   :: Tree m -> TreeOid m
     treeEntry :: Tree m -> TreeFilePath -> m (Maybe (TreeEntry m))
     listTreeEntries :: Tree m -> m [(TreeFilePath, TreeEntry m)]
+
+    diffContentsWithTree :: Source m (Either TreeFilePath ByteString)
+                         -> Tree m -> Producer m ByteString
 
     -- Creating other objects
     hashContents :: BlobContents m -> m (BlobOid m)
@@ -143,7 +145,7 @@ parseObjOid sha = Tagged <$> parseOid sha
 copyOid :: (Repository m, Repository n) => Oid m -> n (Oid n)
 copyOid = parseOid . renderOid
 
-newtype SHA = SHA { getSHA :: B.ByteString } deriving (Eq, Ord, Read)
+newtype SHA = SHA { getSHA :: ByteString } deriving (Eq, Ord, Read)
 
 shaToText :: SHA -> Text
 shaToText (SHA bs) = T.decodeUtf8 (B16.encode bs)
@@ -389,42 +391,48 @@ instance Repository m => Show (MergeResult m) where
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
-data GitException = BackendError Text
-                  | GitError Text
-                  | RepositoryNotExist
-                  | RepositoryInvalid
-                  | RepositoryCannotAccess Text
-                  | BlobCreateFailed
-                  | BlobEmptyCreateFailed
-                  | BlobEncodingUnknown Text
-                  | BlobLookupFailed
-                  | PushNotFastForward Text
-                  | TranslationException Text
-                  | TreeCreateFailed Text
-                  | TreeBuilderCreateFailed
-                  | TreeBuilderInsertFailed TreeFilePath
-                  | TreeBuilderRemoveFailed TreeFilePath
-                  | TreeBuilderWriteFailed Text
-                  | TreeLookupFailed
-                  | TreeCannotTraverseBlob
-                  | TreeCannotTraverseCommit
-                  | TreeEntryLookupFailed TreeFilePath
-                  | TreeUpdateFailed
-                  | TreeWalkFailed
-                  | TreeEmptyCreateFailed
-                  | CommitCreateFailed
-                  | CommitLookupFailed Text
-                  | ReferenceCreateFailed RefName
-                  | ReferenceDeleteFailed RefName
-                  | RefCannotCreateFromPartialOid
-                  | ReferenceListingFailed
-                  | ReferenceLookupFailed RefName
-                  | ObjectLookupFailed Text Int
-                  | ObjectRefRequiresFullOid
-                  | OidCopyFailed
-                  | OidParseFailed Text
-                  | QuotaHardLimitExceeded Int Int
-                  deriving (Eq, Show, Typeable)
+data GitException
+    = BackendError Text
+    | GitError Text
+    | RepositoryNotExist
+    | RepositoryInvalid
+    | RepositoryCannotAccess Text
+    | BlobCreateFailed
+    | BlobEmptyCreateFailed
+    | BlobEncodingUnknown Text
+    | BlobLookupFailed
+    | DiffBlobFailed Text
+    | DiffPrintToPatchFailed Text
+    | DiffTreeToIndexFailed Text
+    | IndexAddFailed TreeFilePath Text
+    | IndexCreateFailed Text
+    | PushNotFastForward Text
+    | TranslationException Text
+    | TreeCreateFailed Text
+    | TreeBuilderCreateFailed
+    | TreeBuilderInsertFailed TreeFilePath
+    | TreeBuilderRemoveFailed TreeFilePath
+    | TreeBuilderWriteFailed Text
+    | TreeLookupFailed
+    | TreeCannotTraverseBlob
+    | TreeCannotTraverseCommit
+    | TreeEntryLookupFailed TreeFilePath
+    | TreeUpdateFailed
+    | TreeWalkFailed
+    | TreeEmptyCreateFailed
+    | CommitCreateFailed
+    | CommitLookupFailed Text
+    | ReferenceCreateFailed RefName
+    | ReferenceDeleteFailed RefName
+    | RefCannotCreateFromPartialOid
+    | ReferenceListingFailed
+    | ReferenceLookupFailed RefName
+    | ObjectLookupFailed Text Int
+    | ObjectRefRequiresFullOid
+    | OidCopyFailed
+    | OidParseFailed Text
+    | QuotaHardLimitExceeded Int Int
+    deriving (Eq, Show, Typeable)
 
 -- jww (2013-02-11): Create a BackendException data constructor of forall
 -- e. Exception e => BackendException e, so that each can throw a derived

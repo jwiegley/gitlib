@@ -4,6 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -54,10 +55,11 @@ module Git.Libgit2
 
 import           Bindings.Libgit2
 import           Control.Applicative
-import           Control.Exception
-import qualified Control.Exception.Lifted as Exc
+import           Control.Concurrent.Async.Lifted
+import           Control.Concurrent.STM
+import           Control.Exception.Lifted
 import           Control.Failure
-import           Control.Monad hiding (forM, mapM, sequence)
+import           Control.Monad hiding (forM, forM_, mapM, mapM_, sequence)
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Loops
@@ -65,12 +67,15 @@ import           Control.Monad.Morph hiding (embed)
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
-import           Data.Bits ((.|.))
+import           Data.Bits ((.|.), (.&.))
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
+import           Data.Foldable
 import           Data.IORef
 import           Data.List as L
+import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
@@ -95,7 +100,7 @@ import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 import           Language.Haskell.TH.Syntax (Loc(..))
 
-import           Prelude hiding (mapM, sequence)
+import           Prelude hiding (mapM, mapM_, sequence, catch)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
@@ -204,6 +209,8 @@ instance MonadLg m => Git.Repository (LgRepository m) where
 
     deleteRepository = lgGet >>= liftIO . removeDirectoryRecursive . repoPath
 
+    diffContentsWithTree = lgDiffContentsWithTree
+
     -- buildPackFile   = lgBuildPackFile
     -- buildPackIndex  = lgBuildPackIndexWrapper
     -- writePackFile   = lgWrap . lgWritePackFile
@@ -212,7 +219,7 @@ instance MonadLg m => Git.Repository (LgRepository m) where
 
 lgWrap :: (MonadIO m, MonadBaseControl IO m)
        => LgRepository m a -> LgRepository m a
-lgWrap f = f `Exc.catch` \e -> do
+lgWrap f = f `catch` \e -> do
     etrap <- lgExcTrap
     mexc  <- liftIO $ readIORef etrap
     liftIO $ writeIORef etrap Nothing
@@ -270,7 +277,7 @@ lgObjToBlob oid ptr = do
 lgLookupBlob :: MonadLg m => BlobOid m
              -> LgRepository m (Git.Blob (LgRepository m))
 lgLookupBlob oid =
-    lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
+    lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
         c'git_blob_lookup c'git_blob_lookup_prefix
         $ \boid obj _ -> withForeignPtr obj $ lgObjToBlob (Tagged (mkOid boid))
 
@@ -427,14 +434,7 @@ lgWriteBuilder tb = do
             withForeignPtr (repoObj repo) $ \repoPtr -> do
                 r3 <- c'git_treebuilder_write coid' repoPtr builder
                 return (r3,coid)
-    when (r3 < 0) $ do
-        errStr <- liftIO $ do
-            errPtr <- c'giterr_last
-            err    <- peek errPtr
-            peekCString (c'git_error'message err)
-        failure (Git.TreeBuilderWriteFailed $ pack $
-                 "c'git_treebuilder_write failed with " ++ show r3
-                 ++ ": " ++ errStr)
+    when (r3 < 0) $ lgThrow Git.TreeBuilderWriteFailed
     return $ Tagged (mkOid coid)
 
 lgCloneBuilder :: MonadLg m
@@ -533,7 +533,7 @@ lgObjToCommit oid c = do
 lgLookupCommit :: MonadLg m
                => CommitOid m -> LgRepository m (Commit m)
 lgLookupCommit oid =
-  lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
+  lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
       c'git_commit_lookup c'git_commit_lookup_prefix
       $ \coid obj _ -> withForeignPtr obj $ lgObjToCommit (Tagged (mkOid coid))
 
@@ -599,7 +599,7 @@ lgForEachObject odbPtr f payload =
 lgSourceObjects
     :: MonadLg m
     => Maybe (CommitOid m) -> CommitOid m -> Bool
-    -> Source (LgRepository m) (ObjectOid m)
+    -> Producer (LgRepository m) (ObjectOid m)
 lgSourceObjects mhave need alsoTrees = do
     repo   <- lift lgGet
     walker <- liftIO $ alloca $ \pptr -> do
@@ -746,13 +746,7 @@ lgUpdateRef name refTarg = do
                     withCString (unpack symName) $ \symPtr ->
                         c'git_reference_symbolic_create ptr repoPtr namePtr
                                                         symPtr (fromBool True)
-    when (r < 0) $ do
-        errStr <- liftIO $ do
-            errPtr <- c'giterr_last
-            err    <- peek errPtr
-            peekCString (c'git_error'message err)
-        failure (Git.ReferenceCreateFailed $ name <> " => "
-                 <> pack (show refTarg) <> ": " <> pack errStr)
+    when (r < 0) $ lgThrow Git.ReferenceCreateFailed
 
 -- int git_reference_name_to_oid(git_oid *out, git_repository *repo,
 --   const char *name)
@@ -908,6 +902,200 @@ lgListRefs = listRefNames allRefsFlag
 
 --compareRef = c'git_reference_cmp
 
+-- | Gather output values asynchronously from an action in the base monad and
+--   then yield them downstream.  This provides a means of working around the
+--   restriction that 'ConduitM' cannot be an instance of 'MonadBaseControl'
+--   in order to, for example, yield values from within a Haskell callback
+--   function called from a C library.
+gatherFrom :: (MonadIO m, MonadBaseControl IO m)
+           => Int                -- ^ Size of the queue to create
+           -> (TBQueue o -> m ()) -- ^ Action that generates output values
+           -> Producer m o
+gatherFrom size scatter = do
+    chan   <- liftIO $ newTBQueueIO size
+    worker <- lift $ async (scatter chan)
+    lift . restoreM =<< gather worker chan
+  where
+    gather worker chan = do
+        (xs, mres) <- liftIO $ atomically $ do
+            xs <- whileM (not <$> isEmptyTBQueue chan) (readTBQueue chan)
+            (xs,) <$> pollSTM worker
+        mapM_ yield xs
+        case mres of
+            Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
+            Just (Right r) -> return r
+            Nothing        -> gather worker chan
+lgThrow :: (MonadIO m, Failure e m) => (Text -> e) -> m ()
+lgThrow f = do
+    errStr <- liftIO $ do
+        errPtr <- c'giterr_last
+        if errPtr == nullPtr
+            then return ""
+            else do
+                err <- peek errPtr
+                peekCString (c'git_error'message err)
+    failure (f (pack errStr))
+
+lgDiffContentsWithTree
+    :: MonadLg m
+    => Source (LgRepository m) (Either Git.TreeFilePath ByteString)
+    -> Tree m
+    -> Producer (LgRepository m) ByteString
+lgDiffContentsWithTree _contents (LgTree Nothing) =
+    liftIO $ throwIO $
+        Git.DiffTreeToIndexFailed "Cannot diff against an empty tree"
+
+lgDiffContentsWithTree contents tree = do
+    repo <- lift lgGet
+    gatherFrom 16 $ generateDiff repo
+  where
+    generateDiff repo chan = do
+        entries   <- M.fromList <$> lgListTreeEntries tree
+        paths     <- liftIO $ newIORef []
+        (src, ()) <- contents $$+ return ()
+
+        handleEntries entries paths src
+        contentsPaths <- liftIO $ readIORef paths
+
+        forM_ (sort (M.keys entries) \\ sort contentsPaths) $ \path ->
+            -- File was removed
+            case entries M.! path of
+                Git.BlobEntry oid _   -> do
+                    let boid = getOid (untag oid)
+                    diffBlob path Nothing (Just boid)
+
+                -- jww (2013-11-24): NYI
+                Git.CommitEntry _coid -> return ()
+                Git.TreeEntry _toid   -> return ()
+      where
+        handleEntries entries paths src = do
+            (src', mres) <- src $$++ do
+                mpath <- await
+                case mpath of
+                    Nothing   -> return Nothing
+                    Just path -> Just <$> handlePath path
+            case mres of
+                Nothing -> return ()
+                Just (path, content) -> do
+                    liftIO $ modifyIORef paths (path:)
+                    case M.lookup path entries of
+                        Nothing ->
+                            -- File is newly added
+                            diffBlob path (Just content) Nothing
+
+                        Just entry -> case entry of
+                            -- File has been changed
+                            Git.BlobEntry oid _   -> do
+                                let boid = getOid (untag oid)
+                                diffBlob path (Just content) (Just boid)
+
+                            -- jww (2013-11-24): NYI
+                            Git.CommitEntry _coid -> return ()
+                            Git.TreeEntry _toid   -> return ()
+                    handleEntries entries paths src'
+
+        handlePath (Right _) =
+            liftIO $ throwIO $ Git.DiffTreeToIndexFailed
+                "Received a Right value when a Left RawFilePath was expected"
+        handlePath (Left path) = do
+            mcontent <- await
+            case mcontent of
+                Nothing ->
+                    liftIO $ throwIO $ Git.DiffTreeToIndexFailed $
+                        "Content not provided for " <> T.pack (show path)
+                Just x -> handleContent path x
+
+        handleContent _path (Left _) =
+            liftIO $ throwIO $ Git.DiffTreeToIndexFailed
+                "Received a Left value when a Right ByteString was expected"
+        handleContent path (Right content) = return (path, content)
+
+        diffBlob path mcontent mboid = do
+            r <- liftIO $ runResourceT $ case mboid of
+                Nothing   -> go nullPtr
+                Just boid -> withBlob boid
+            when (r < 0) $ lgThrow Git.DiffBlobFailed
+          where
+            withBlob boid = do
+                (_, eblobp) <- flip allocate freeBlob $
+                    alloca $ \blobpp ->
+                    withForeignPtr boid $ \boidPtr ->
+                    withForeignPtr (repoObj repo) $ \repoPtr -> do
+                        r <- c'git_blob_lookup blobpp repoPtr boidPtr
+                        if r < 0
+                            then return $ Left r
+                            else Right <$> peek blobpp
+                case eblobp of
+                    Left r      -> return r
+                    Right blobp -> go blobp
+              where
+                freeBlob (Left _)      = return ()
+                freeBlob (Right blobp) = c'git_blob_free blobp
+
+            go blobp = do
+                let f x = allocate x freeHaskellFunPtr
+                (_, file_cb')  <- f $ mk'git_diff_file_cb file_cb
+                (_, hunk_cb')  <- f $ mk'git_diff_hunk_cb hunk_cb
+                (_, print_cb') <- f $ mk'git_diff_data_cb print_cb
+
+                let diff s l =
+                        c'git_diff_blob_to_buffer blobp s (fromIntegral l)
+                            nullPtr file_cb' hunk_cb' print_cb' nullPtr
+                liftIO $ case mcontent of
+                    Nothing -> diff nullPtr 0
+                    Just c  -> BU.unsafeUseAsCStringLen c $ uncurry diff
+
+            isBinary delta =
+                c'git_diff_delta'flags delta .&. c'GIT_DIFF_FLAG_BINARY /= 0
+
+            deltaFileName = fmap (T.encodeUtf8 . T.pack) . peekCString
+                                . c'git_diff_file'path
+
+            file_cb :: Ptr C'git_diff_delta
+                    -> CFloat
+                    -> Ptr ()
+                    -> IO CInt
+            file_cb deltap _progress _payload = do
+                delta <- peek deltap
+                atomically $
+                    if isBinary delta
+                    then writeTBQueue chan $
+                        "Binary files a/" <> path
+                            <> " and b/" <> path <> " differ\n"
+                    else do
+                        writeTBQueue chan $ "--- a/" <> path <> "\n"
+                        writeTBQueue chan $ "+++ b/" <> path <> "\n"
+                return 0
+
+            hunk_cb :: Ptr C'git_diff_delta
+                    -> Ptr C'git_diff_range
+                    -> CString
+                    -> CSize
+                    -> Ptr ()
+                    -> IO CInt
+            hunk_cb deltap _rangep header headerLen _payload = do
+                delta <- peek deltap
+                unless (isBinary delta) $ do
+                    bs <- curry B.packCStringLen header (fromIntegral headerLen)
+                    atomically $ writeTBQueue chan bs
+                return 0
+
+            print_cb :: Ptr C'git_diff_delta
+                     -> Ptr C'git_diff_range
+                     -> CChar
+                     -> CString
+                     -> CSize
+                     -> Ptr ()
+                     -> IO CInt
+            print_cb deltap _range lineOrigin content contentLen _payload = do
+                delta <- peek deltap
+                unless (isBinary delta) $ do
+                    bs <- curry B.packCStringLen content
+                        (fromIntegral contentLen)
+                    atomically $ writeTBQueue chan $
+                        B.cons (fromIntegral lineOrigin) bs
+                return 0
+
 checkResult :: (Eq a, Num a, Failure Git.GitException m) => a -> Text -> m ()
 checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
 
@@ -967,12 +1155,12 @@ lift_ = void . lift
 
 lgBuildPackIndexWrapper :: MonadLg m
                         => FilePath
-                        -> B.ByteString
+                        -> ByteString
                         -> LgRepository m (Text, FilePath, FilePath)
 lgBuildPackIndexWrapper = (lift .) . lgBuildPackIndex
 
 lgBuildPackIndex :: (MonadLg m, MonadLogger m)
-                 => FilePath -> B.ByteString -> m (Text, FilePath, FilePath)
+                 => FilePath -> ByteString -> m (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
     return (sha, dir </> ("pack-" <> unpack sha <> ".pack"),
@@ -1131,7 +1319,7 @@ lgWithPackFile idxPath f = control $ \run ->
 
 lgReadFromPack :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
                => FilePath -> Git.SHA -> Bool
-               -> m (Maybe (C'git_otype, CSize, B.ByteString))
+               -> m (Maybe (C'git_otype, CSize, ByteString))
 lgReadFromPack idxPath sha metadataOnly =
     control $ \run -> alloca $ \objectPtrPtr ->
         run $ lgWithPackFile idxPath $ \odbPtr -> do

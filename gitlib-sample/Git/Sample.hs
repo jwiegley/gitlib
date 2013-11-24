@@ -72,6 +72,8 @@ instance Git.MonadGit m => Git.Repository (SampleRepository m) where
     deleteRepository  = undefined
     -- remoteFetch       = undefined
 
+    diffContentsWithTree = undefined
+
 -- type TreeEntry m = Git.TreeEntry (SampleRepository m)
 
 data Repository = Repository Void
