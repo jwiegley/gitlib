@@ -75,6 +75,9 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     treeEntry :: Tree m -> TreeFilePath -> m (Maybe (TreeEntry m))
     listTreeEntries :: Tree m -> m [(TreeFilePath, TreeEntry m)]
 
+    diffContentsWithTree :: Map TreeFilePath (BlobContents m) -> Tree m
+                         -> Source m ByteString
+
     -- Creating other objects
     hashContents :: BlobContents m -> m (BlobOid m)
     createBlob   :: BlobContents m -> m (BlobOid m)
@@ -389,42 +392,48 @@ instance Repository m => Show (MergeResult m) where
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when
 --   interacting with the Git repository.
-data GitException = BackendError Text
-                  | GitError Text
-                  | RepositoryNotExist
-                  | RepositoryInvalid
-                  | RepositoryCannotAccess Text
-                  | BlobCreateFailed
-                  | BlobEmptyCreateFailed
-                  | BlobEncodingUnknown Text
-                  | BlobLookupFailed
-                  | PushNotFastForward Text
-                  | TranslationException Text
-                  | TreeCreateFailed Text
-                  | TreeBuilderCreateFailed
-                  | TreeBuilderInsertFailed TreeFilePath
-                  | TreeBuilderRemoveFailed TreeFilePath
-                  | TreeBuilderWriteFailed Text
-                  | TreeLookupFailed
-                  | TreeCannotTraverseBlob
-                  | TreeCannotTraverseCommit
-                  | TreeEntryLookupFailed TreeFilePath
-                  | TreeUpdateFailed
-                  | TreeWalkFailed
-                  | TreeEmptyCreateFailed
-                  | CommitCreateFailed
-                  | CommitLookupFailed Text
-                  | ReferenceCreateFailed RefName
-                  | ReferenceDeleteFailed RefName
-                  | RefCannotCreateFromPartialOid
-                  | ReferenceListingFailed
-                  | ReferenceLookupFailed RefName
-                  | ObjectLookupFailed Text Int
-                  | ObjectRefRequiresFullOid
-                  | OidCopyFailed
-                  | OidParseFailed Text
-                  | QuotaHardLimitExceeded Int Int
-                  deriving (Eq, Show, Typeable)
+data GitException
+    = BackendError Text
+    | GitError Text
+    | RepositoryNotExist
+    | RepositoryInvalid
+    | RepositoryCannotAccess Text
+    | BlobCreateFailed
+    | BlobEmptyCreateFailed
+    | BlobEncodingUnknown Text
+    | BlobLookupFailed
+    | DiffBlobFailed Text
+    | DiffPrintToPatchFailed Text
+    | DiffTreeToIndexFailed Text
+    | IndexAddFailed TreeFilePath Text
+    | IndexCreateFailed Text
+    | PushNotFastForward Text
+    | TranslationException Text
+    | TreeCreateFailed Text
+    | TreeBuilderCreateFailed
+    | TreeBuilderInsertFailed TreeFilePath
+    | TreeBuilderRemoveFailed TreeFilePath
+    | TreeBuilderWriteFailed Text
+    | TreeLookupFailed
+    | TreeCannotTraverseBlob
+    | TreeCannotTraverseCommit
+    | TreeEntryLookupFailed TreeFilePath
+    | TreeUpdateFailed
+    | TreeWalkFailed
+    | TreeEmptyCreateFailed
+    | CommitCreateFailed
+    | CommitLookupFailed Text
+    | ReferenceCreateFailed RefName
+    | ReferenceDeleteFailed RefName
+    | RefCannotCreateFromPartialOid
+    | ReferenceListingFailed
+    | ReferenceLookupFailed RefName
+    | ObjectLookupFailed Text Int
+    | ObjectRefRequiresFullOid
+    | OidCopyFailed
+    | OidParseFailed Text
+    | QuotaHardLimitExceeded Int Int
+    deriving (Eq, Show, Typeable)
 
 -- jww (2013-02-11): Create a BackendException data constructor of forall
 -- e. Exception e => BackendException e, so that each can throw a derived

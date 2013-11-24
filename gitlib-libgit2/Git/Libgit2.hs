@@ -54,8 +54,9 @@ module Git.Libgit2
 
 import           Bindings.Libgit2
 import           Control.Applicative
-import           Control.Exception
-import qualified Control.Exception.Lifted as Exc
+import           Control.Concurrent.Async.Lifted
+import           Control.Concurrent.STM
+import           Control.Exception.Lifted
 import           Control.Failure
 import           Control.Monad hiding (forM, mapM, sequence)
 import           Control.Monad.IO.Class
@@ -71,6 +72,8 @@ import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
 import           Data.IORef
 import           Data.List as L
+import           Data.Map (Map)
+import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
@@ -95,7 +98,7 @@ import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 import           Language.Haskell.TH.Syntax (Loc(..))
 
-import           Prelude hiding (mapM, sequence)
+import           Prelude hiding (mapM, sequence, catch)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
@@ -204,6 +207,8 @@ instance MonadLg m => Git.Repository (LgRepository m) where
 
     deleteRepository = lgGet >>= liftIO . removeDirectoryRecursive . repoPath
 
+    diffContentsWithTree = lgDiffContentsWithTree
+
     -- buildPackFile   = lgBuildPackFile
     -- buildPackIndex  = lgBuildPackIndexWrapper
     -- writePackFile   = lgWrap . lgWritePackFile
@@ -212,7 +217,7 @@ instance MonadLg m => Git.Repository (LgRepository m) where
 
 lgWrap :: (MonadIO m, MonadBaseControl IO m)
        => LgRepository m a -> LgRepository m a
-lgWrap f = f `Exc.catch` \e -> do
+lgWrap f = f `catch` \e -> do
     etrap <- lgExcTrap
     mexc  <- liftIO $ readIORef etrap
     liftIO $ writeIORef etrap Nothing
@@ -270,7 +275,7 @@ lgObjToBlob oid ptr = do
 lgLookupBlob :: MonadLg m => BlobOid m
              -> LgRepository m (Git.Blob (LgRepository m))
 lgLookupBlob oid =
-    lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
+    lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
         c'git_blob_lookup c'git_blob_lookup_prefix
         $ \boid obj _ -> withForeignPtr obj $ lgObjToBlob (Tagged (mkOid boid))
 
@@ -533,7 +538,7 @@ lgObjToCommit oid c = do
 lgLookupCommit :: MonadLg m
                => CommitOid m -> LgRepository m (Commit m)
 lgLookupCommit oid =
-  lookupObject'(getOid (untag oid)) (getOidLen (untag oid))
+  lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
       c'git_commit_lookup c'git_commit_lookup_prefix
       $ \coid obj _ -> withForeignPtr obj $ lgObjToCommit (Tagged (mkOid coid))
 
@@ -907,6 +912,129 @@ lgListRefs = listRefNames allRefsFlag
 -- int git_reference_cmp(git_reference *ref1, git_reference *ref2)
 
 --compareRef = c'git_reference_cmp
+
+lgThrow :: (MonadIO m, Failure e m) => (Text -> e) -> m b
+lgThrow f = do
+    errStr <- liftIO $ do
+        errPtr <- c'giterr_last
+        if errPtr == nullPtr
+            then return ""
+            else do
+                err <- peek errPtr
+                peekCString (c'git_error'message err)
+    failure (f (pack errStr))
+
+lgDiffContentsWithTree
+    :: MonadLg m
+    => Map Git.TreeFilePath (Git.BlobContents (LgRepository m))
+    -> Tree m
+    -> Source (LgRepository m) B.ByteString
+lgDiffContentsWithTree _contents (LgTree Nothing) =
+    liftIO $ throwIO $
+        Git.DiffTreeToIndexFailed "Cannot diff against an empty tree"
+
+lgDiffContentsWithTree contents tree = do
+    repo    <- lift lgGet
+    diffOut <- liftIO newEmptyTMVarIO
+    worker  <- lift $ async (generateDiff repo diffOut)
+    readDiff worker diffOut
+  where
+    readDiff worker diffOut = do
+        eres <- liftIO $ atomically $ do
+            mres <- pollSTM worker
+            case mres of
+                Nothing  -> Right <$> takeTMVar diffOut
+                Just res -> return $ Left res
+        case eres of
+            Left (Left e)  -> liftIO $ throwIO (e :: SomeException)
+            Left (Right _) -> return ()
+            Right s        -> yield s >> readDiff worker diffOut
+
+    generateDiff repo diffOut = do
+        entries <- M.fromList <$> lgListTreeEntries tree
+        let contentsPaths = M.keys contents
+            entriesPaths  = M.keys entries
+            diff          = diffBlob repo diffOut
+
+        forM_ (contentsPaths \\ entriesPaths) $ \path -> do -- added
+            let content = contents M.! path
+            bs <- Git.blobContentsToByteString content
+            diff path (Just bs) Nothing
+
+        forM_ (entriesPaths \\ contentsPaths) $ \path -> -- removed
+            case entries M.! path of
+                Git.BlobEntry oid _   -> do
+                    let boid = getOid (untag oid)
+                    diff path Nothing (Just boid)
+
+                Git.CommitEntry _coid -> return () -- jww (2013-11-24): NYI
+                Git.TreeEntry _toid   -> return () -- jww (2013-11-24): NYI
+
+        let f k = (k, (contents M.! k, entries M.! k))
+            entries' = map f $ entriesPaths `intersect` contentsPaths
+
+        forM_ entries' $ \(path, (content, entry)) -> case entry of
+            Git.BlobEntry oid _   -> do
+                let boid = getOid (untag oid)
+                bs <- Git.blobContentsToByteString content
+                diff path (Just bs) (Just boid)
+
+            Git.CommitEntry _coid -> return () -- jww (2013-11-24): NYI
+            Git.TreeEntry _toid   -> return () -- jww (2013-11-24): NYI
+
+    diffBlob repo diffOut path mcontent moid =
+        void $ liftBaseWith $ \run ->
+            case moid of
+                Nothing   -> go run nullPtr
+                Just boid -> withForeignPtr boid (withBlob run repo)
+      where
+        withBlob run repo boid = alloca $ \blobpp -> do
+            r <- withForeignPtr (repoObj repo) $ \repoPtr ->
+                c'git_blob_lookup blobpp repoPtr boid
+            when (r < 0) $ void $ run $ lgThrow Git.DiffBlobFailed
+            blobp <- peek blobpp
+            go run blobp
+
+        go run blobp = do
+            file_cb'  <- mk'git_diff_file_cb file_cb
+            hunk_cb'  <- mk'git_diff_hunk_cb hunk_cb
+            print_cb' <- mk'git_diff_data_cb print_cb
+
+            let diff s l = c'git_diff_blob_to_buffer blobp s (fromIntegral l)
+                    nullPtr file_cb' hunk_cb' print_cb' nullPtr
+            r <- case mcontent of
+                Nothing -> diff nullPtr 0
+                Just content -> do
+                    BU.unsafeUseAsCStringLen content $ uncurry diff
+            when (r < 0) $ void $ run $ lgThrow Git.DiffBlobFailed
+
+        file_cb :: Ptr C'git_diff_delta
+                -> CFloat
+                -> Ptr ()
+                -> IO CInt
+        file_cb _delta _progress _payload = do
+            return 0
+
+        hunk_cb :: Ptr C'git_diff_delta
+                -> Ptr C'git_diff_range
+                -> CString
+                -> CSize
+                -> Ptr ()
+                -> IO CInt
+        hunk_cb _delta _range _header _headerLen _payload = do
+            return 0
+
+        print_cb :: Ptr C'git_diff_delta
+                 -> Ptr C'git_diff_range
+                 -> CChar
+                 -> CString
+                 -> CSize
+                 -> Ptr ()
+                 -> IO CInt
+        print_cb _delta _range lineOrigin content contentLen _payload = do
+            bs <- curry B.packCStringLen content (fromIntegral contentLen)
+            atomically $ putTMVar diffOut (B.cons (fromIntegral lineOrigin) bs)
+            return 0
 
 checkResult :: (Eq a, Num a, Failure Git.GitException m) => a -> Text -> m ()
 checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
