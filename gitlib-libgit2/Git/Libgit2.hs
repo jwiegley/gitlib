@@ -44,6 +44,7 @@ module Git.Libgit2
        , lgReadFromPack
        , lgWithPackFile
        , lgCopyPackFile
+       , lgDiffContentsWithTree
        , lgWrap
        , oidToSha
        , shaToOid
@@ -209,7 +210,7 @@ instance MonadLg m => Git.Repository (LgRepository m) where
 
     deleteRepository = lgGet >>= liftIO . removeDirectoryRecursive . repoPath
 
-    diffContentsWithTree = lgDiffContentsWithTree
+    diffContentsWithTree = error "Not implemented: lgDiffContentsWithTree"
 
     -- buildPackFile   = lgBuildPackFile
     -- buildPackIndex  = lgBuildPackIndexWrapper
@@ -938,7 +939,7 @@ lgThrow f = do
 
 lgDiffContentsWithTree
     :: MonadLg m
-    => Source (LgRepository m) (Either Git.TreeFilePath ByteString)
+    => Source m (Either Git.TreeFilePath ByteString)
     -> Tree m
     -> Producer (LgRepository m) ByteString
 lgDiffContentsWithTree _contents (LgTree Nothing) =
@@ -952,7 +953,7 @@ lgDiffContentsWithTree contents tree = do
     generateDiff repo chan = do
         entries   <- M.fromList <$> lgListTreeEntries tree
         paths     <- liftIO $ newIORef []
-        (src, ()) <- contents $$+ return ()
+        (src, ()) <- lift $ contents $$+ return ()
 
         handleEntries entries paths src
         contentsPaths <- liftIO $ readIORef paths
@@ -969,7 +970,7 @@ lgDiffContentsWithTree contents tree = do
                 Git.TreeEntry _toid   -> return ()
       where
         handleEntries entries paths src = do
-            (src', mres) <- src $$++ do
+            (src', mres) <- lift $ src $$++ do
                 mpath <- await
                 case mpath of
                     Nothing   -> return Nothing

@@ -57,11 +57,11 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
 
     -- Object lookup
     lookupCommit  :: CommitOid m -> m (Commit m)
-    lookupTree    :: TreeOid m   -> m (Tree m)
-    lookupBlob    :: BlobOid m   -> m (Blob m)
-    lookupTag     :: TagOid m    -> m (Tag m)
-    lookupObject  :: Oid m       -> m (Object m)
-    existsObject  :: Oid m       -> m Bool
+    lookupTree    :: TreeOid m -> m (Tree m)
+    lookupBlob    :: BlobOid m -> m (Blob m)
+    lookupTag     :: TagOid m -> m (Tag m)
+    lookupObject  :: Oid m -> m (Object m)
+    existsObject  :: Oid m -> m Bool
     sourceObjects :: Maybe (CommitOid m)    -- ^ A commit we may already have
                   -> CommitOid m            -- ^ The commit we need
                   -> Bool                   -- ^ Include commit trees also?
