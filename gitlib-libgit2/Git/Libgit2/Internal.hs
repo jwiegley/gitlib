@@ -11,6 +11,7 @@ import           Control.Applicative
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Control
 import           Data.ByteString
 import           Data.Tagged
 import qualified Data.Text as T
@@ -63,11 +64,11 @@ lookupObject'
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CSize -> IO CInt)
-  -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> IO b)
+  -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> LgRepository m b)
   -> LgRepository m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- lgGet
-    result <- liftIO $ alloca $ \ptr -> do
+    result <- control $ \run -> alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
             withForeignPtr oid $ \oidPtr ->
                 if len == 40
@@ -79,10 +80,11 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
               let args = ["Could not lookup ", T.pack oidStr]
               err <- c'giterr_last
               if err == nullPtr
-                  then return $ Left $ T.concat args
+                  then run $ return $ Left $ T.concat args
                   else do
                       errmsg <- peekCString . c'git_error'message =<< peek err
-                      return $ Left $ T.concat $ args ++ [": ", T.pack errmsg]
+                      run $ return $ Left $
+                          T.concat $ args ++ [": ", T.pack errmsg]
             else do
               ptr'     <- peek ptr
               coid     <- c'git_object_id (castPtr ptr')
@@ -90,7 +92,7 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
               withForeignPtr coidCopy $ flip c'git_oid_cpy coid
 
               fptr <- newForeignPtr p'git_object_free (castPtr ptr')
-              Right <$> createFn coidCopy (castForeignPtr fptr) ptr'
+              run $ Right <$> createFn coidCopy (castForeignPtr fptr) ptr'
     either (failure . Git.BackendError) return result
 
 -- lgLookupObject :: Text -> LgRepository Dynamic

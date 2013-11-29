@@ -397,7 +397,7 @@ data GitException
     | RepositoryNotExist
     | RepositoryInvalid
     | RepositoryCannotAccess Text
-    | BlobCreateFailed
+    | BlobCreateFailed Text
     | BlobEmptyCreateFailed
     | BlobEncodingUnknown Text
     | BlobLookupFailed

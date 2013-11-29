@@ -25,6 +25,8 @@ Library
         , HUnit                >= 1.2.5
         , hspec                >= 1.4.4
         , hspec-expectations   >= 0.3
+        , bytestring
+        , conduit
         , monad-control        >= 0.3.1
         , tagged               >= 0.4.4
         , text                 >= 0.11.2

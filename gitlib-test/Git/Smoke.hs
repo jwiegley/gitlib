@@ -10,25 +10,27 @@
 
 module Git.Smoke where
 
-import Control.Applicative
-import Control.Exception
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Control
-import Data.List (sort)
-import Data.Monoid
-import Data.Tagged
-import Data.Text (Text)
-import Data.Time
-import Data.Time.Clock.POSIX
-import Data.Typeable
-import Git
-import Prelude hiding (putStr)
-import Test.HUnit
-import Test.Hspec (Spec, Example, describe, it)
-import Test.Hspec.Expectations
-import Test.Hspec.HUnit ()
+import           Control.Applicative
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.Conduit.Binary as CB
+import           Data.List (sort)
+import           Data.Monoid
+import           Data.Tagged
+import           Data.Text (Text)
+import           Data.Time
+import           Data.Time.Clock.POSIX
+import           Data.Typeable
+import           Git
+import           Prelude hiding (putStr)
+import           Test.HUnit
+import           Test.Hspec (Spec, Example, describe, it)
+import           Test.Hspec.Expectations
+import           Test.Hspec.HUnit ()
 
 sampleCommit :: Repository m => TreeOid m -> Signature -> m (Commit m)
 sampleCommit tr sig =
@@ -388,7 +390,9 @@ data TreeitException = TreeitException Text deriving (Eq, Show, Typeable)
 instance Exception TreeitException
 
 mkBlob :: Repository m => TreeFilePath -> TreeT m ()
-mkBlob path = putBlob path =<< lift (createBlob $ BlobString $ path <> "\n")
+mkBlob path = putBlob path
+    =<< lift (createBlob $ BlobStream $
+                  CB.sourceLbs (BL.fromChunks [path <> "\n"]))
 
 doTreeit :: (MonadBaseControl IO m, MonadIO m,
              MonadGit t, Repository t)

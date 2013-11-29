@@ -232,12 +232,11 @@ lgHashContents b = do
     ptr <- liftIO mallocForeignPtr
     r   <- Git.blobContentsToByteString b >>= \bs ->
         liftIO $ withForeignPtr ptr $ \oidPtr ->
-            BU.unsafeUseAsCStringLen bs $
-                uncurry (\cstr len ->
-                          c'git_odb_hash oidPtr (castPtr cstr)
-                                         (fromIntegral len) c'GIT_OBJ_BLOB)
-    when (r < 0) $ failure Git.BlobCreateFailed
-    return (Tagged (mkOid ptr))
+            BU.unsafeUseAsCStringLen bs $ uncurry $ \cstr len ->
+                c'git_odb_hash oidPtr (castPtr cstr) (fromIntegral len)
+                    c'GIT_OBJ_BLOB
+    when (r < 0) $ lgThrow Git.BlobCreateFailed
+    return $ Tagged (mkOid ptr)
 
 -- | Create a new blob in the 'Repository', with 'ByteString' as its contents.
 --
@@ -248,39 +247,66 @@ lgCreateBlob :: MonadLg m
              -> LgRepository m (BlobOid m)
 lgCreateBlob b = do
     repo <- lgGet
-    ptr  <- liftIO mallocForeignPtr
-    r    <- Git.blobContentsToByteString b
-            >>= \bs -> liftIO $ evaluate
-                       =<< createBlobFromByteString repo ptr bs
-    when (r < 0) $ failure Git.BlobCreateFailed
-    return (Tagged (mkOid ptr))
+    ptr  <- liftIO mallocForeignPtr -- freed automatically if GC'd
+    r <- case b of
+        Git.BlobString bs ->
+            liftIO $ withForeignPtr ptr $ \coid' ->
+            withForeignPtr (repoObj repo) $ \repoPtr ->
+            BU.unsafeUseAsCStringLen bs $ uncurry $ \cstr len ->
+                c'git_blob_create_frombuffer coid' repoPtr
+                    (castPtr cstr) (fromIntegral len)
+        Git.BlobStream src -> readFromSource repo ptr src
+        Git.BlobSizedStream src _ -> readFromSource repo ptr src
+    when (r < 0) $ lgThrow Git.BlobCreateFailed
+    return $ Tagged (mkOid ptr)
 
   where
-    createBlobFromByteString repo coid bs =
-        BU.unsafeUseAsCStringLen bs $
-            uncurry (\cstr len ->
-                      withForeignPtr coid $ \coid' ->
-                      withForeignPtr (repoObj repo) $ \repoPtr ->
-                        c'git_blob_create_frombuffer
-                          coid' repoPtr (castPtr cstr) (fromIntegral len))
+    readFromSource repo ptr src =
+        src $$ drainTo 2 $ \queue ->
+            liftIO $ withForeignPtr ptr $ \coid' ->
+            withForeignPtr (repoObj repo) $ \repoPtr ->
+            bracket
+                (mk'git_blob_chunk_cb (chunk_cb queue))
+                freeHaskellFunPtr
+                (\cb -> c'git_blob_create_fromchunks coid' repoPtr
+                            nullPtr cb nullPtr)
+
+    chunk_cb :: TBQueue (Maybe ByteString)
+             -> CString          -- ^ content
+             -> CSize            -- ^ max_length
+             -> Ptr ()           -- ^ payload
+             -> IO CInt
+    chunk_cb queue content (fromIntegral -> maxLength) _payload = do
+        (bs, len) <- atomically $ do
+            mval <- readTBQueue queue
+            let len = case mval of Nothing -> 0; Just val -> B.length val
+            case mval of
+                Nothing -> return (B.empty, 0)
+                Just val
+                    | len <= maxLength -> return (val, len)
+                    | otherwise -> do
+                        let (b, b') = B.splitAt maxLength val
+                        unGetTBQueue queue (Just b')
+                        return (b, maxLength)
+        BU.unsafeUseAsCString bs $ flip (copyBytes content) len
+        return $ fromIntegral len
 
 lgObjToBlob :: MonadLg m
-            => BlobOid m -> Ptr C'git_blob -> IO (Git.Blob (LgRepository m))
-lgObjToBlob oid ptr = do
-    size <- c'git_blob_rawsize ptr
-    buf  <- c'git_blob_rawcontent ptr
-    -- The lifetime of buf is tied to the lifetime of the blob object in
-    -- libgit2, which this Blob object controls, so we can use
-    -- unsafePackCStringLen to refer to its bytes.
-    bstr <- curry B.packCStringLen (castPtr buf) (fromIntegral size)
-    return $ Git.Blob oid (Git.BlobString bstr)
+            => BlobOid m -> ForeignPtr C'git_blob
+            -> LgRepository m (Git.Blob (LgRepository m))
+lgObjToBlob oid fptr = do
+    bs <- liftIO $ withForeignPtr fptr $ \ptr -> do
+        size <- c'git_blob_rawsize ptr
+        buf  <- c'git_blob_rawcontent ptr
+        B.packCStringLen (castPtr buf, fromIntegral size)
+    return $ Git.Blob oid $ Git.BlobString bs
 
 lgLookupBlob :: MonadLg m => BlobOid m
              -> LgRepository m (Git.Blob (LgRepository m))
 lgLookupBlob oid =
     lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
         c'git_blob_lookup c'git_blob_lookup_prefix
-        $ \boid obj _ -> withForeignPtr obj $ lgObjToBlob (Tagged (mkOid boid))
+        $ \boid obj _ -> lgObjToBlob (Tagged (mkOid boid)) obj
 
 type TreeEntry m = Git.TreeEntry (LgRepository m)
 
@@ -536,7 +562,8 @@ lgLookupCommit :: MonadLg m
 lgLookupCommit oid =
   lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
       c'git_commit_lookup c'git_commit_lookup_prefix
-      $ \coid obj _ -> withForeignPtr obj $ lgObjToCommit (Tagged (mkOid coid))
+      $ \coid obj _ -> liftIO $ withForeignPtr obj $
+          lgObjToCommit (Tagged (mkOid coid))
 
 data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
                | TreePtr (ForeignPtr C'git_commit)
@@ -551,13 +578,11 @@ lgLookupObject oid = do
             (\x y z   -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
             (\x y z l -> c'git_object_lookup_prefix x y z l c'GIT_OBJ_ANY)
             $ \coid fptr y -> do
-                typ <- c'git_object_type y
+                typ <- liftIO $ c'git_object_type y
                 return (mkOid coid, typ, fptr)
     case () of
         () | typ == c'GIT_OBJ_BLOB   ->
-                Git.BlobObj <$>
-                liftIO (withForeignPtr fptr $ \y ->
-                         lgObjToBlob (Tagged oid') (castPtr y))
+                Git.BlobObj <$> lgObjToBlob (Tagged oid') (castForeignPtr fptr)
            | typ == c'GIT_OBJ_TREE   ->
                 -- A ForeignPtr C'git_object is bit-wise equivalent to a
                 -- ForeignPtr C'git_tree.
@@ -926,6 +951,33 @@ gatherFrom size scatter = do
             Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
             Just (Right r) -> return r
             Nothing        -> gather worker chan
+
+drainTo :: (MonadIO m, MonadBaseControl IO m)
+        => Int                        -- ^ Size of the queue to create
+        -> (TBQueue (Maybe i) -> m r)  -- ^ Action to consume input values
+        -> Consumer i m r
+drainTo size gather = do
+    chan   <- liftIO $ newTBQueueIO size
+    worker <- lift $ async (gather chan)
+    lift . restoreM =<< scatter worker chan
+  where
+    scatter worker chan = do
+        mval <- await
+        (mx, action) <- liftIO $ atomically $ do
+            mres <- pollSTM worker
+            case mres of
+                Just (Left e)  ->
+                    return (Nothing, liftIO $ throwIO (e :: SomeException))
+                Just (Right r) ->
+                    return (Just r, return ())
+                Nothing        -> do
+                    writeTBQueue chan mval
+                    return (Nothing, return ())
+        action
+        case mx of
+            Just x  -> return x
+            Nothing -> scatter worker chan
+
 lgThrow :: (MonadIO m, Failure e m) => (Text -> e) -> m ()
 lgThrow f = do
     errStr <- liftIO $ do

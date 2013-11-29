@@ -362,7 +362,7 @@ cliDoCreateBlob b persist = do
             bs
     if r == ExitSuccess
         then mkOid . fromStrict . T.init . T.decodeUtf8 $ out
-        else failure Git.BlobCreateFailed
+        else failure $ Git.BlobCreateFailed "Failed to create blob"
 
 cliHashContents :: Git.MonadGit m
                 => Git.BlobContents (CmdLineRepository m)
