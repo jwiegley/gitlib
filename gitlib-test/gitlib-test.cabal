@@ -1,5 +1,5 @@
 Name:                gitlib-test
-Version:             2.1.0.0
+Version:             2.2.0.0
 Synopsis:            Test library for confirming gitlib backend compliance
 License-file:        LICENSE
 License:             MIT
@@ -21,7 +21,7 @@ Library
     ghc-options: -Wall
     build-depends:
           base                 >= 3 && < 5
-        , gitlib               >= 2.1.0.0
+        , gitlib               >= 2.2.0.0
         , HUnit                >= 1.2.5
         , hspec                >= 1.4.4
         , hspec-expectations   >= 0.3

@@ -1,5 +1,5 @@
 Name:    git-gpush
-Version: 2.1.0.0
+Version: 2.2.0.0
 
 Synopsis:    More intelligent push-to-GitHub utility.
 Description: More intelligent push-to-GitHub utility.
@@ -21,9 +21,9 @@ Executable git-gpush
     ghc-options: -Wall
 
     Build-depends: base                 >= 4 && < 5
-                 , gitlib               >= 2.1.0.0
-                 , gitlib-cmdline       >= 2.1.0.0
-                 -- , gitlib-libgit2       >= 2.1.0.0
+                 , gitlib               >= 2.2.0.0
+                 , gitlib-cmdline       >= 2.2.0.0
+                 -- , gitlib-libgit2       >= 2.2.0.0
                  , bytestring           >= 0.9.2.1
                  , containers           >= 0.4.2.1
                  , directory            >= 1.1.0.2
