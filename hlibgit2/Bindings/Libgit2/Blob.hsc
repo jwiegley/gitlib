@@ -20,7 +20,7 @@ import Bindings.Libgit2.Object
 {- typedef int (* git_blob_chunk_cb)(char * content,
                                   size_t max_length,
                                   void * payload); -}
-#callback git_blob_chunk_cb , Ptr Char -> CSize -> Ptr () -> IO CInt
+#callback git_blob_chunk_cb , CString -> CSize -> Ptr () -> IO CInt
 #ccall git_blob_create_fromchunks , Ptr <git_oid> -> Ptr <git_repository> -> CString -> <git_blob_chunk_cb> -> Ptr () -> IO (CInt)
 #ccall git_blob_create_frombuffer , Ptr <git_oid> -> Ptr <git_repository> -> Ptr () -> CSize -> IO (CInt)
 #ccall git_blob_is_binary , Ptr <git_blob> -> IO (CInt)
