@@ -10,7 +10,7 @@ import Bindings.Libgit2.Types
 {- typedef int (* git_note_foreach_cb)(const git_oid * blob_id,
                                     const git_oid * annotated_object_id,
                                     void * payload); -}
-#callback git_note_foreach_cb , Ptr (<git_oid>) -> Ptr (<git_oid>) -> Ptr () -> Ptr CInt
+#callback git_note_foreach_cb , Ptr (<git_oid>) -> Ptr (<git_oid>) -> Ptr () -> IO CInt
 {- typedef struct git_iterator git_note_iterator; -}
 #opaque_t git_iterator
 #synonym_t git_note_iterator , <git_iterator>

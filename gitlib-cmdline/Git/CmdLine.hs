@@ -25,6 +25,7 @@ import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
 import qualified Data.ByteString as B
 import           Data.Conduit hiding (MonadBaseControl)
+import qualified Data.Conduit.List as CL
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.HashMap.Strict as HashMap
@@ -99,26 +100,26 @@ instance Git.MonadGit m => Git.Repository (CmdLineRepository m) where
 
     parseOid = Git.textToSha
 
-    lookupReference  = cliLookupRef
-    createReference  = cliUpdateRef
-    updateReference  = cliUpdateRef
-    deleteReference  = cliDeleteRef
-    listReferences   = cliListRefs
-    lookupCommit     = cliLookupCommit
-    lookupTree       = cliLookupTree
-    lookupBlob       = cliLookupBlob
-    lookupTag        = error "Not defined cliLookupTag"
-    lookupObject     = error "Not defined cliLookupObject"
-    existsObject     = cliExistsObject
-    sourceObjects    = cliSourceObjects
-    newTreeBuilder   = Pure.newPureTreeBuilder cliReadTree cliWriteTree
-    treeEntry        = cliTreeEntry
-    listTreeEntries  = cliListTreeEntries
-    treeOid          = \(CmdLineTree toid) -> toid
-    hashContents     = cliHashContents
-    createBlob       = cliCreateBlob
-    createCommit     = cliCreateCommit
-    createTag        = cliCreateTag
+    lookupReference   = cliLookupRef
+    createReference   = cliUpdateRef
+    updateReference   = cliUpdateRef
+    deleteReference   = cliDeleteRef
+    sourceReferences  = cliSourceRefs
+    lookupCommit      = cliLookupCommit
+    lookupTree        = cliLookupTree
+    lookupBlob        = cliLookupBlob
+    lookupTag         = error "Not defined cliLookupTag"
+    lookupObject      = error "Not defined cliLookupObject"
+    existsObject      = cliExistsObject
+    sourceObjects     = cliSourceObjects
+    newTreeBuilder    = Pure.newPureTreeBuilder cliReadTree cliWriteTree
+    treeEntry         = cliTreeEntry
+    sourceTreeEntries = cliSourceTreeEntries
+    treeOid           = \(CmdLineTree toid) -> toid
+    hashContents      = cliHashContents
+    createBlob        = cliCreateBlob
+    createCommit      = cliCreateCommit
+    createTag         = cliCreateTag
 
     -- remoteFetch      = error "Not defined: CmdLineRepository.remoteFetch"
 
@@ -502,13 +503,17 @@ cliTreeEntry tree fp = do
                 []        -> Nothing
                 ((_,x):_) -> Just x
 
-cliListTreeEntries :: Git.MonadGit m
-                   => Tree m
-                   -> CmdLineRepository m [(Git.TreeFilePath, TreeEntry m)]
-cliListTreeEntries tree = do
-    contents <- runGit [ "ls-tree", "-t", "-r", "-z"
-                       , fromStrict (Git.renderObjOid (Git.treeOid tree)) ]
-    mapM cliParseLsTree (L.init (TL.splitOn "\NUL" contents))
+cliSourceTreeEntries
+    :: Git.MonadGit m
+    => Tree m
+    -> Producer (CmdLineRepository m) (Git.TreeFilePath, TreeEntry m)
+cliSourceTreeEntries tree = do
+    contents <- lift $ runGit
+        [ "ls-tree", "-t", "-r", "-z"
+        , fromStrict (Git.renderObjOid (Git.treeOid tree))
+        ]
+    forM_ (L.init (TL.splitOn "\NUL" contents)) $
+        yield <=< lift . cliParseLsTree
 
 cliLookupCommit :: Git.MonadGit m
                 => CommitOid m -> CmdLineRepository m (Commit m)
@@ -638,11 +643,11 @@ cliUpdateRef refName (Git.RefSymbolic targetName) =
 cliDeleteRef :: Git.MonadGit m => Text -> CmdLineRepository m ()
 cliDeleteRef refName = runGit_ ["update-ref", "-d", fromStrict refName]
 
-cliListRefs :: Git.MonadGit m
-            => CmdLineRepository m [Text]
-cliListRefs = do
-    mxs <- cliShowRef Nothing
-    return $ case mxs of
+cliSourceRefs :: Git.MonadGit m
+              => Producer (CmdLineRepository m) Text
+cliSourceRefs = do
+    mxs <- lift $ cliShowRef Nothing
+    CL.sourceList $ case mxs of
         Nothing -> []
         Just xs -> map (toStrict . fst) xs
 

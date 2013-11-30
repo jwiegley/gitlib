@@ -26,7 +26,7 @@ import Bindings.Libgit2.Strarray
 #ccall git_reference_list , Ptr <git_strarray> -> Ptr <git_repository> -> CUInt -> IO (CInt)
 {- typedef int (* git_reference_foreach_cb)(const char * refname,
                                          void * payload); -}
-#callback git_reference_foreach_cb , CString -> Ptr () -> Ptr CInt
+#callback git_reference_foreach_cb , CString -> Ptr () -> IO CInt
 #ccall git_reference_foreach , Ptr <git_repository> -> CUInt -> <git_reference_foreach_cb> -> Ptr () -> IO (CInt)
 #ccall git_reference_free , Ptr <git_reference> -> IO ()
 #ccall git_reference_cmp , Ptr <git_reference> -> Ptr <git_reference> -> IO (CInt)

@@ -27,22 +27,16 @@ traverseObjects_ = (void .) . traverseObjects
 --   'listObjects', expand it to include all subtrees and blobs as well.
 --   Ordering is preserved.
 expandTreeObjects :: Repository m => Conduit (ObjectOid m) m (ObjectOid m)
-expandTreeObjects = whileJust_ await $ \obj -> case obj of
+expandTreeObjects = awaitForever $ \obj -> case obj of
     TreeObjOid toid -> do
         yield $ TreeObjOid toid
         tr <- lift $ lookupTree toid
-        ents <- lift $ listTreeEntries tr
-        forM_ ents $ \ent -> case ent of
-            (_, BlobEntry oid _) -> yield $ BlobObjOid oid
-            (_, TreeEntry oid)   -> yield $ TreeObjOid oid
-            _ -> return ()
+        sourceTreeEntries tr
+            =$= awaitForever (\ent -> case ent of
+                (_, BlobEntry oid _) -> yield $ BlobObjOid oid
+                (_, TreeEntry oid)   -> yield $ TreeObjOid oid
+                _ -> return ())
     _ -> yield obj
-  where
-    whileJust_ p f = do
-        x <- p
-        case x of
-            Nothing -> return ()
-            Just x' -> f x' >> whileJust_ p f
 
 listAllObjects :: Repository m
                => Maybe (CommitOid m) -> CommitOid m -> m [ObjectOid m]

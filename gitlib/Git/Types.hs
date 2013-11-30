@@ -3,11 +3,14 @@ module Git.Types where
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
+import           Control.Monad
+import           Control.Monad.Trans.Class
 import           Control.Monad.IO.Class
 import qualified Data.Binary as Bin
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import           Data.Conduit
+import qualified Data.Conduit.List as CL
 import           Data.Default
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
@@ -53,7 +56,7 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
     lookupReference :: RefName -> m (Maybe (RefTarget m))
     updateReference :: RefName -> RefTarget m -> m ()
     deleteReference :: RefName -> m ()
-    listReferences  :: m [RefName]
+    sourceReferences :: Producer m RefName
 
     -- Object lookup
     lookupCommit  :: CommitOid m -> m (Commit m)
@@ -72,7 +75,7 @@ class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
 
     treeOid   :: Tree m -> TreeOid m
     treeEntry :: Tree m -> TreeFilePath -> m (Maybe (TreeEntry m))
-    listTreeEntries :: Tree m -> m [(TreeFilePath, TreeEntry m)]
+    sourceTreeEntries :: Tree m -> Producer m (TreeFilePath, TreeEntry m)
 
     diffContentsWithTree :: Source m (Either TreeFilePath ByteString)
                          -> Tree m -> Producer m ByteString
@@ -240,8 +243,12 @@ data Commit m = Commit
     , commitEncoding  :: !Text
     }
 
+sourceCommitParents :: Repository m => Commit m -> Producer m (Commit m)
+sourceCommitParents commit =
+    forM_ (commitParents commit) $ yield <=< lift . lookupCommit
+
 lookupCommitParents :: Repository m => Commit m -> m [Commit m]
-lookupCommitParents = mapM lookupCommit . commitParents
+lookupCommitParents commit = sourceCommitParents commit $$ CL.consume
 
 data Signature = Signature
     { signatureName  :: !CommitAuthor
@@ -418,14 +425,14 @@ data GitException
     | TreeCannotTraverseCommit
     | TreeEntryLookupFailed TreeFilePath
     | TreeUpdateFailed
-    | TreeWalkFailed
+    | TreeWalkFailed Text
     | TreeEmptyCreateFailed
     | CommitCreateFailed
     | CommitLookupFailed Text
     | ReferenceCreateFailed RefName
     | ReferenceDeleteFailed RefName
     | RefCannotCreateFromPartialOid
-    | ReferenceListingFailed
+    | ReferenceListingFailed Text
     | ReferenceLookupFailed RefName
     | ObjectLookupFailed Text Int
     | ObjectRefRequiresFullOid

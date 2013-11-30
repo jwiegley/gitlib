@@ -190,7 +190,7 @@ instance MonadLg m => Git.Repository (LgRepository m) where
     createReference   = lgUpdateRef
     updateReference   = lgUpdateRef
     deleteReference   = lgDeleteRef
-    listReferences    = lgListRefs
+    sourceReferences  = lgSourceRefs
     lookupCommit      = lgLookupCommit
     lookupTree        = lgLookupTree
     lookupBlob        = lgLookupBlob
@@ -201,7 +201,7 @@ instance MonadLg m => Git.Repository (LgRepository m) where
     newTreeBuilder    = lgNewTreeBuilder
     treeEntry         = lgTreeEntry
     treeOid           = lgTreeOid
-    listTreeEntries   = lgListTreeEntries
+    sourceTreeEntries = lgSourceTreeEntries
     hashContents      = lgHashContents
     createBlob        = lgWrap . lgCreateBlob
     createTag         = error "Not implemented: LgRepository.createTag"
@@ -330,27 +330,27 @@ lgTreeOid (LgTree (Just tree)) = SU.unsafePerformIO $ liftIO $ do
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
-lgListTreeEntries :: MonadLg m
-                  => Tree m
-                  -> LgRepository m [(Git.TreeFilePath, TreeEntry m)]
-lgListTreeEntries (LgTree Nothing) = return []
-lgListTreeEntries (LgTree (Just tree)) =
+lgSourceTreeEntries
+    :: MonadLg m
+    => Tree m
+    -> Producer (LgRepository m) (Git.TreeFilePath, TreeEntry m)
+lgSourceTreeEntries (LgTree Nothing) = return ()
+lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom 16 $ \queue -> do
     liftIO $ withForeignPtr tree $ \tr -> do
-        ior <- newIORef []
         r <- bracket
-                (mk'git_treewalk_cb (callback ior))
+                (mk'git_treewalk_cb (callback queue))
                 freeHaskellFunPtr
-                (flip (c'git_tree_walk tr c'GIT_TREEWALK_PRE) nullPtr)
-        when (r < 0) $ failure Git.TreeWalkFailed
-        readIORef ior
-
+                (\callback ->
+                  c'git_tree_walk tr c'GIT_TREEWALK_PRE callback nullPtr)
+        when (r < 0) $ lgThrow Git.TreeWalkFailed
   where
-    callback ior root te _ = do
+    callback queue root te _payload = do
         fp    <- peekFilePath root
         cname <- c'git_tree_entry_name te
         name  <- (fp <>) <$> peekFilePath cname
         entry <- entryToTreeEntry te
-        seq name $ seq entry $ modifyIORef ior $ \xs -> (name,entry):xs
+        atomically $
+            writeTBQueue queue $ name `seq` entry `seq` (name,entry)
         return 0
 
 lgMakeBuilder :: MonadLg m
@@ -863,21 +863,26 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
                  + (if listFlagPacked flags   then 4 else 0)
                  + (if listFlagHasPeel flags  then 8 else 0)
 
-listRefNames :: MonadLg m => ListFlags -> LgRepository m [Git.RefName]
-listRefNames flags = do
-    repo <- lgGet
-    refs <- liftIO $ alloca $ \c'refs ->
-      withForeignPtr (repoObj repo) $ \repoPtr -> do
-        r <- c'git_reference_list c'refs repoPtr (flagsToInt flags)
-        if r < 0
-            then return Nothing
-            else do refs <- gitStrArray2List c'refs
-                    c'git_strarray_free c'refs
-                    return (Just refs)
-    maybe (failure Git.ReferenceListingFailed) return refs
-
-lgListRefs :: MonadLg m => LgRepository m [Git.RefName]
-lgListRefs = listRefNames allRefsFlag
+lgSourceRefs :: MonadLg m => Producer (LgRepository m) Git.RefName
+lgSourceRefs =
+    gatherFrom 16 $ \queue -> do
+        repo <- lgGet
+        r <- liftIO $ bracket
+            (mk'git_reference_foreach_cb (callback queue))
+            freeHaskellFunPtr
+            (\callback -> withForeignPtr (repoObj repo) $ \repoPtr ->
+                  c'git_reference_foreach repoPtr
+                      (flagsToInt allRefsFlag) callback nullPtr)
+        when (r < 0) $ lgThrow Git.ReferenceListingFailed
+  where
+    callback :: TBQueue Text
+             -> CString
+             -> Ptr ()
+             -> IO CInt
+    callback queue cname _payload = do
+        name <- peekCString cname
+        atomically $ writeTBQueue queue (pack name)
+        return 0
 
 -- foreachRefCallback :: CString -> Ptr () -> IO CInt
 -- foreachRefCallback name payload = do
@@ -1003,7 +1008,7 @@ lgDiffContentsWithTree contents tree = do
     gatherFrom 16 $ generateDiff repo
   where
     generateDiff repo chan = do
-        entries   <- M.fromList <$> lgListTreeEntries tree
+        entries   <- M.fromList <$> Git.listTreeEntries tree
         paths     <- liftIO $ newIORef []
         (src, ()) <- lift $ contents $$+ return ()
 

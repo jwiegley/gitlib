@@ -16,7 +16,7 @@ import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 {- typedef int (* git_remote_rename_problem_cb)(const char * problematic_refspec,
                                              void * payload); -}
-#callback git_remote_rename_problem_cb , CString -> Ptr () -> Ptr CInt
+#callback git_remote_rename_problem_cb , CString -> Ptr () -> IO CInt
 #ccall git_remote_create , Ptr (Ptr <git_remote>) -> Ptr <git_repository> -> CString -> CString -> IO (CInt)
 #ccall git_remote_create_inmemory , Ptr (Ptr <git_remote>) -> Ptr <git_repository> -> CString -> CString -> IO (CInt)
 #ccall git_remote_load , Ptr (Ptr <git_remote>) -> Ptr <git_repository> -> CString -> IO (CInt)

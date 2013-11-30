@@ -3,6 +3,8 @@ module Git.Tree where
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Trans.Class
+import           Data.Conduit
+import qualified Data.Conduit.List as CL
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Monoid
@@ -11,6 +13,9 @@ import           Data.Text (Text)
 import           Git.Blob
 import           Git.Tree.Builder
 import           Git.Types
+
+listTreeEntries :: Repository m => Tree m -> m [(TreeFilePath, TreeEntry m)]
+listTreeEntries tree = sourceTreeEntries tree $$ CL.consume
 
 copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
               => TreeEntry m
