@@ -19,7 +19,6 @@ import           Data.Maybe
 import           Data.Tagged
 import           Data.Text (Text)
 import           Git
-import           Git.Classy
 import           Prelude hiding (FilePath)
 
 makeClassy_ ''Commit

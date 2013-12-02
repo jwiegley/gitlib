@@ -24,13 +24,12 @@ Library
         , gitlib               >= 2.2.0.0
         , bytestring
         , containers
-        , lens                 >= 3.9.0.2
+        , lens                 >= 4.0
         , tagged
         , template-haskell
         , text
         , unordered-containers
     exposed-modules:
-        Git.Classy
         Git.Lens
     default-extensions: 
         ConstraintKinds
@@ -55,6 +54,6 @@ Test-suite smoke
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3
-        , lens
+        , lens               >= 4.0
         , time
         , transformers
