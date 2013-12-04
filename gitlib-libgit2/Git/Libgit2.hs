@@ -1012,12 +1012,13 @@ lgDiffContentsWithTree contents tree = do
         handleContent path (Right content) = return (path, content)
 
         diffBlob path mcontent mboid = do
+            fileHeader <- liftIO $ newIORef Nothing
             r <- liftIO $ runResourceT $ case mboid of
-                Nothing   -> go nullPtr
-                Just boid -> withBlob boid
+                Nothing   -> go fileHeader nullPtr
+                Just boid -> withBlob fileHeader boid
             when (r < 0) $ lgThrow Git.DiffBlobFailed
           where
-            withBlob boid = do
+            withBlob fh boid = do
                 (_, eblobp) <- flip allocate freeBlob $
                     alloca $ \blobpp ->
                     withForeignPtr boid $ \boidPtr ->
@@ -1028,15 +1029,15 @@ lgDiffContentsWithTree contents tree = do
                             else Right <$> peek blobpp
                 case eblobp of
                     Left r      -> return r
-                    Right blobp -> go blobp
+                    Right blobp -> go fh blobp
               where
                 freeBlob (Left _)      = return ()
                 freeBlob (Right blobp) = c'git_blob_free blobp
 
-            go blobp = do
+            go fh blobp = do
                 let f x = allocate x freeHaskellFunPtr
-                (_, file_cb')  <- f $ mk'git_diff_file_cb file_cb
-                (_, hunk_cb')  <- f $ mk'git_diff_hunk_cb hunk_cb
+                (_, file_cb')  <- f $ mk'git_diff_file_cb (file_cb fh)
+                (_, hunk_cb')  <- f $ mk'git_diff_hunk_cb (hunk_cb fh)
                 (_, print_cb') <- f $ mk'git_diff_data_cb print_cb
 
                 let diff s l =
@@ -1052,33 +1053,43 @@ lgDiffContentsWithTree contents tree = do
             deltaFileName = fmap (T.encodeUtf8 . T.pack) . peekCString
                                 . c'git_diff_file'path
 
-            file_cb :: Ptr C'git_diff_delta
+            file_cb :: IORef (Maybe ByteString)
+                    -> Ptr C'git_diff_delta
                     -> CFloat
                     -> Ptr ()
                     -> IO CInt
-            file_cb deltap _progress _payload = do
+            file_cb fh deltap _progress _payload = do
                 delta <- peek deltap
-                atomically $
+                mbs <- atomically $
                     if isBinary delta
-                    then writeTBQueue chan $
-                        "Binary files a/" <> path
-                            <> " and b/" <> path <> " differ\n"
-                    else do
-                        writeTBQueue chan $ "--- a/" <> path <> "\n"
-                        writeTBQueue chan $ "+++ b/" <> path <> "\n"
+                    then do
+                        writeTBQueue chan $
+                            "Binary files a/" <> path
+                                <> " and b/" <> path <> " differ\n"
+                        return Nothing
+                    else return $ Just
+                        $ "--- a/" <> path <> "\n"
+                       <> "+++ b/" <> path <> "\n"
+                writeIORef fh mbs
                 return 0
 
-            hunk_cb :: Ptr C'git_diff_delta
+            hunk_cb :: IORef (Maybe ByteString)
+                    -> Ptr C'git_diff_delta
                     -> Ptr C'git_diff_range
                     -> CString
                     -> CSize
                     -> Ptr ()
                     -> IO CInt
-            hunk_cb deltap _rangep header headerLen _payload = do
+            hunk_cb fh deltap _rangep header headerLen _payload = do
                 delta <- peek deltap
-                unless (isBinary delta) $ do
-                    bs <- curry B.packCStringLen header (fromIntegral headerLen)
-                    atomically $ writeTBQueue chan bs
+                if isBinary delta
+                    then writeIORef fh Nothing
+                    else do
+                        mfh <- readIORef fh
+                        forM_ mfh $ atomically . writeTBQueue chan
+                        bs <- curry B.packCStringLen header
+                            (fromIntegral headerLen)
+                        atomically $ writeTBQueue chan bs
                 return 0
 
             print_cb :: Ptr C'git_diff_delta
