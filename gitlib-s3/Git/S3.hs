@@ -699,7 +699,10 @@ cacheLoadObject :: (MonadLg m, MonadUnsafeIO m, MonadThrow m)
 cacheLoadObject dets sha ce metadataOnly = do
     lgDebug $ "cacheLoadObject " ++ show sha ++ " " ++ show metadataOnly
     minfo <- go ce
-    for_ minfo $ cacheStoreObject dets sha -- refresh the cache's knowledge
+    case ce of
+        LooseCached {} -> return ()
+        -- refresh the cache's knowledge if it wasn't already cached
+        _ -> for_ minfo $ cacheStoreObject dets sha
     return minfo
   where
     go DoesNotExist = return Nothing
@@ -756,11 +759,7 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     lgDebug $ "cacheStoreObject " ++ show sha ++ " " ++ show info
     liftIO go >>= cacheUpdateEntry dets sha
   where
-    go | Just path <- infoPath, Nothing <- infoData = do
-           now <- getCurrentTime
-           return $ LooseCached infoLength infoType now path
-
-       | Just bytes <- infoData = do
+    go | Just bytes <- infoData = do
            let path = tempDirectory dets
                    </> (fromSha sha
                            ++ "-" ++ show (getObjectType infoType)
