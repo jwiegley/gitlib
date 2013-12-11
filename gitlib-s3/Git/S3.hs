@@ -643,19 +643,15 @@ catalogPackFile dets packSha idxPath = do
 observeCacheObjects :: OdbS3Details -> IO ()
 observeCacheObjects dets = do
     now <- getCurrentTime
-    putStrLn $ "Reading: " ++ show (tempDirectory dets)
     let dir = tempDirectory dets
     contents <- getDirectoryContents dir
     forM_ contents $ \entry -> do
-        putStrLn $ "entry: " ++ show entry
         let fname = dir </> entry
-        putStrLn $ "fname: " ++ show fname
         exists <- doesFileExist fname -- make sure it's a regular file
         when exists $
             if "pack-" `L.isPrefixOf` entry
             then if ".pack" `L.isSuffixOf` entry
                  then do
-                     putStrLn $ "found a pack file"
                      let sha = under reversed (drop 5) $ drop 5 entry
                      psha <- packSha sha
                      atomically $ modifyTVar (knownObjects dets) $
@@ -668,8 +664,6 @@ observeCacheObjects dets = do
             else case L.splitOn "-" entry of
                 [sha, typs, lens] -> do
                     sha' <- packSha sha
-                    putStrLn $ "found a regular file, len: " ++ show lens
-                    putStrLn $ "found a regular file, typ: " ++ show typs
                     atomically $ modifyTVar (knownObjects dets) $
                         M.insert sha' $ LooseCached
                             (ObjectLength (read lens))
