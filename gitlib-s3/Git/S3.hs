@@ -647,9 +647,7 @@ observeCacheObjects dets = do
     contents <- getDirectoryContents dir
     forM_ contents $ \entry -> do
         let fname = dir </> entry
-        exists <- doesFileExist fname -- make sure it's a regular file
-        when exists $
-            if "pack-" `L.isPrefixOf` entry
+        if "pack-" `L.isPrefixOf` entry
             then if ".pack" `L.isSuffixOf` entry
                  then do
                      let sha = under reversed (drop 5) $ drop 5 entry
