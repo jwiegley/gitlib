@@ -615,10 +615,6 @@ lgSourceObjects mhave need alsoTrees = do
     c <- lift $ lgLookupCommit need
     let oid = untag (Git.commitOid c)
 
-    liftIO $ putStrLn $ "mhave = " ++ show mhave
-    liftIO $ putStrLn $ "need  = " ++ show need
-    liftIO $ putStrLn $ "oid   = " ++ show oid
-
     liftIO $ withForeignPtr (getOid oid) $ \coid -> do
         r2 <- withForeignPtr walker $ flip c'git_revwalk_push coid
         when (r2 < 0) $
@@ -940,7 +936,7 @@ lgThrow f = do
 
 lgDiffContentsWithTree
     :: MonadLg m
-    => Source m (Either Git.TreeFilePath ByteString)
+    => Source m (Either Git.TreeFilePath (Either Git.SHA ByteString))
     -> Tree m
     -> Producer (LgRepository m) ByteString
 lgDiffContentsWithTree _contents (LgTree Nothing) =
@@ -1013,13 +1009,30 @@ lgDiffContentsWithTree contents tree = do
         handleContent path (Right content) = return (path, content)
 
         diffBlob path mcontent mboid = do
-            fileHeader <- liftIO $ newIORef Nothing
-            r <- liftIO $ runResourceT $ case mboid of
-                Nothing   -> go fileHeader nullPtr
-                Just boid -> withBlob fileHeader boid
+            r <- liftIO $ runResourceT $ do
+                fileHeader <- liftIO $ newIORef Nothing
+
+                let f = flip allocate freeHaskellFunPtr
+                (_, fcb) <- f $ mk'git_diff_file_cb (file_cb fileHeader)
+                (_, hcb) <- f $ mk'git_diff_hunk_cb (hunk_cb fileHeader)
+                (_, pcb) <- f $ mk'git_diff_data_cb print_cb
+
+                let db  = diffBlobs fcb hcb pcb
+                    dbb = diffBlobToBuffer fcb hcb pcb
+                case mboid of
+                    Nothing   -> dbb nullPtr
+                    Just boid -> withBlob boid $ \blobp ->
+                        case mcontent of
+                            Just (Left sha) -> do
+                                boid2 <- liftIO $ shaToOid sha
+                                withBlob boid2 $ db blobp
+                            _ -> dbb blobp
             when (r < 0) $ lgThrow Git.DiffBlobFailed
           where
-            withBlob fh boid = do
+            withBlob :: ForeignPtr C'git_oid
+                     -> (Ptr C'git_blob -> ResourceT IO CInt)
+                     -> ResourceT IO CInt
+            withBlob boid f = do
                 (_, eblobp) <- flip allocate freeBlob $
                     alloca $ \blobpp ->
                     withForeignPtr boid $ \boidPtr ->
@@ -1030,23 +1043,23 @@ lgDiffContentsWithTree contents tree = do
                             else Right <$> peek blobpp
                 case eblobp of
                     Left r      -> return r
-                    Right blobp -> go fh blobp
+                    Right blobp -> f blobp
               where
                 freeBlob (Left _)      = return ()
                 freeBlob (Right blobp) = c'git_blob_free blobp
 
-            go fh blobp = do
-                let f x = allocate x freeHaskellFunPtr
-                (_, file_cb')  <- f $ mk'git_diff_file_cb (file_cb fh)
-                (_, hunk_cb')  <- f $ mk'git_diff_hunk_cb (hunk_cb fh)
-                (_, print_cb') <- f $ mk'git_diff_data_cb print_cb
-
+            diffBlobToBuffer fcb hcb pcb blobp = do
                 let diff s l =
                         c'git_diff_blob_to_buffer blobp s (fromIntegral l)
-                            nullPtr file_cb' hunk_cb' print_cb' nullPtr
+                            nullPtr fcb hcb pcb nullPtr
                 liftIO $ case mcontent of
-                    Nothing -> diff nullPtr 0
-                    Just c  -> BU.unsafeUseAsCStringLen c $ uncurry diff
+                    Just (Right c) ->
+                        BU.unsafeUseAsCStringLen c $ uncurry diff
+                    _ -> diff nullPtr 0
+
+            diffBlobs fcb hcb pcb blobp otherp =
+                liftIO $ c'git_diff_blobs blobp otherp nullPtr
+                    fcb hcb pcb nullPtr
 
             isBinary delta =
                 c'git_diff_delta'flags delta .&. c'GIT_DIFF_FLAG_BINARY /= 0
