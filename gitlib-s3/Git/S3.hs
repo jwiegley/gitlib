@@ -681,13 +681,12 @@ cacheLookupEntry dets sha =
   where
     go recurse = do
         objs <- liftIO $ readTVarIO (knownObjects dets)
-        let mres = M.lookup sha objs
-        case mres of
+        case M.lookup sha objs of
             Nothing | M.null objs && recurse -> do
                 lgDebug "observeCacheObjects"
                 liftIO $ observeCacheObjects dets
                 go False
-            _ -> return mres
+            mres -> return mres
 
 cacheUpdateEntry :: MonadLg m => OdbS3Details -> SHA -> CacheEntry -> m ()
 cacheUpdateEntry dets sha ce = do
