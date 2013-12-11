@@ -1409,7 +1409,7 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
             , c'git_odb_backend'free        = freeCallbackPtr
             }
 
-    liftIO $ do
+    ptr <- liftIO $ do
         dirExists <- doesDirectoryExist dir
         unless dirExists $ createDirectoryIfMissing True dir
 
@@ -1427,8 +1427,11 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
             , c'git_odb_writepack'free    = packFreeCallbackPtr
             }
         pokeByteOff ptr (sizeOf (undefined :: C'git_odb_backend)) packWriterPtr
-
         return ptr
+
+    lgDebug $ "Created new S3 backend at " ++ show ptr
+
+    return ptr
 
 -- | Given a repository object obtained from Libgit2, add an S3 backend to it,
 --   making it the primary store for objects associated with that repository.
