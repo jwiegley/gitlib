@@ -1290,32 +1290,28 @@ lgLoadPackFileInMemory :: (MonadLg m, MonadUnsafeIO m, MonadThrow m,
                        -> Ptr (Ptr C'git_odb)
                        -> ResourceT m (Ptr C'git_odb)
 lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
-    lgDebug "Creating temporary, in-memory object database"
-    (freeKey,odbPtr) <- flip allocate c'git_odb_free $ do
+    lgDebug "Create temporary, in-memory object database"
+    (_,odbPtr) <- flip allocate c'git_odb_free $ do
         r <- c'git_odb_new odbPtrPtr
         checkResult r "c'git_odb_new failed"
         peek odbPtrPtr
 
     lgDebug $ "Load pack index " ++ show idxPath ++ " into temporary odb"
-    (_,backendPtr) <- allocate
-        (do r <- withCString idxPath $ \idxPathStr ->
+    bracketOnError
+        (do r <- liftIO $ withCString idxPath $ \idxPathStr ->
                 c'git_odb_backend_one_pack backendPtrPtr idxPathStr
             checkResult r "c'git_odb_backend_one_pack failed"
-            peek backendPtrPtr)
+            liftIO $ peek backendPtrPtr)
+        (\backendPtr -> liftIO $ do
+            backend <- peek backendPtr
+            mK'git_odb_backend_free_callback
+                (c'git_odb_backend'free backend) backendPtr)
         (\backendPtr -> do
-              backend <- peek backendPtr
-              mK'git_odb_backend_free_callback
-                  (c'git_odb_backend'free backend) backendPtr)
-
-    -- Since freeing the backend will now free the object database, unregister
-    -- the finalizer we had setup for the odbPtr
-    void $ unprotect freeKey
-
-    -- Associate the new backend containing our single index file with the
-    -- in-memory object database
-    lgDebug "Associate odb with backend"
-    r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
-    checkResult r "c'git_odb_add_backend failed"
+            -- Associate the new backend containing our single index file with
+            -- the in-memory object database
+            lgDebug "Associate odb with backend"
+            r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
+            checkResult r "c'git_odb_add_backend failed")
 
     return odbPtr
 
@@ -1323,11 +1319,8 @@ lgWithPackFile :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
                => FilePath -> (Ptr C'git_odb -> ResourceT m a) -> m a
 lgWithPackFile idxPath f = control $ \run ->
     alloca $ \odbPtrPtr ->
-    alloca $ \backendPtrPtr -> run $ runResourceT $ do
-        lift $ lgDebug "Load pack file into an in-memory object database"
-        odbPtr <- lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
-        lift $ lgDebug "Calling function using in-memory odb"
-        f odbPtr
+    alloca $ \backendPtrPtr -> run $ runResourceT $
+        f =<< lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
 lgReadFromPack :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
                => FilePath -> Git.SHA -> Bool
