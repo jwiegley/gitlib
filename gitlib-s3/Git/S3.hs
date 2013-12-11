@@ -31,7 +31,7 @@ import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Concurrent.STM hiding (orElse)
 import           Control.Exception.Lifted
-import           Control.Lens ((??))
+import           Control.Lens ((??), under, reversed)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger hiding (LogLevel)
@@ -58,6 +58,7 @@ import qualified Data.HashMap.Strict as M
 import           Data.IORef
 import           Data.Int (Int64)
 import qualified Data.List as L
+import qualified Data.List.Split as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Text (Text)
@@ -639,15 +640,62 @@ catalogPackFile dets packSha idxPath = do
         observePackObjects dets packSha idxPath True
     return []
 
+observeCacheObjects :: OdbS3Details -> IO ()
+observeCacheObjects dets = do
+    now <- getCurrentTime
+    putStrLn $ "Reading: " ++ show (tempDirectory dets)
+    let dir = tempDirectory dets
+    contents <- getDirectoryContents dir
+    forM_ contents $ \entry -> do
+        putStrLn $ "entry: " ++ show entry
+        let fname = dir </> entry
+        putStrLn $ "fname: " ++ show fname
+        exists <- doesFileExist fname -- make sure it's a regular file
+        when exists $
+            if "pack-" `L.isPrefixOf` entry
+            then if ".pack" `L.isSuffixOf` entry
+                 then do
+                     putStrLn $ "found a pack file"
+                     let sha = under reversed (drop 5) $ drop 5 entry
+                     psha <- packSha sha
+                     atomically $ modifyTVar (knownObjects dets) $
+                         M.insert psha $ PackedCached
+                             now
+                             (T.pack sha)
+                             fname
+                             (replaceExtension fname "idx")
+                 else return ()
+            else case L.splitOn "-" entry of
+                [sha, typs, lens] -> do
+                    sha' <- packSha sha
+                    putStrLn $ "found a regular file, len: " ++ show lens
+                    putStrLn $ "found a regular file, typ: " ++ show typs
+                    atomically $ modifyTVar (knownObjects dets) $
+                        M.insert sha' $ LooseCached
+                            (ObjectLength (read lens))
+                            (ObjectType (read typs))
+                            now
+                            fname
+                _ -> return ()
+  where
+    packSha = Git.textToSha . T.pack
+    mapPair f (x,y) = (f x, f y)
+
 cacheLookupEntry :: MonadLg m => OdbS3Details -> SHA -> m (Maybe CacheEntry)
 cacheLookupEntry dets sha =
     wrap ("cacheLookupEntry " ++ show (shaToText sha))
-        go
+        (go True)
         (return Nothing)
   where
-    go = do
+    go recurse = do
         objs <- liftIO $ readTVarIO (knownObjects dets)
-        return $ M.lookup sha objs
+        let mres = M.lookup sha objs
+        case mres of
+            Nothing | M.null objs && recurse -> do
+                lgDebug "observeCacheObjects"
+                liftIO $ observeCacheObjects dets
+                go False
+            _ -> return mres
 
 cacheUpdateEntry :: MonadLg m => OdbS3Details -> SHA -> CacheEntry -> m ()
 cacheUpdateEntry dets sha ce = do
@@ -717,13 +765,15 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     lgDebug $ "cacheStoreObject " ++ show sha ++ " " ++ show info
     liftIO go >>= cacheUpdateEntry dets sha
   where
-    go | Just path <- infoPath = do
-           for_ infoData $ B.writeFile path
+    go | Just path <- infoPath, Nothing <- infoData = do
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
        | Just bytes <- infoData = do
-           let path = tempDirectory dets </> fromSha sha
+           let path = tempDirectory dets
+                   </> (fromSha sha
+                           ++ "-" ++ show (getObjectType infoType)
+                           ++ "-" ++ show (getObjectLength infoLength))
            B.writeFile path bytes
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
