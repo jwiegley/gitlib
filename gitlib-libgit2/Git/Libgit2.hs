@@ -71,6 +71,7 @@ import           Control.Monad.Trans.Resource
 import           Data.Bits ((.|.), (.&.))
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
 import           Data.Foldable
@@ -1167,12 +1168,12 @@ lift_ = void . lift
 
 lgBuildPackIndexWrapper :: MonadLg m
                         => FilePath
-                        -> ByteString
+                        -> BL.ByteString
                         -> LgRepository m (Text, FilePath, FilePath)
 lgBuildPackIndexWrapper = (lift .) . lgBuildPackIndex
 
 lgBuildPackIndex :: (MonadLg m, MonadLogger m)
-                 => FilePath -> ByteString -> m (Text, FilePath, FilePath)
+                 => FilePath -> BL.ByteString -> m (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
     return (sha, dir </> ("pack-" <> unpack sha <> ".pack"),
@@ -1189,10 +1190,10 @@ lgBuildPackIndex dir bytes = do
 
         lift_ . run $
             lgDebug $ "Add the incoming packfile data to the stream ("
-                 ++ show (B.length bytes) ++ " bytes)"
+                 ++ show (BL.length bytes) ++ " bytes)"
         (_,statsPtr) <- allocate calloc free
-        liftIO $ BU.unsafeUseAsCStringLen bytes $
-            uncurry $ \dataPtr dataLen -> do
+        liftIO $ forM_ (BL.toChunks bytes) $ \chunk ->
+            BU.unsafeUseAsCStringLen chunk $ uncurry $ \dataPtr dataLen -> do
                 r <- c'git_indexer_stream_add idxPtr (castPtr dataPtr)
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_indexer_stream_add failed"
