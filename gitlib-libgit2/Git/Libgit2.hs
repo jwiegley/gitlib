@@ -1025,7 +1025,9 @@ lgDiffContentsWithTree contents tree = do
                         case mcontent of
                             Just (Left sha) -> do
                                 boid2 <- liftIO $ shaToOid sha
-                                withBlob boid2 $ db blobp
+                                if boid == boid2
+                                    then withBlob boid2 $ db blobp
+                                    else return 0
                             _ -> dbb blobp
             when (r < 0) $ lgThrow Git.DiffBlobFailed
           where
@@ -1074,17 +1076,11 @@ lgDiffContentsWithTree contents tree = do
                     -> IO CInt
             file_cb fh deltap _progress _payload = do
                 delta <- peek deltap
-                mbs <- atomically $
+                writeIORef fh $ Just $
                     if isBinary delta
-                    then do
-                        writeTBQueue chan $
-                            "Binary files a/" <> path
-                                <> " and b/" <> path <> " differ\n"
-                        return Nothing
-                    else return $ Just
-                        $ "--- a/" <> path <> "\n"
-                       <> "+++ b/" <> path <> "\n"
-                writeIORef fh mbs
+                    then "Binary files a/" <> path <> " and b/" <> path
+                        <> " differ\n"
+                    else "--- a/" <> path <> "\n" <> "+++ b/" <> path <> "\n"
                 return 0
 
             hunk_cb :: IORef (Maybe ByteString)
@@ -1096,14 +1092,14 @@ lgDiffContentsWithTree contents tree = do
                     -> IO CInt
             hunk_cb fh deltap _rangep header headerLen _payload = do
                 delta <- peek deltap
-                if isBinary delta
-                    then writeIORef fh Nothing
-                    else do
-                        mfh <- readIORef fh
-                        forM_ mfh $ atomically . writeTBQueue chan
-                        bs <- curry B.packCStringLen header
-                            (fromIntegral headerLen)
-                        atomically $ writeTBQueue chan bs
+                mfh <- readIORef fh
+                forM_ mfh $ \h -> do
+                    atomically $ writeTBQueue chan h
+                    writeIORef fh Nothing
+                unless (isBinary delta) $ do
+                    bs <- curry B.packCStringLen header
+                        (fromIntegral headerLen)
+                    atomically $ writeTBQueue chan bs
                 return 0
 
             print_cb :: Ptr C'git_diff_delta
