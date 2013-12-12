@@ -919,11 +919,13 @@ gatherFrom size scatter = do
         (xs, mres) <- liftIO $ atomically $ do
             xs <- whileM (not <$> isEmptyTBQueue chan) (readTBQueue chan)
             (xs,) <$> pollSTM worker
+        liftIO $ putStrLn "..."
         mapM_ yield xs
         case mres of
             Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
             Just (Right r) -> return r
             Nothing        -> gather worker chan
+
 lgThrow :: (MonadIO m, Failure e m) => (Text -> e) -> m ()
 lgThrow f = do
     errStr <- liftIO $ do
