@@ -75,6 +75,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
+import           Data.Conduit.Async
 import           Data.Foldable
 import           Data.IORef
 import           Data.List as L
@@ -930,57 +931,6 @@ lgSourceRefs =
 -- int git_reference_cmp(git_reference *ref1, git_reference *ref2)
 
 --compareRef = c'git_reference_cmp
-
--- | Gather output values asynchronously from an action in the base monad and
---   then yield them downstream.  This provides a means of working around the
---   restriction that 'ConduitM' cannot be an instance of 'MonadBaseControl'
---   in order to, for example, yield values from within a Haskell callback
---   function called from a C library.
-gatherFrom :: (MonadIO m, MonadBaseControl IO m)
-           => Int                -- ^ Size of the queue to create
-           -> (TBQueue o -> m ()) -- ^ Action that generates output values
-           -> Producer m o
-gatherFrom size scatter = do
-    chan   <- liftIO $ newTBQueueIO size
-    worker <- lift $ async (scatter chan)
-    lift . restoreM =<< gather worker chan
-  where
-    gather worker chan = do
-        (xs, mres) <- liftIO $ atomically $ do
-            xs <- whileM (not <$> isEmptyTBQueue chan) (readTBQueue chan)
-            (xs,) <$> pollSTM worker
-        liftIO $ putStrLn "..."
-        mapM_ yield xs
-        case mres of
-            Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
-            Just (Right r) -> return r
-            Nothing        -> gather worker chan
-
-drainTo :: (MonadIO m, MonadBaseControl IO m)
-        => Int                        -- ^ Size of the queue to create
-        -> (TBQueue (Maybe i) -> m r)  -- ^ Action to consume input values
-        -> Consumer i m r
-drainTo size gather = do
-    chan   <- liftIO $ newTBQueueIO size
-    worker <- lift $ async (gather chan)
-    lift . restoreM =<< scatter worker chan
-  where
-    scatter worker chan = do
-        mval <- await
-        (mx, action) <- liftIO $ atomically $ do
-            mres <- pollSTM worker
-            case mres of
-                Just (Left e)  ->
-                    return (Nothing, liftIO $ throwIO (e :: SomeException))
-                Just (Right r) ->
-                    return (Just r, return ())
-                Nothing        -> do
-                    writeTBQueue chan mval
-                    return (Nothing, return ())
-        action
-        case mx of
-            Just x  -> return x
-            Nothing -> scatter worker chan
 
 lgThrow :: (MonadIO m, Failure e m) => (Text -> e) -> m ()
 lgThrow f = do
