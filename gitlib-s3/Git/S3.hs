@@ -31,7 +31,7 @@ import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Concurrent.STM hiding (orElse)
 import           Control.Exception.Lifted
-import           Control.Lens ((??))
+import           Control.Lens ((??), under, reversed)
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger hiding (LogLevel)
@@ -58,6 +58,7 @@ import qualified Data.HashMap.Strict as M
 import           Data.IORef
 import           Data.Int (Int64)
 import qualified Data.List as L
+import qualified Data.List.Split as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Text (Text)
@@ -105,7 +106,7 @@ data ObjectInfo = ObjectInfo
       { infoLength :: ObjectLength
       , infoType   :: ObjectType
       , infoPath   :: Maybe FilePath
-      , infoData   :: Maybe ByteString
+      , infoData   :: Maybe BL.ByteString
       } deriving Eq
 
 instance Show ObjectInfo where
@@ -329,12 +330,6 @@ orElse f g = catch f $ \e -> do
 coidToJSON :: ForeignPtr C'git_oid -> A.Value
 coidToJSON coid = unsafePerformIO $ withForeignPtr coid $
     fmap A.toJSON . flip oidToStr 40
-
-pokeByteString :: ByteString -> Ptr (Ptr b) -> ObjectLength -> IO ()
-pokeByteString bytes data_p (fromIntegral . getObjectLength -> len) = do
-    content <- mallocBytes len
-    BU.unsafeUseAsCString bytes $ copyBytes content ?? len
-    poke data_p (castPtr content)
 
 unpackDetails :: Ptr C'git_odb_backend -> Ptr C'git_oid
               -> IO (OdbS3Details, SHA)
@@ -639,15 +634,53 @@ catalogPackFile dets packSha idxPath = do
         observePackObjects dets packSha idxPath True
     return []
 
+observeCacheObjects :: OdbS3Details -> IO ()
+observeCacheObjects dets = do
+    now <- getCurrentTime
+    let dir = tempDirectory dets
+    contents <- getDirectoryContents dir
+    forM_ contents $ \entry -> do
+        let fname = dir </> entry
+        if "pack-" `L.isPrefixOf` entry
+            then if ".pack" `L.isSuffixOf` entry
+                 then do
+                     let sha = under reversed (drop 5) $ drop 5 entry
+                     psha <- packSha sha
+                     atomically $ modifyTVar (knownObjects dets) $
+                         M.insert psha $ PackedCached
+                             now
+                             (T.pack sha)
+                             fname
+                             (replaceExtension fname "idx")
+                 else return ()
+            else case L.splitOn "-" entry of
+                [sha, typs, lens] -> do
+                    sha' <- packSha sha
+                    atomically $ modifyTVar (knownObjects dets) $
+                        M.insert sha' $ LooseCached
+                            (ObjectLength (read lens))
+                            (ObjectType (read typs))
+                            now
+                            fname
+                _ -> return ()
+  where
+    packSha = Git.textToSha . T.pack
+    mapPair f (x,y) = (f x, f y)
+
 cacheLookupEntry :: MonadLg m => OdbS3Details -> SHA -> m (Maybe CacheEntry)
 cacheLookupEntry dets sha =
     wrap ("cacheLookupEntry " ++ show (shaToText sha))
-        go
+        (go True)
         (return Nothing)
   where
-    go = do
+    go recurse = do
         objs <- liftIO $ readTVarIO (knownObjects dets)
-        return $ M.lookup sha objs
+        case M.lookup sha objs of
+            Nothing | M.null objs && recurse -> do
+                lgDebug "observeCacheObjects"
+                liftIO $ observeCacheObjects dets
+                go False
+            mres -> return mres
 
 cacheUpdateEntry :: MonadLg m => OdbS3Details -> SHA -> CacheEntry -> m ()
 cacheUpdateEntry dets sha ce = do
@@ -660,7 +693,10 @@ cacheLoadObject :: (MonadLg m, MonadUnsafeIO m, MonadThrow m)
 cacheLoadObject dets sha ce metadataOnly = do
     lgDebug $ "cacheLoadObject " ++ show sha ++ " " ++ show metadataOnly
     minfo <- go ce
-    for_ minfo $ cacheStoreObject dets sha -- refresh the cache's knowledge
+    case ce of
+        LooseCached {} -> return ()
+        -- refresh the cache's knowledge if it wasn't already cached
+        _ -> for_ minfo $ cacheStoreObject dets sha
     return minfo
   where
     go DoesNotExist = return Nothing
@@ -681,7 +717,7 @@ cacheLoadObject dets sha ce metadataOnly = do
                                <$> pure len
                                <*> pure typ
                                <*> pure (Just path)
-                               <*> (Just <$> liftIO (B.readFile path)))
+                               <*> (Just <$> liftIO (BL.readFile path)))
                 else go LooseRemote
 
     go (PackedRemote packSha) = do
@@ -709,7 +745,7 @@ cacheLoadObject dets sha ce metadataOnly = do
                 mresult <- lgReadFromPack idxPath sha metadataOnly
                 for mresult $ \(typ, len, bytes) ->
                     return $ ObjectInfo (fromLength len) (fromType typ)
-                        Nothing (Just bytes)
+                        Nothing (Just (BL.fromChunks [bytes]))
             else go (PackedRemote packSha)
 
 cacheStoreObject :: MonadLg m => OdbS3Details -> SHA -> ObjectInfo -> m ()
@@ -717,14 +753,12 @@ cacheStoreObject dets sha info@ObjectInfo {..} = do
     lgDebug $ "cacheStoreObject " ++ show sha ++ " " ++ show info
     liftIO go >>= cacheUpdateEntry dets sha
   where
-    go | Just path <- infoPath = do
-           for_ infoData $ B.writeFile path
-           now <- getCurrentTime
-           return $ LooseCached infoLength infoType now path
-
-       | Just bytes <- infoData = do
-           let path = tempDirectory dets </> fromSha sha
-           B.writeFile path bytes
+    go | Just bytes <- infoData = do
+           let path = tempDirectory dets
+                   </> (fromSha sha
+                           ++ "-" ++ show (getObjectType infoType)
+                           ++ "-" ++ show (getObjectLength infoLength))
+           BL.writeFile path bytes
            now <- getCurrentTime
            return $ LooseCached infoLength infoType now path
 
@@ -813,7 +847,7 @@ remoteReadFile dets path = do
             { infoLength = ObjectLength (fromIntegral len)
             , infoType   = ObjectType (fromIntegral typ)
             , infoPath   = Just path
-            , infoData   = Just bytes
+            , infoData   = Just (BL.fromChunks [bytes])
             }
 
     readData hdrLen content offset x = liftIO $ do
@@ -856,14 +890,14 @@ remoteReadPackFile dets packSha readPackAndIndex = do
             case infoData of
                 Nothing -> throw $ Git.BackendError $
                     "failed to download data for " <> T.pack path
-                Just xs -> liftIO $ B.writeFile path xs
+                Just xs -> liftIO $ BL.writeFile path xs
 
 remoteWriteFile :: MonadLg m
-                => OdbS3Details -> Text -> ObjectType -> ByteString
+                => OdbS3Details -> Text -> ObjectType -> BL.ByteString
                 -> ResourceT m ()
 remoteWriteFile dets path typ bytes = do
     mstatus <- wrapCheckQuota (checkQuota (callbacks dets))
-                   (ObjectLength (fromIntegral (B.length bytes)))
+                   (ObjectLength (fromIntegral (BL.length bytes)))
     case mstatus of
         Nothing -> go
         Just QuotaCheckSuccess -> go
@@ -877,10 +911,10 @@ remoteWriteFile dets path typ bytes = do
   where
     go = do
         lgDebug $ "remoteWriteFile " ++ show path
-        let hdr = Bin.encode ((fromIntegral (B.length bytes),
+        let hdr = Bin.encode ((fromIntegral (BL.length bytes),
                                fromIntegral (getObjectType typ))
                               :: (Int64,Int64))
-            payload = BL.append hdr (BL.fromChunks [bytes])
+            payload = BL.append hdr bytes
         putFileS3 dets path (sourceLbs payload)
 
 remoteLoadObject :: MonadLg m
@@ -989,10 +1023,10 @@ writeObject dets sha info = do
     cacheStoreObject dets sha info
 
 writePackFile :: (MonadLg m, MonadUnsafeIO m, MonadThrow m)
-              => OdbS3Details -> ByteString -> m ()
+              => OdbS3Details -> BL.ByteString -> m ()
 writePackFile dets bytes = do
     let dir = tempDirectory dets
-        len = B.length bytes
+        len = BL.length bytes
     lgDebug $ "writePackFile: building index for " ++ show len ++ " bytes"
     (packSha, packPath, idxPath) <- lgBuildPackIndex dir bytes
 
@@ -1000,7 +1034,7 @@ writePackFile dets bytes = do
         remoteWriteFile dets (T.pack (takeFileName packPath)) plainFile bytes
     runResourceT
         . remoteWriteFile dets (T.pack (takeFileName idxPath)) plainFile
-        =<< liftIO (B.readFile idxPath)
+        =<< liftIO (BL.readFile idxPath)
 
     -- This updates the local cache and remote registry with knowledge of
     -- every object in the pack file.
@@ -1023,10 +1057,20 @@ readCallback data_p len_p type_p be oid = do
     go dets sha = do
         minfo <- readObject dets sha False
         liftIO $ for minfo $ \(ObjectInfo len typ _ (Just bytes)) -> do
-            pokeByteString bytes data_p len
-            poke len_p (toLength len)
-            poke type_p (toType typ)
-            return (Just ())
+            let bytesLen = BL.length bytes
+            assert (getObjectLength len == bytesLen) $ do
+                content <- castPtr <$>
+                    c'git_odb_backend_malloc be (fromIntegral bytesLen)
+                poke data_p (castPtr content)
+                foldM_ copyData content (BL.toChunks bytes)
+                poke len_p (toLength len)
+                poke type_p (toType typ)
+                return (Just ())
+      where
+        copyData p chunk = do
+            let len = B.length chunk
+            BU.unsafeUseAsCString chunk $ copyBytes p ?? len
+            return $ p `plusPtr` len
 
 readPrefixCallback :: (MonadLg m, MonadUnsafeIO m, MonadThrow m)
                    => Ptr C'git_oid
@@ -1106,7 +1150,7 @@ writeCallback oid be obj_data len obj_type = do
                      (castPtr obj_data) (fromIntegral len)
         writeObject dets sha
             (ObjectInfo (fromLength len) (fromType obj_type)
-                 Nothing (Just bytes))
+                 Nothing (Just (BL.fromChunks [bytes])))
 
 existsCallback :: (MonadLg m, MonadUnsafeIO m, MonadThrow m)
                => Ptr C'git_odb_backend -> Ptr C'git_oid -> CInt -> m CInt
@@ -1188,7 +1232,7 @@ packAddCallback wp dataPtr len _progress =
         dets  <- liftIO $ deRefStablePtr (details odbS3)
         bytes <- liftIO $ curry BU.unsafePackCStringLen
                      (castPtr dataPtr) (fromIntegral len)
-        writePackFile dets bytes
+        writePackFile dets (BL.fromChunks [bytes])
 
 packCommitCallback :: (MonadLg m, MonadUnsafeIO m, MonadThrow m)
                    => Ptr C'git_odb_writepack -> Ptr C'git_transfer_progress
@@ -1369,7 +1413,7 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
             , c'git_odb_backend'free        = freeCallbackPtr
             }
 
-    liftIO $ do
+    ptr <- liftIO $ do
         dirExists <- doesDirectoryExist dir
         unless dirExists $ createDirectoryIfMissing True dir
 
@@ -1387,8 +1431,11 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
             , c'git_odb_writepack'free    = packFreeCallbackPtr
             }
         pokeByteOff ptr (sizeOf (undefined :: C'git_odb_backend)) packWriterPtr
-
         return ptr
+
+    lgDebug $ "Created new S3 backend at " ++ show ptr
+
+    return ptr
 
 -- | Given a repository object obtained from Libgit2, add an S3 backend to it,
 --   making it the primary store for objects associated with that repository.

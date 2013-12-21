@@ -72,6 +72,7 @@ import           Control.Monad.Trans.Resource
 import           Data.Bits ((.|.), (.&.))
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
 import           Data.Foldable
@@ -640,10 +641,6 @@ lgSourceObjects mhave need alsoTrees = do
     c <- lift $ lgLookupCommit need
     let oid = untag (Git.commitOid c)
 
-    liftIO $ putStrLn $ "mhave = " ++ show mhave
-    liftIO $ putStrLn $ "need  = " ++ show need
-    liftIO $ putStrLn $ "oid   = " ++ show oid
-
     liftIO $ withForeignPtr (getOid oid) $ \coid -> do
         r2 <- withForeignPtr walker $ flip c'git_revwalk_push coid
         when (r2 < 0) $
@@ -952,6 +949,7 @@ gatherFrom size scatter = do
         (xs, mres) <- liftIO $ atomically $ do
             xs <- whileM (not <$> isEmptyTBQueue chan) (readTBQueue chan)
             (xs,) <$> pollSTM worker
+        liftIO $ putStrLn "..."
         mapM_ yield xs
         case mres of
             Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
@@ -997,7 +995,7 @@ lgThrow f = do
 
 lgDiffContentsWithTree
     :: MonadLg m
-    => Source m (Either Git.TreeFilePath ByteString)
+    => Source m (Either Git.TreeFilePath (Either Git.SHA ByteString))
     -> Tree m
     -> Producer (LgRepository m) ByteString
 lgDiffContentsWithTree _contents (LgTree Nothing) =
@@ -1070,12 +1068,32 @@ lgDiffContentsWithTree contents tree = do
         handleContent path (Right content) = return (path, content)
 
         diffBlob path mcontent mboid = do
-            r <- liftIO $ runResourceT $ case mboid of
-                Nothing   -> go nullPtr
-                Just boid -> withBlob boid
+            r <- liftIO $ runResourceT $ do
+                fileHeader <- liftIO $ newIORef Nothing
+
+                let f = flip allocate freeHaskellFunPtr
+                (_, fcb) <- f $ mk'git_diff_file_cb (file_cb fileHeader)
+                (_, hcb) <- f $ mk'git_diff_hunk_cb (hunk_cb fileHeader)
+                (_, pcb) <- f $ mk'git_diff_data_cb print_cb
+
+                let db  = diffBlobs fcb hcb pcb
+                    dbb = diffBlobToBuffer fcb hcb pcb
+                case mboid of
+                    Nothing   -> dbb nullPtr
+                    Just boid -> withBlob boid $ \blobp ->
+                        case mcontent of
+                            Just (Left sha) -> do
+                                boid2 <- liftIO $ shaToOid sha
+                                if boid == boid2
+                                    then withBlob boid2 $ db blobp
+                                    else return 0
+                            _ -> dbb blobp
             when (r < 0) $ lgThrow Git.DiffBlobFailed
           where
-            withBlob boid = do
+            withBlob :: ForeignPtr C'git_oid
+                     -> (Ptr C'git_blob -> ResourceT IO CInt)
+                     -> ResourceT IO CInt
+            withBlob boid f = do
                 (_, eblobp) <- flip allocate freeBlob $
                     alloca $ \blobpp ->
                     withForeignPtr boid $ \boidPtr ->
@@ -1086,23 +1104,23 @@ lgDiffContentsWithTree contents tree = do
                             else Right <$> peek blobpp
                 case eblobp of
                     Left r      -> return r
-                    Right blobp -> go blobp
+                    Right blobp -> f blobp
               where
                 freeBlob (Left _)      = return ()
                 freeBlob (Right blobp) = c'git_blob_free blobp
 
-            go blobp = do
-                let f x = allocate x freeHaskellFunPtr
-                (_, file_cb')  <- f $ mk'git_diff_file_cb file_cb
-                (_, hunk_cb')  <- f $ mk'git_diff_hunk_cb hunk_cb
-                (_, print_cb') <- f $ mk'git_diff_data_cb print_cb
-
+            diffBlobToBuffer fcb hcb pcb blobp = do
                 let diff s l =
                         c'git_diff_blob_to_buffer blobp s (fromIntegral l)
-                            nullPtr file_cb' hunk_cb' print_cb' nullPtr
+                            nullPtr fcb hcb pcb nullPtr
                 liftIO $ case mcontent of
-                    Nothing -> diff nullPtr 0
-                    Just c  -> BU.unsafeUseAsCStringLen c $ uncurry diff
+                    Just (Right c) ->
+                        BU.unsafeUseAsCStringLen c $ uncurry diff
+                    _ -> diff nullPtr 0
+
+            diffBlobs fcb hcb pcb blobp otherp =
+                liftIO $ c'git_diff_blobs blobp otherp nullPtr
+                    fcb hcb pcb nullPtr
 
             isBinary delta =
                 c'git_diff_delta'flags delta .&. c'GIT_DIFF_FLAG_BINARY /= 0
@@ -1110,32 +1128,36 @@ lgDiffContentsWithTree contents tree = do
             deltaFileName = fmap (T.encodeUtf8 . T.pack) . peekCString
                                 . c'git_diff_file'path
 
-            file_cb :: Ptr C'git_diff_delta
+            file_cb :: IORef (Maybe ByteString)
+                    -> Ptr C'git_diff_delta
                     -> CFloat
                     -> Ptr ()
                     -> IO CInt
-            file_cb deltap _progress _payload = do
+            file_cb fh deltap _progress _payload = do
                 delta <- peek deltap
-                atomically $
+                writeIORef fh $ Just $
                     if isBinary delta
-                    then writeTBQueue chan $
-                        "Binary files a/" <> path
-                            <> " and b/" <> path <> " differ\n"
-                    else do
-                        writeTBQueue chan $ "--- a/" <> path <> "\n"
-                        writeTBQueue chan $ "+++ b/" <> path <> "\n"
+                    then "Binary files a/" <> path <> " and b/" <> path
+                        <> " differ\n"
+                    else "--- a/" <> path <> "\n" <> "+++ b/" <> path <> "\n"
                 return 0
 
-            hunk_cb :: Ptr C'git_diff_delta
+            hunk_cb :: IORef (Maybe ByteString)
+                    -> Ptr C'git_diff_delta
                     -> Ptr C'git_diff_range
                     -> CString
                     -> CSize
                     -> Ptr ()
                     -> IO CInt
-            hunk_cb deltap _rangep header headerLen _payload = do
+            hunk_cb fh deltap _rangep header headerLen _payload = do
                 delta <- peek deltap
+                mfh <- readIORef fh
+                forM_ mfh $ \h -> do
+                    atomically $ writeTBQueue chan h
+                    writeIORef fh Nothing
                 unless (isBinary delta) $ do
-                    bs <- curry B.packCStringLen header (fromIntegral headerLen)
+                    bs <- curry B.packCStringLen header
+                        (fromIntegral headerLen)
                     atomically $ writeTBQueue chan bs
                 return 0
 
@@ -1214,12 +1236,12 @@ lift_ = void . lift
 
 lgBuildPackIndexWrapper :: MonadLg m
                         => FilePath
-                        -> ByteString
+                        -> BL.ByteString
                         -> LgRepository m (Text, FilePath, FilePath)
 lgBuildPackIndexWrapper = (lift .) . lgBuildPackIndex
 
 lgBuildPackIndex :: (MonadLg m, MonadLogger m)
-                 => FilePath -> ByteString -> m (Text, FilePath, FilePath)
+                 => FilePath -> BL.ByteString -> m (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
     return (sha, dir </> ("pack-" <> unpack sha <> ".pack"),
@@ -1236,10 +1258,10 @@ lgBuildPackIndex dir bytes = do
 
         lift_ . run $
             lgDebug $ "Add the incoming packfile data to the stream ("
-                 ++ show (B.length bytes) ++ " bytes)"
+                 ++ show (BL.length bytes) ++ " bytes)"
         (_,statsPtr) <- allocate calloc free
-        liftIO $ BU.unsafeUseAsCStringLen bytes $
-            uncurry $ \dataPtr dataLen -> do
+        liftIO $ forM_ (BL.toChunks bytes) $ \chunk ->
+            BU.unsafeUseAsCStringLen chunk $ uncurry $ \dataPtr dataLen -> do
                 r <- c'git_indexer_stream_add idxPtr (castPtr dataPtr)
                          (fromIntegral dataLen) statsPtr
                 checkResult r "c'git_indexer_stream_add failed"
@@ -1337,32 +1359,28 @@ lgLoadPackFileInMemory :: (MonadLg m, MonadUnsafeIO m, MonadThrow m,
                        -> Ptr (Ptr C'git_odb)
                        -> ResourceT m (Ptr C'git_odb)
 lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
-    lgDebug "Creating temporary, in-memory object database"
-    (freeKey,odbPtr) <- flip allocate c'git_odb_free $ do
+    lgDebug "Create temporary, in-memory object database"
+    (_,odbPtr) <- flip allocate c'git_odb_free $ do
         r <- c'git_odb_new odbPtrPtr
         checkResult r "c'git_odb_new failed"
         peek odbPtrPtr
 
     lgDebug $ "Load pack index " ++ show idxPath ++ " into temporary odb"
-    (_,backendPtr) <- allocate
-        (do r <- withCString idxPath $ \idxPathStr ->
+    bracketOnError
+        (do r <- liftIO $ withCString idxPath $ \idxPathStr ->
                 c'git_odb_backend_one_pack backendPtrPtr idxPathStr
             checkResult r "c'git_odb_backend_one_pack failed"
-            peek backendPtrPtr)
+            liftIO $ peek backendPtrPtr)
+        (\backendPtr -> liftIO $ do
+            backend <- peek backendPtr
+            mK'git_odb_backend_free_callback
+                (c'git_odb_backend'free backend) backendPtr)
         (\backendPtr -> do
-              backend <- peek backendPtr
-              mK'git_odb_backend_free_callback
-                  (c'git_odb_backend'free backend) backendPtr)
-
-    -- Since freeing the backend will now free the object database, unregister
-    -- the finalizer we had setup for the odbPtr
-    void $ unprotect freeKey
-
-    -- Associate the new backend containing our single index file with the
-    -- in-memory object database
-    lgDebug "Associate odb with backend"
-    r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
-    checkResult r "c'git_odb_add_backend failed"
+            -- Associate the new backend containing our single index file with
+            -- the in-memory object database
+            lgDebug "Associate odb with backend"
+            r <- liftIO $ c'git_odb_add_backend odbPtr backendPtr 1
+            checkResult r "c'git_odb_add_backend failed")
 
     return odbPtr
 
@@ -1370,11 +1388,8 @@ lgWithPackFile :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
                => FilePath -> (Ptr C'git_odb -> ResourceT m a) -> m a
 lgWithPackFile idxPath f = control $ \run ->
     alloca $ \odbPtrPtr ->
-    alloca $ \backendPtrPtr -> run $ runResourceT $ do
-        lift $ lgDebug "Load pack file into an in-memory object database"
-        odbPtr <- lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
-        lift $ lgDebug "Calling function using in-memory odb"
-        f odbPtr
+    alloca $ \backendPtrPtr -> run $ runResourceT $
+        f =<< lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
 lgReadFromPack :: (MonadLg m, MonadUnsafeIO m, MonadThrow m, MonadLogger m)
                => FilePath -> Git.SHA -> Bool
