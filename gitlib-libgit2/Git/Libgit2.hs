@@ -57,6 +57,7 @@ module Git.Libgit2
 
 import           Bindings.Libgit2
 import           Control.Applicative
+import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async.Lifted
 import           Control.Concurrent.STM
 import           Control.Exception.Lifted
@@ -346,7 +347,7 @@ gatherFrom' size scatter = do
         (xs, mres) <- liftIO $ atomically $ do
             xs <- whileM (not <$> isEmptyTBQueue chan) (readTBQueue chan)
             (xs,) <$> pollSTM worker
-        liftIO $ putStrLn "..."
+        liftIO $ threadDelay 1
         mapM_ yield xs
         case mres of
             Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
