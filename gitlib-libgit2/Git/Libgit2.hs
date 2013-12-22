@@ -333,12 +333,32 @@ lgTreeOid (LgTree (Just tree)) = SU.unsafePerformIO $ liftIO $ do
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
+gatherFrom' :: (MonadIO m, MonadBaseControl IO m)
+           => Int                -- ^ Size of the queue to create
+           -> (TBQueue o -> m ()) -- ^ Action that generates output values
+           -> Producer m o
+gatherFrom' size scatter = do
+    chan   <- liftIO $ newTBQueueIO size
+    worker <- lift $ async (scatter chan)
+    lift . restoreM =<< gather worker chan
+  where
+    gather worker chan = do
+        (xs, mres) <- liftIO $ atomically $ do
+            xs <- whileM (not <$> isEmptyTBQueue chan) (readTBQueue chan)
+            (xs,) <$> pollSTM worker
+        liftIO $ putStrLn "..."
+        mapM_ yield xs
+        case mres of
+            Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
+            Just (Right r) -> return r
+            Nothing        -> gather worker chan
+
 lgSourceTreeEntries
     :: MonadLg m
     => Tree m
     -> Producer (LgRepository m) (Git.TreeFilePath, TreeEntry m)
 lgSourceTreeEntries (LgTree Nothing) = return ()
-lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom 16 $ \queue -> do
+lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
     liftIO $ withForeignPtr tree $ \tr -> do
         r <- bracket
                 (mk'git_treewalk_cb (callback queue))
@@ -864,7 +884,7 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
 
 lgSourceRefs :: MonadLg m => Producer (LgRepository m) Git.RefName
 lgSourceRefs =
-    gatherFrom 16 $ \queue -> do
+    gatherFrom' 16 $ \queue -> do
         repo <- lgGet
         r <- liftIO $ bracket
             (mk'git_reference_foreach_cb (callback queue))
@@ -954,7 +974,7 @@ lgDiffContentsWithTree _contents (LgTree Nothing) =
 
 lgDiffContentsWithTree contents tree = do
     repo <- lift lgGet
-    gatherFrom 16 $ generateDiff repo
+    gatherFrom' 16 $ generateDiff repo
   where
     generateDiff repo chan = do
         entries   <- M.fromList <$> Git.listTreeEntries tree
