@@ -1265,15 +1265,11 @@ lgCopyPackFile packFile = do
             peek odbPtrPtr
 
         lift_ . run $ lgDebug "Opening pack writer into odb"
-        (_,writepackPtr) <- allocate
-            (do r <- c'git_odb_write_pack writepackPtrPtr odbPtr
-                         nullFunPtr nullPtr
-                checkResult r "c'git_odb_write_pack failed"
-                peek writepackPtrPtr)
-            (\writepackPtr -> do
-                  writepack <- peek writepackPtr
-                  mK'git_odb_writepack_free_callback
-                      (c'git_odb_writepack'free writepack) writepackPtr)
+        writepackPtr <- liftIO $ do
+            r <- c'git_odb_write_pack writepackPtrPtr odbPtr
+                nullFunPtr nullPtr
+            checkResult r "c'git_odb_write_pack failed"
+            peek writepackPtrPtr
         writepack <- liftIO $ peek writepackPtr
 
         bs <- liftIO $ B.readFile packFile

@@ -830,7 +830,7 @@ remoteReadFile dets path = do
     lgDebug $ "remoteReadFile: downloaded " ++ show path
     case blocks of
       [] -> return Nothing
-      bs -> processData bs
+      bs -> Just <$> processData bs
   where
     processData bs = do
         let hdrLen = sizeOf (undefined :: Int64) * 2
@@ -839,11 +839,10 @@ remoteReadFile dets path = do
                     (Bin.decode (BL.fromChunks [L.head bs])
                      :: (Int64,Int64))
         lgDebug $ "downloadFile: length from header is " ++ show len
-        content <- liftIO $ mallocBytes len
-        foldM_ (readData hdrLen content) 0 bs
-        bytes <- liftIO $ curry BU.unsafePackCStringLen
-                     (castPtr content) (fromIntegral len)
-        return . Just $ ObjectInfo
+        bytes <- liftIO $ allocaBytes len $ \content -> do
+            foldM_ (readData hdrLen content) 0 bs
+            curry B.packCStringLen (castPtr content) (fromIntegral len)
+        return ObjectInfo
             { infoLength = ObjectLength (fromIntegral len)
             , infoType   = ObjectType (fromIntegral typ)
             , infoPath   = Just path
@@ -878,6 +877,7 @@ remoteReadPackFile dets packSha readPackAndIndex = do
             void $ if exists
                    then return (Just ())
                    else download packPath
+
         exists <- liftIO $ doesFileExist idxPath
         void $ if exists
                then return (Just ())
@@ -889,7 +889,7 @@ remoteReadPackFile dets packSha readPackAndIndex = do
         for minfo $ \ObjectInfo {..} ->
             case infoData of
                 Nothing -> throw $ Git.BackendError $
-                    "failed to download data for " <> T.pack path
+                    "Failed to download data for " <> T.pack path
                 Just xs -> liftIO $ BL.writeFile path xs
 
 remoteWriteFile :: MonadLg m
@@ -1194,11 +1194,8 @@ freeCallback be = do
 
     shuttingDown (callbacks dets)
 
-    let tmpDir = tempDirectory dets
-    exists <- doesDirectoryExist tmpDir
-    when exists $
-        removeDirectoryRecursive tmpDir
-            `catch` \(_ :: SomeException) -> return ()
+    packFreeCallback (packWriter odbS3)
+    freeStablePtr (details odbS3)
 
     backend <- peek be
     freeHaskellFunPtr (c'git_odb_backend'read backend)
@@ -1206,9 +1203,11 @@ freeCallback be = do
     freeHaskellFunPtr (c'git_odb_backend'read_header backend)
     freeHaskellFunPtr (c'git_odb_backend'write backend)
     freeHaskellFunPtr (c'git_odb_backend'exists backend)
+    freeHaskellFunPtr (c'git_odb_backend'refresh backend)
+    freeHaskellFunPtr (c'git_odb_backend'foreach backend)
+    freeHaskellFunPtr (c'git_odb_backend'writepack backend)
 
-    free (packWriter odbS3)
-    freeStablePtr (details odbS3)
+    free (castPtr be :: Ptr OdbS3Backend)
 
 foreign export ccall "freeCallback"
   freeCallback :: F'git_odb_backend_free_callback
@@ -1245,6 +1244,7 @@ packFreeCallback wp = do
     writepack <- peek wp
     freeHaskellFunPtr (c'git_odb_writepack'add writepack)
     freeHaskellFunPtr (c'git_odb_writepack'commit writepack)
+    free wp
 
 foreign export ccall "packFreeCallback"
   packFreeCallback :: F'git_odb_writepack_free_callback
