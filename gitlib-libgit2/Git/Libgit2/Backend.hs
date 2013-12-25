@@ -78,6 +78,7 @@ odbBackendAdd repo backend priority =
         else do
         odb <- peek odbPtr
         r2 <- c'git_odb_add_backend odb backend (fromIntegral priority)
+        c'git_odb_free odb
         if r2 < 0
           then return (Left "Cannot add backend to repository ODB")
           else return (Right repo)

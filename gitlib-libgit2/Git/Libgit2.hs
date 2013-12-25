@@ -658,7 +658,7 @@ lgSourceObjects mhave need alsoTrees = do
         when (r < 0) $
             failure (Git.BackendError "Could not create revwalker")
         ptr <- peek pptr
-        newForeignPtr p'git_revwalk_free ptr
+        FC.newForeignPtr ptr (c'git_revwalk_free ptr)
 
     c <- lift $ lgLookupCommit need
     let oid = untag (Git.commitOid c)
@@ -1473,7 +1473,7 @@ openLgRepository opts = do
                 when (r < 0) $
                     error $ "Could not open repository " ++ show path
                 ptr' <- peek ptr
-                newForeignPtr p'git_repository_free ptr'
+                FC.newForeignPtr ptr' (c'git_repository_free ptr')
         excTrap <- newIORef Nothing
         return Repository { repoOptions = opts
                           , repoObj     = fptr

@@ -21,6 +21,7 @@ import           Data.Time.Clock.POSIX (posixSecondsToUTCTime,
                                         utcTimeToPOSIXSeconds)
 import           Foreign.C.String
 import           Foreign.C.Types
+import qualified Foreign.Concurrent as FC
 import           Foreign.ForeignPtr
 import           Foreign.Marshal.Alloc
 import           Foreign.Ptr
@@ -91,7 +92,8 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
               coidCopy <- mallocForeignPtr
               withForeignPtr coidCopy $ flip c'git_oid_cpy coid
 
-              fptr <- newForeignPtr p'git_object_free (castPtr ptr')
+              let p = castPtr ptr'
+              fptr <- FC.newForeignPtr p (c'git_object_free p)
               run $ Right <$> createFn coidCopy (castForeignPtr fptr) ptr'
     either (failure . Git.BackendError) return result
 
