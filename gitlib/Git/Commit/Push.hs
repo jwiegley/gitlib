@@ -1,8 +1,12 @@
 module Git.Commit.Push where
 
+import           Control.Applicative
 import           Control.Failure
 import           Control.Monad
+import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
+import           Data.Default
 import           Data.Function
 import qualified Data.HashSet as HashSet
 import           Data.List
@@ -14,8 +18,9 @@ import           Data.Traversable (for)
 import           Git.Commit
 import           Git.Object
 import           Git.Reference
+import           Git.Repository
 import           Git.Types
-import           Prelude hiding (FilePath)
+import           Prelude
 
 -- | Fast-forward push a reference between repositories using a recursive
 --   copy.  This can be extremely slow, but always works no matter which two
@@ -41,3 +46,39 @@ pushCommit coid remoteRefName = do
     -- jww (2013-04-18): This is something the user must decide to do
     -- updateReference_ remoteRefName (RefObj cref)
     return cref
+
+copyRepository :: (Repository (t m), Repository m, MonadTrans t,
+                   MonadIO m, MonadBaseControl IO m)
+                => RepositoryFactory (t m) m c
+                -> Maybe (CommitOid m)
+                -> Text
+                -> FilePath
+                -> Bool
+                -> m ()
+copyRepository factory mname refName gitDir isBare =
+    withRepository' factory
+        def { repoPath       = gitDir
+            , repoIsBare     = isBare
+            , repoAutoCreate = True
+            }
+        (maybe (return ()) go mname)
+  where
+    go coid = do
+        -- jww (2013-04-24): We don't need do download every object back to
+        -- the first commit, but only the commits (and their objects) back to
+        -- and including the common ancestor.  The question is, how do we
+        -- determine the common ancestor before we've fetched all the contents
+        -- of at least one side?
+        cref <- pushCommit coid refName
+
+        -- This will always be a fast-forward, since temp.git is empty.  The
+        -- resulting HEAD will have the refname as the ref we want to push to
+        -- or pull from, and no others.
+        updateReference refName (RefObj (untag cref))
+        updateReference "HEAD" (RefSymbolic refName)
+
+        mref <- fmap renderOid <$> resolveReference refName
+        unless (maybe False (renderObjOid coid ==) mref) $
+            failure (BackendError $
+                     "Could not resolve destination reference '"
+                     <> refName <> "'in project")
