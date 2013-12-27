@@ -8,7 +8,7 @@ import Git.Types
 import System.Directory
 
 withNewRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
-                  => RepositoryFactory n m c
+                  => RepositoryFactory n m r
                   -> FilePath -> n a -> m a
 withNewRepository factory path action = do
     liftIO $ do
@@ -30,7 +30,7 @@ withNewRepository factory path action = do
 
 withNewRepository' :: (MonadGit r n, MonadBaseControl IO n,
                        MonadBaseControl IO m, MonadIO m)
-                   => RepositoryFactory n m c -> FilePath -> n a -> m a
+                   => RepositoryFactory n m r -> FilePath -> n a -> m a
 withNewRepository' factory path action =
     bracket_ recover recover $
         withRepository' factory RepositoryOptions
@@ -44,12 +44,12 @@ withNewRepository' factory path action =
         when exists $ removeDirectoryRecursive path
 
 withRepository' :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
-                => RepositoryFactory n m c -> RepositoryOptions -> n a -> m a
+                => RepositoryFactory n m r -> RepositoryOptions -> n a -> m a
 withRepository' factory opts action = do
     repo <- openRepository factory opts
     runRepository factory repo $ action `finally` closeRepository
 
 withRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
-               => RepositoryFactory n m c -> FilePath -> n a -> m a
+               => RepositoryFactory n m r -> FilePath -> n a -> m a
 withRepository factory path =
     withRepository' factory defaultRepositoryOptions { repoPath = path }

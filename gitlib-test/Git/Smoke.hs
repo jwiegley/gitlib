@@ -12,7 +12,6 @@ module Git.Smoke where
 
 import           Control.Applicative
 import           Control.Exception
-import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
@@ -38,10 +37,9 @@ sampleCommit tr sig =
     createCommit [] tr sig sig "Sample log message.\n" Nothing
 
 smokeTestSpec :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
-                  MonadGit s n, MonadIO n, MonadBaseControl IO n,
-                  Failure GitException o, MonadIO o, MonadBaseControl IO o)
+                  MonadGit s n, MonadIO n, MonadBaseControl IO n)
               => RepositoryFactory m IO r
-              -> RepositoryFactory n o s
+              -> RepositoryFactory n m s
               -> Spec
 smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do

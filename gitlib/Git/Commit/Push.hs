@@ -48,7 +48,7 @@ pushCommit coid remoteRefName = do
 
 copyRepository :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
                    MonadGit s (t m), MonadTrans t, MonadBaseControl IO (t m))
-                => RepositoryFactory (t m) m c
+                => RepositoryFactory (t m) m s
                 -> Maybe (CommitOid r)
                 -> Text
                 -> FilePath
