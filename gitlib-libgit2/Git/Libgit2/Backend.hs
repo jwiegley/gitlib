@@ -67,8 +67,8 @@ type F'git_odb_writepack_commit_callback =
 type F'git_odb_writepack_free_callback = Ptr C'git_odb_writepack -> IO ()
 
 
-odbBackendAdd :: Repository -> Ptr C'git_odb_backend -> Int
-              -> IO (Either String Repository)
+odbBackendAdd :: LgRepo -> Ptr C'git_odb_backend -> Int
+              -> IO (Either String LgRepo)
 odbBackendAdd repo backend priority =
   withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \odbPtr -> do

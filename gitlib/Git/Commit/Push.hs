@@ -6,7 +6,6 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
-import           Data.Default
 import           Data.Function
 import qualified Data.HashSet as HashSet
 import           Data.List
@@ -26,8 +25,8 @@ import           Prelude
 --   copy.  This can be extremely slow, but always works no matter which two
 --   backends are being used.  It should be considered a matter of last
 --   resort, or for objects sets that are known to be small.
-pushCommit :: (Repository m, Repository (t m), MonadTrans t)
-           => CommitOid m -> Text -> t m (CommitOid (t m))
+pushCommit :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
+           => CommitOid r -> Text -> t m (CommitOid s)
 pushCommit coid remoteRefName = do
     commits <- mapM copyCommitOid =<< lift (listCommits Nothing coid)
     mrref   <- fmap Tagged `liftM` resolveReference remoteRefName
@@ -47,20 +46,20 @@ pushCommit coid remoteRefName = do
     -- updateReference_ remoteRefName (RefObj cref)
     return cref
 
-copyRepository :: (Repository (t m), Repository m, MonadTrans t,
-                   MonadIO m, MonadBaseControl IO m)
+copyRepository :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
+                   MonadGit s (t m), MonadTrans t, MonadBaseControl IO (t m))
                 => RepositoryFactory (t m) m c
-                -> Maybe (CommitOid m)
+                -> Maybe (CommitOid r)
                 -> Text
                 -> FilePath
                 -> Bool
                 -> m ()
 copyRepository factory mname refName gitDir isBare =
-    withRepository' factory
-        def { repoPath       = gitDir
-            , repoIsBare     = isBare
-            , repoAutoCreate = True
-            }
+    withRepository' factory RepositoryOptions
+        { repoPath       = gitDir
+        , repoIsBare     = isBare
+        , repoAutoCreate = True
+        }
         (maybe (return ()) go mname)
   where
     go coid = do

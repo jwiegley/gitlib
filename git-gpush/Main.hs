@@ -12,6 +12,7 @@ module Main where
 
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
+import           Control.Monad.Trans.Reader
 import           Data.Char
 import           Data.Foldable hiding (concat, concatMap, elem)
 import           Data.List
@@ -35,10 +36,10 @@ import           Options.Applicative
 import           Shelly hiding (FilePath)
 
 #if USE_LIBGIT2
-factory :: RepositoryFactory Lg.LgRepository IO Lg.Repository
+factory :: RepositoryFactory (ReaderT Lg.LgRepo (NoLoggingT IO)) IO Lg.LgRepo
 factory = Lg.lgFactory
 #else
-factory :: RepositoryFactory (Cli.CmdLineRepository IO) IO Cli.Repository
+factory :: RepositoryFactory (ReaderT Cli.CliRepo IO) IO Cli.CliRepo
 factory = Cli.cliFactory
 #endif
 
@@ -83,7 +84,7 @@ git_ :: [Text] -> Sh ()
 git_ = run_ "git"
 
 main :: IO ()
-main = withBackendDo factory $ execParser opts >>= pushToGitHub
+main = execParser opts >>= pushToGitHub
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)

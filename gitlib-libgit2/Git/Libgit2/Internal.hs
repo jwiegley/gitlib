@@ -13,7 +13,6 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Control
 import           Data.ByteString
-import           Data.Tagged
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
 import           Data.Time
@@ -32,17 +31,10 @@ import           Git.Libgit2.Trace
 import           Git.Libgit2.Types
 import           System.FilePath.Posix
 
-type ObjPtr a = Maybe (ForeignPtr a)
-
-data Base m a b = Base
-    { gitId  :: Maybe (Tagged a (Git.Oid (LgRepository m)))
-    , gitObj :: ObjPtr b
-    }
-
-addTracingBackend :: Git.MonadGit m => LgRepository m ()
+addTracingBackend :: MonadLg m => m ()
 addTracingBackend = do
-    repo <- lgGet
-    liftIO $ withCString (repoPath repo </> "objects") $ \objectsDir ->
+    repo <- Git.getRepository
+    liftIO $ withCString (lgRepoPath repo </> "objects") $ \objectsDir ->
         alloca $ \loosePtr -> do
             r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
             when (r < 0) $
@@ -61,14 +53,14 @@ coidPtrToOid coidptr = do
     return fptr
 
 lookupObject'
-  :: Git.MonadGit m
+  :: (MonadLg m, MonadBaseControl IO m)
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CSize -> IO CInt)
-  -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> LgRepository m b)
-  -> LgRepository m b
+  -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> m b)
+  -> m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
-    repo <- lgGet
+    repo <- Git.getRepository
     result <- control $ \run -> alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
             withForeignPtr oid $ \oidPtr ->

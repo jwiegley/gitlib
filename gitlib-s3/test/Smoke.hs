@@ -11,8 +11,10 @@ module Main where
 
 import           Aws
 import           Control.Applicative
+import           Control.Failure
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
+import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
 import           Data.Default (def)
 import           Data.Maybe (fromMaybe, isNothing)
@@ -21,21 +23,22 @@ import qualified Git
 import qualified Git.Libgit2 as Lg
 import qualified Git.S3 as S3
 import qualified Git.Smoke as Git
+import           System.Directory
 import           System.Environment
+import           System.FilePath.Posix
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
-import           System.Directory
-import           System.FilePath.Posix
 
-s3Factory :: (Git.MonadGit m, MonadUnsafeIO m, MonadThrow m)
-          => Git.RepositoryFactory
-                 (Lg.LgRepository (NoLoggingT m)) m Lg.Repository
+s3Factory
+    :: (Failure Git.GitException m, MonadIO m, MonadBaseControl IO m,
+        MonadUnsafeIO m, MonadThrow m)
+    => Git.RepositoryFactory (ReaderT Lg.LgRepo (NoLoggingT m)) m Lg.LgRepo
 s3Factory = Lg.lgFactory
     { Git.runRepository = \ctxt m ->
        runNoLoggingT $ Lg.runLgRepository ctxt (s3back >> m) }
   where
     s3back = do
-        repo <- Lg.lgGet
+        repo <- Git.getRepository
         env <- liftIO getEnvironment
         let bucket    = T.pack <$> lookup "S3_BUCKET" env
             accessKey = T.pack <$> lookup "AWS_ACCESS_KEY" env

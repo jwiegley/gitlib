@@ -276,7 +276,6 @@ treeEntryToProxy name (Git.BlobEntry oid kind) =
             Git.PlainBlob      -> "100644"
             Git.ExecutableBlob -> "100755"
             Git.SymlinkBlob    -> "120000"
-            Git.UnknownBlob    -> "100000"
         , ghpTreeEntrySize    = (-1)
         , ghpTreeEntrySha     = Git.renderObjOid oid
         , ghpTreeEntrySubtree = Nothing
@@ -322,7 +321,6 @@ proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "blob" }) = do
             "100644" -> Git.PlainBlob
             "100755" -> Git.ExecutableBlob
             "120000" -> Git.SymlinkBlob
-            _        -> Git.UnknownBlob
 
 proxyToTreeEntry entry@(GitHubTreeEntryProxy { ghpTreeEntryType = "commit" }) = do
     oid <- Git.parseOid (ghpTreeEntrySha entry)

@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
@@ -10,95 +9,52 @@
 module Git.Libgit2.Types where
 
 import           Bindings.Libgit2
-import           Control.Applicative
-import           Control.Exception
 import           Control.Monad (liftM)
-import           Control.Monad.Base
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
-import           Control.Monad.Morph
 import           Control.Monad.Trans.Control
-import           Control.Monad.Trans.Reader
-import           Data.Conduit
 import           Data.IORef
-import           Data.Monoid
 import           Foreign.ForeignPtr
 import qualified Git
 
-data Repository = Repository
+data LgRepo = LgRepo
     { repoOptions :: Git.RepositoryOptions
     , repoObj     :: ForeignPtr C'git_repository
     , repoExcTrap :: IORef (Maybe Git.GitException)
     }
 
-repoPath :: Repository -> FilePath
-repoPath = Git.repoPath . repoOptions
+lgRepoPath :: LgRepo -> FilePath
+lgRepoPath = Git.repoPath . repoOptions
 
-instance Eq Repository where
-  x == y = repoPath x == repoPath y && repoObj x == repoObj y
+class HasLgRepo env where
+    getLgRepo :: env -> LgRepo
 
-instance Show Repository where
-  show x = "Repository " <> repoPath x
+instance HasLgRepo LgRepo where
+    getLgRepo = id
 
-newtype LgRepository m a = LgRepository
-    { lgRepositoryReaderT :: ReaderT Repository m a }
-    deriving (Functor, Applicative, Monad, MonadIO)
+instance HasLgRepo (env, LgRepo) where
+    getLgRepo = snd
 
-instance (Monad m, MonadIO m, Applicative m)
-         => MonadBase IO (LgRepository m) where
-    liftBase = liftIO
+type BlobOid     = Git.BlobOid LgRepo
+type TreeOid     = Git.TreeOid LgRepo
+type CommitOid   = Git.CommitOid LgRepo
 
-instance Monad m => MonadThrow (LgRepository m) where
-    -- monadThrow :: Exception e => e -> m a
-    monadThrow = throw
+type Tree        = Git.Tree LgRepo
+type TreeEntry   = Git.TreeEntry LgRepo
+type Commit      = Git.Commit LgRepo
+type Tag         = Git.Tag LgRepo
 
-instance MonadLogger m => MonadLogger (LgRepository m) where
-    monadLoggerLog a b c d = LgRepository $ monadLoggerLog a b c d
+type Object      = Git.Object LgRepo
+type ObjectOid   = Git.ObjectOid LgRepo
+type RefTarget   = Git.RefTarget LgRepo
 
-instance MonadTrans LgRepository where
-    lift = LgRepository . ReaderT . const
+type TreeBuilder = Git.TreeBuilder LgRepo
+type Options     = Git.Options LgRepo
 
-instance MFunctor LgRepository where
-    hoist nat m = LgRepository $ ReaderT $ \i ->
-        nat (runReaderT (lgRepositoryReaderT m) i)
+type MonadLg m = (Git.MonadGit LgRepo m,
+                  MonadIO m, MonadBaseControl IO m, MonadLogger m)
 
-instance MonadTransControl LgRepository where
-    newtype StT LgRepository a = StLgRepository
-        { unLgRepository :: StT (ReaderT Repository) a
-        }
-    liftWith = defaultLiftWith LgRepository
-                   lgRepositoryReaderT StLgRepository
-    restoreT = defaultRestoreT LgRepository unLgRepository
-
-instance (MonadIO m, MonadBaseControl IO m)
-         => MonadBaseControl IO (LgRepository m) where
-    newtype StM (LgRepository m) a = StMT
-        { unStMT :: ComposeSt LgRepository m a
-        }
-    liftBaseWith = defaultLiftBaseWith StMT
-    restoreM     = defaultRestoreM unStMT
-
-type BlobOid m     = Git.BlobOid (LgRepository m)
-type TreeOid m     = Git.TreeOid (LgRepository m)
-type CommitOid m   = Git.CommitOid (LgRepository m)
-
-type Tree m        = Git.Tree (LgRepository m)
-type Commit m      = Git.Commit (LgRepository m)
-type Tag m         = Git.Tag (LgRepository m)
-
-type Object m      = Git.Object (LgRepository m)
-type ObjectOid m   = Git.ObjectOid (LgRepository m)
-type RefTarget m   = Git.RefTarget (LgRepository m)
-
-type TreeBuilder m = Git.TreeBuilder (LgRepository m)
-type Options m     = Git.Options (LgRepository m)
-
-type MonadLg m     = (Git.MonadGit m, MonadLogger m)
-
-lgGet :: Monad m => LgRepository m Repository
-lgGet = LgRepository ask
-
-lgExcTrap :: Monad m => LgRepository m (IORef (Maybe Git.GitException))
-lgExcTrap = repoExcTrap `liftM` lgGet
+lgExcTrap :: MonadLg m => m (IORef (Maybe Git.GitException))
+lgExcTrap = repoExcTrap `liftM` Git.getRepository
 
 -- Types.hs
