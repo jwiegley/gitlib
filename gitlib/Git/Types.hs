@@ -376,8 +376,8 @@ data MergeResult r
             Map TreeFilePath (ModificationKind, ModificationKind)
         }
 
-copyMergeResult :: (MonadGit r m, MonadGit s n)
-                => MergeResult r -> n (MergeResult s)
+copyMergeResult :: (MonadGit r m, IsOid (Oid s))
+                => MergeResult s -> m (MergeResult r)
 copyMergeResult (MergeSuccess mc) =
     MergeSuccess <$> parseObjOid (renderObjOid mc)
 copyMergeResult (MergeConflicted hl hr mc cs) =

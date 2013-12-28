@@ -10,7 +10,6 @@ import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Failure
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Control
 import           Data.ByteString
 import qualified Data.Text as T
@@ -31,10 +30,9 @@ import           Git.Libgit2.Trace
 import           Git.Libgit2.Types
 import           System.FilePath.Posix
 
-addTracingBackend :: MonadLg m => m ()
-addTracingBackend = do
-    repo <- Git.getRepository
-    liftIO $ withCString (lgRepoPath repo </> "objects") $ \objectsDir ->
+addTracingBackend :: LgRepo -> IO ()
+addTracingBackend repo =
+    withCString (lgRepoPath repo </> "objects") $ \objectsDir ->
         alloca $ \loosePtr -> do
             r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
             when (r < 0) $
@@ -53,7 +51,7 @@ coidPtrToOid coidptr = do
     return fptr
 
 lookupObject'
-  :: (MonadLg m, MonadBaseControl IO m)
+  :: (Git.MonadGit LgRepo m, MonadBaseControl IO m)
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CSize -> IO CInt)

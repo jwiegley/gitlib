@@ -181,7 +181,7 @@ doMain opts = do
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots any
 --   changes that have occurred in them.
-snapshotTree :: MonadLg m
+snapshotTree :: (MonadGit LgRepo m, MonadLg m)
              => Options
              -> FilePath
              -> CommitAuthor
@@ -234,7 +234,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
         else loop sc' toid' ft'
 
   where
-    scanOldEntry :: MonadLg m
+    scanOldEntry :: (MonadGit LgRepo m, MonadLg m)
                  => Map TreeFilePath (FileEntry LgRepo)
                  -> TreeFilePath
                  -> FileEntry LgRepo
@@ -245,7 +245,7 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
             dropEntry fp
         _ -> return ()
 
-    scanNewEntry :: MonadLg m
+    scanNewEntry :: (MonadGit LgRepo m, MonadLg m)
                  => Map TreeFilePath (FileEntry LgRepo)
                  -> TreeFilePath
                  -> FileEntry LgRepo
@@ -276,7 +276,7 @@ data FileEntry m = FileEntry
 
 type FileTree m = Map TreeFilePath (FileEntry m)
 
-readFileTree :: MonadLg m
+readFileTree :: (MonadGit LgRepo m, MonadLg m)
              => RefName
              -> FilePath
              -> Bool
@@ -289,7 +289,7 @@ readFileTree ref wdir getHash = do
             tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
             readFileTree' tr wdir getHash
 
-readFileTree' :: MonadLg m
+readFileTree' :: (MonadGit LgRepo m, MonadLg m)
               => Tree LgRepo -> FilePath -> Bool
               -> m (FileTree LgRepo)
 readFileTree' tr wdir getHash = do
@@ -299,7 +299,7 @@ readFileTree' tr wdir getHash = do
                  return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
-readModTime :: MonadLg m
+readModTime :: (MonadGit LgRepo m, MonadLg m)
             => FilePath
             -> Bool
             -> FilePath

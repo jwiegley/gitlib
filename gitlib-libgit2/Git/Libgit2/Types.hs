@@ -9,7 +9,8 @@
 module Git.Libgit2.Types where
 
 import           Bindings.Libgit2
-import           Control.Monad (liftM)
+import           Control.Applicative
+import           Control.Failure
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Control
@@ -26,14 +27,14 @@ data LgRepo = LgRepo
 lgRepoPath :: LgRepo -> FilePath
 lgRepoPath = Git.repoPath . repoOptions
 
-class HasLgRepo env where
-    getLgRepo :: env -> LgRepo
+-- class HasLgRepo env where
+--     getLgRepo :: env -> LgRepo
 
-instance HasLgRepo LgRepo where
-    getLgRepo = id
+-- instance HasLgRepo LgRepo where
+--     getLgRepo = id
 
-instance HasLgRepo (env, LgRepo) where
-    getLgRepo = snd
+-- instance HasLgRepo (env, LgRepo) where
+--     getLgRepo = snd
 
 type BlobOid     = Git.BlobOid LgRepo
 type TreeOid     = Git.TreeOid LgRepo
@@ -51,10 +52,7 @@ type RefTarget   = Git.RefTarget LgRepo
 type TreeBuilder = Git.TreeBuilder LgRepo
 type Options     = Git.Options LgRepo
 
-type MonadLg m = (Git.MonadGit LgRepo m,
+type MonadLg m = (Applicative m, Failure Git.GitException m,
                   MonadIO m, MonadBaseControl IO m, MonadLogger m)
-
-lgExcTrap :: MonadLg m => m (IORef (Maybe Git.GitException))
-lgExcTrap = repoExcTrap `liftM` Git.getRepository
 
 -- Types.hs

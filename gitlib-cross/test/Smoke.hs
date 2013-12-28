@@ -16,6 +16,6 @@ import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
 main :: IO ()
-main = hspec $ Git.smokeTestSpec Cli.cliFactory Lg.lgFactoryT
+main = hspec $ Git.smokeTestSpec Cli.cliFactory Lg.lgFactory
 
 -- Smoke.hs ends here
