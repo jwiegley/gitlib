@@ -1,18 +1,24 @@
 module Git.Working where
 
-import           Control.Monad.IO.Class
-import           Data.Conduit
-import           Data.Conduit.List as CL
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import           Git.Blob
-import           Git.Types
-import           System.FilePath
+import Control.Applicative
+import Control.Exception
+import Control.Monad.IO.Class
+import Control.Monad.Trans.Resource
+import Data.Conduit
+import Data.Conduit.List as CL
+import Git.Blob
+import Git.Types
+import System.Directory
+import System.FilePath
 
 checkoutFiles :: (MonadGit r m, MonadBaseControl IO m, MonadIO m,
                   MonadResource m)
-              => FilePath -> Tree r -> Bool -> m ()
-checkoutFiles destPath tree cloneSubmodules =
+              => FilePath
+              -> Tree r
+              -> (TreeFilePath -> Either String FilePath)
+              -> Bool
+              -> m ()
+checkoutFiles destPath tree decode cloneSubmodules =
     sourceTreeEntries tree $$ CL.mapM_ $ \(path, entry) -> case entry of
         BlobEntry oid kind -> case kind of
             SymlinkBlob ->
@@ -21,8 +27,12 @@ checkoutFiles destPath tree cloneSubmodules =
                 Blob _ contents <- lookupBlob oid
                 -- jww (2013-12-26): There is no way to know what a tree's
                 -- path has been encoded as.
-                writeBlob (destPath </> T.unpack (T.decodeUtf8 path))
-                    contents
+                case (destPath </>) <$> decode path of
+                    Left e -> liftIO $ throwIO (userError e)
+                    Right fullPath -> do
+                        liftIO $ createDirectoryIfMissing True
+                            (takeDirectory fullPath)
+                        writeBlob fullPath contents
 
         -- jww (2013-12-26): Recursively clone submodules?
         CommitEntry {} | cloneSubmodules -> do
