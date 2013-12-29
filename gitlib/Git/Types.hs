@@ -415,6 +415,7 @@ data GitException
     | DiffTreeToIndexFailed Text
     | IndexAddFailed TreeFilePath Text
     | IndexCreateFailed Text
+    | PathEncodingError Text
     | PushNotFastForward Text
     | TranslationException Text
     | TreeCreateFailed Text

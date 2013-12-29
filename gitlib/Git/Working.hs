@@ -1,15 +1,22 @@
+{-# LANGUAGE CPP #-}
+
 module Git.Working where
 
 import Control.Applicative
-import Control.Exception
+import Control.Failure
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 import Data.Conduit
 import Data.Conduit.List as CL
+import Data.Text as T
+import Data.Semigroup
 import Git.Blob
 import Git.Types
 import System.Directory
 import System.FilePath
+#if !mingw32_HOST_OS
+import System.Posix.Files
+#endif
 
 checkoutFiles :: (MonadGit r m, MonadBaseControl IO m, MonadIO m,
                   MonadResource m)
@@ -19,23 +26,37 @@ checkoutFiles :: (MonadGit r m, MonadBaseControl IO m, MonadIO m,
               -> Bool
               -> m ()
 checkoutFiles destPath tree decode cloneSubmodules =
-    sourceTreeEntries tree $$ CL.mapM_ $ \(path, entry) -> case entry of
-        BlobEntry oid kind -> case kind of
-            SymlinkBlob ->
-                error "jww (2013-12-27): checkoutFiles not yet implemented"
-            _ -> do
-                Blob _ contents <- lookupBlob oid
+    sourceTreeEntries tree $$ CL.mapM_ $ \(path, entry) ->
+        case (destPath </>) <$> decode path of
+            Left e ->  decodeError path e
+            Right fullPath -> do
+                liftIO $ createDirectoryIfMissing True (takeDirectory fullPath)
+                case entry of
+                    TreeEntry {} -> return ()
+                    BlobEntry oid kind -> checkoutBlob oid kind fullPath
+                    CommitEntry oid
+                        -- jww (2013-12-26): Recursively clone submodules?
+                        | cloneSubmodules -> cloneSubmodule oid fullPath
+                        | otherwise -> liftIO $ createDirectory fullPath
+  where
+    decodeError path e = failure $ PathEncodingError $
+        "Could not decode path " <> T.pack (show path) <> ":" <> T.pack e
+
+    checkoutBlob oid kind fullPath = do
+        Blob _ contents <- lookupBlob oid
+        case kind of
+#if !mingw32_HOST_OS
+            SymlinkBlob -> do
+                target <- blobContentsToByteString contents
+                case decode target of
+                    Left e -> decodeError target e
+                    Right targetPath ->
+                        liftIO $ createSymbolicLink targetPath fullPath
+#endif
+            _ -> do                  -- PlainBlob | ExecutableBlob
                 -- jww (2013-12-26): There is no way to know what a tree's
                 -- path has been encoded as.
-                case (destPath </>) <$> decode path of
-                    Left e -> liftIO $ throwIO (userError e)
-                    Right fullPath -> do
-                        liftIO $ createDirectoryIfMissing True
-                            (takeDirectory fullPath)
-                        writeBlob fullPath contents
+                writeBlob fullPath contents
 
-        -- jww (2013-12-26): Recursively clone submodules?
-        CommitEntry {} | cloneSubmodules -> do
-            return ()
-
-        _ -> return ()
+    cloneSubmodule =
+        error "jww (2013-12-29): Cloning submodule is not yet implemented"

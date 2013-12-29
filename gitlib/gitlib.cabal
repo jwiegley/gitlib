@@ -59,6 +59,9 @@ Library
         , time                 >= 1.4
         , transformers         >= 0.3.0.0
         , unordered-containers >= 0.2.3.0
+    if !os(mingw32)
+        build-depends:
+          unix                 >= 2.5.1.1
     exposed-modules:
         Git
         Git.Blob
