@@ -60,7 +60,7 @@ Library
     , data-default         >= 0.5.1
     , directory            >= 1.1.0.2
     , filepath             >= 1.3.0
-    , http-conduit         >= 1.8.5.1
+    , http-conduit         >= 2.0
     , lens                 >= 3.8
     , lifted-base          >= 0.2.0.2
     , monad-control
