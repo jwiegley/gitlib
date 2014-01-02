@@ -39,57 +39,57 @@ import           Data.Text (Text)
 import           Data.Word
 import           Git.Types
 
-data ModifyTreeResult m = TreeEntryNotFound
+data ModifyTreeResult r = TreeEntryNotFound
                         | TreeEntryDeleted
-                        | TreeEntryPersistent (TreeEntry m)
-                        | TreeEntryMutated (TreeEntry m)
+                        | TreeEntryPersistent (TreeEntry r)
+                        | TreeEntryMutated (TreeEntry r)
 
-fromModifyTreeResult :: ModifyTreeResult m -> Maybe (TreeEntry m)
+fromModifyTreeResult :: ModifyTreeResult r -> Maybe (TreeEntry r)
 fromModifyTreeResult TreeEntryNotFound       = Nothing
 fromModifyTreeResult TreeEntryDeleted        = Nothing
 fromModifyTreeResult (TreeEntryPersistent x) = Just x
 fromModifyTreeResult (TreeEntryMutated x)    = Just x
 
-toModifyTreeResult :: (TreeEntry m -> ModifyTreeResult m)
-                   -> Maybe (TreeEntry m)
-                   -> ModifyTreeResult m
+toModifyTreeResult :: (TreeEntry r -> ModifyTreeResult r)
+                   -> Maybe (TreeEntry r)
+                   -> ModifyTreeResult r
 toModifyTreeResult _ Nothing  = TreeEntryNotFound
 toModifyTreeResult f (Just x) = f x
 
-newtype TreeT m a = TreeT { runTreeT :: StateT (TreeBuilder m) m a }
+newtype TreeT r m a = TreeT { runTreeT :: StateT (TreeBuilder r m) m a }
 
-instance Functor m => Functor (TreeT m) where
+instance Functor m => Functor (TreeT r m) where
     fmap f (TreeT t) = TreeT (fmap f t)
 
-instance Monad m => Monad (TreeT m) where
+instance Monad m => Monad (TreeT r m) where
     return x = TreeT (return x)
     TreeT x >>= f = TreeT (x >>= runTreeT . f)
 
-instance (Functor m, Monad m) => Applicative (TreeT m) where
+instance (Functor m, Monad m) => Applicative (TreeT r m) where
     pure = return
     (<*>) = ap
 
-instance (Functor m, MonadPlus m) => Alternative (TreeT m) where
+instance (Functor m, MonadPlus m) => Alternative (TreeT r m) where
     empty = mzero
     (<|>) = mplus
 
-instance (MonadPlus m) => MonadPlus (TreeT m) where
+instance (MonadPlus m) => MonadPlus (TreeT r m) where
     mzero       = TreeT mzero
     m `mplus` n = TreeT $ runTreeT m `mplus` runTreeT n
 
-instance (MonadFix m) => MonadFix (TreeT m) where
+instance (MonadFix m) => MonadFix (TreeT r m) where
     mfix f = TreeT $ mfix $ \ ~a -> runTreeT (f a)
 
-instance MonadTrans TreeT where
+instance MonadTrans (TreeT r) where
     lift m = TreeT $ lift m
 
-instance (MonadIO m) => MonadIO (TreeT m) where
+instance (MonadIO m) => MonadIO (TreeT r m) where
     liftIO = lift . liftIO
 
-getBuilder :: Monad m => TreeT m (TreeBuilder m)
+getBuilder :: Monad m => TreeT r m (TreeBuilder r m)
 getBuilder = TreeT get
 
-putBuilder :: Monad m => TreeBuilder m -> TreeT m ()
+putBuilder :: Monad m => TreeBuilder r m -> TreeT r m ()
 putBuilder = TreeT . put
 
 data BuilderAction = GetEntry | PutEntry | DropEntry
@@ -103,12 +103,12 @@ emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 --
 --   This is a complex algorithm which has been rewritten many times, so I
 --   will try to guide you through it as best I can.
-queryTreeBuilder :: Repository m
-                 => TreeBuilder m
+queryTreeBuilder :: MonadGit r m
+                 => TreeBuilder r m
                  -> TreeFilePath
                  -> BuilderAction
-                 -> (Maybe (TreeEntry m) -> ModifyTreeResult m)
-                 -> m (TreeBuilder m, Maybe (TreeEntry m))
+                 -> (Maybe (TreeEntry r) -> ModifyTreeResult r)
+                 -> m (TreeBuilder r m, Maybe (TreeEntry r))
 queryTreeBuilder builder path kind f = do
     (mtb, mtresult) <- walk (BuilderUnchanged builder) (splitDirectories path)
     return (fromBuilderMod mtb, fromModifyTreeResult mtresult)
@@ -200,8 +200,8 @@ queryTreeBuilder builder path kind f = do
 
 -- | Write out a tree to its repository.  If it has already been written,
 --   nothing will happen.
-writeTreeBuilder :: Repository m
-                 => TreeBuilder m -> m (TreeBuilder m, TreeOid m)
+writeTreeBuilder :: MonadGit r m
+                 => TreeBuilder r m -> m (TreeBuilder r m, TreeOid r)
 writeTreeBuilder builder = do
     (bm, mtref) <- go (BuilderUnchanged builder)
     tref <- case mtref of
@@ -235,70 +235,71 @@ writeTreeBuilder builder = do
             Just tref -> mtbPutEntry tb tb k (TreeEntry tref)
         return $ bm <> bm'
 
-getEntry :: Repository m => TreeFilePath -> TreeT m (Maybe (TreeEntry m))
+getEntry :: MonadGit r m => TreeFilePath -> TreeT r m (Maybe (TreeEntry r))
 getEntry path = do
     tb <- getBuilder
     snd <$> lift (queryTreeBuilder tb path GetEntry
                   (toModifyTreeResult TreeEntryPersistent))
 
-putEntry :: Repository m => TreeFilePath -> TreeEntry m -> TreeT m ()
+putEntry :: MonadGit r m => TreeFilePath -> TreeEntry r -> TreeT r m ()
 putEntry path ent = do
     tb  <- getBuilder
     tb' <- fst <$> lift (queryTreeBuilder tb path PutEntry
                          (const (TreeEntryMutated ent)))
     putBuilder tb'
 
-dropEntry :: Repository m => TreeFilePath -> TreeT m ()
+dropEntry :: MonadGit r m => TreeFilePath -> TreeT r m ()
 dropEntry path = do
     tb  <- getBuilder
     tb' <- fst <$> lift (queryTreeBuilder tb path DropEntry
                          (const TreeEntryDeleted))
     putBuilder tb'
 
-putBlob' :: Repository m => TreeFilePath -> BlobOid m -> BlobKind -> TreeT m ()
+putBlob' :: MonadGit r m
+         => TreeFilePath -> BlobOid r -> BlobKind -> TreeT r m ()
 putBlob' path b kind = putEntry path (BlobEntry b kind)
 
-putBlob :: Repository m => TreeFilePath -> BlobOid m -> TreeT m ()
+putBlob :: MonadGit r m => TreeFilePath -> BlobOid r -> TreeT r m ()
 putBlob path b = putBlob' path b PlainBlob
 
-putTree :: Repository m => TreeFilePath -> TreeOid m -> TreeT m ()
+putTree :: MonadGit r m => TreeFilePath -> TreeOid r -> TreeT r m ()
 putTree path t = putEntry path (TreeEntry t)
 
-putCommit :: Repository m => TreeFilePath -> CommitOid m -> TreeT m ()
+putCommit :: MonadGit r m => TreeFilePath -> CommitOid r -> TreeT r m ()
 putCommit path c = putEntry path (CommitEntry c)
 
-doWithTree :: Repository m => Maybe (Tree m) -> TreeT m a -> m (a, TreeOid m)
-doWithTree mtr act =
-    fst <$> (runStateT (runTreeT go) =<< newTreeBuilder mtr)
+doWithTree :: MonadGit r m => Maybe (Tree r) -> TreeT r m a -> m (a, TreeOid r)
+doWithTree rtr act =
+    fst <$> (runStateT (runTreeT go) =<< newTreeBuilder rtr)
   where
     go = liftM2 (,) act currentTreeOid
 
-withTree :: Repository m => Tree m -> TreeT m a -> m (a, TreeOid m)
+withTree :: MonadGit r m => Tree r -> TreeT r m a -> m (a, TreeOid r)
 withTree tr = doWithTree (Just tr)
 
-withTreeOid :: Repository m => TreeOid m -> TreeT m a -> m (a, TreeOid m)
+withTreeOid :: MonadGit r m => TreeOid r -> TreeT r m a -> m (a, TreeOid r)
 withTreeOid oid action = do
     tree <- lookupTree oid
     doWithTree (Just tree) action
 
-mutateTree :: Repository m => Tree m -> TreeT m a -> m (TreeOid m)
+mutateTree :: MonadGit r m => Tree r -> TreeT r m a -> m (TreeOid r)
 mutateTree tr action = snd <$> withTree tr action
 
-mutateTreeOid :: Repository m => TreeOid m -> TreeT m a -> m (TreeOid m)
+mutateTreeOid :: MonadGit r m => TreeOid r -> TreeT r m a -> m (TreeOid r)
 mutateTreeOid tr action = snd <$> withTreeOid tr action
 
-currentTreeOid :: Repository m => TreeT m (TreeOid m)
+currentTreeOid :: MonadGit r m => TreeT r m (TreeOid r)
 currentTreeOid = do
     tb <- getBuilder
     (tb', toid) <- lift $ writeTreeBuilder tb
     putBuilder tb'
     return toid
 
-currentTree :: Repository m => TreeT m (Tree m)
+currentTree :: MonadGit r m => TreeT r m (Tree r)
 currentTree = lift . lookupTree =<< currentTreeOid
 
-withNewTree :: Repository m => TreeT m a -> m (a, TreeOid m)
+withNewTree :: MonadGit r m => TreeT r m a -> m (a, TreeOid r)
 withNewTree = doWithTree Nothing
 
-createTree :: Repository m => TreeT m a -> m (TreeOid m)
+createTree :: MonadGit r m => TreeT r m a -> m (TreeOid r)
 createTree action = snd <$> withNewTree action

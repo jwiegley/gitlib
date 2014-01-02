@@ -5,24 +5,22 @@ import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Trans.Class
-import           Control.Monad.IO.Class
 import qualified Data.Binary as Bin
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Lazy as BL
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
-import           Data.Default
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
 import           Data.Map (Map)
-import           Data.Monoid
+import           Data.Semigroup
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Typeable
---import           System.Posix.ByteString.FilePath
 
 type RawFilePath = ByteString
 
@@ -30,66 +28,68 @@ data RepositoryFacts = RepositoryFacts
     { hasSymbolicReferences :: !Bool
     } deriving Show
 
-type MonadGit m = (Failure GitException m, Applicative m,
-                   MonadIO m, MonadBaseControl IO m)
-
-type RefName = Text
-type CommitAuthor = Text
-type CommitEmail = Text
+type RefName       = Text
+type CommitAuthor  = Text
+type CommitEmail   = Text
 type CommitMessage = Text
-type TreeFilePath = RawFilePath
+type TreeFilePath  = RawFilePath
 
 -- | 'Repository' is the central point of contact between user code and Git
 --   data objects.  Every object must belong to some repository.
-class (Applicative m, Monad m, Failure GitException m, IsOid (Oid m))
-      => Repository m where
-    type Oid m :: *
-    data Tree m :: *
-    data Options m :: *
+class (Applicative m, Monad m, Failure GitException m,
+       IsOid (Oid r), Show (Oid r), Eq (Oid r), Ord (Oid r))
+      => MonadGit r m | m -> r where
+    type Oid r :: *
+    data Tree r :: *
+    data Options r :: *
 
     facts :: m RepositoryFacts
-    parseOid :: Text -> m (Oid m)
+    parseOid :: Text -> m (Oid r)
+
+    getRepository :: m r
+    closeRepository :: m ()
     deleteRepository :: m ()
 
     -- References
-    createReference :: RefName -> RefTarget m -> m ()
-    lookupReference :: RefName -> m (Maybe (RefTarget m))
-    updateReference :: RefName -> RefTarget m -> m ()
+    createReference :: RefName -> RefTarget r -> m ()
+    lookupReference :: RefName -> m (Maybe (RefTarget r))
+    updateReference :: RefName -> RefTarget r -> m ()
     deleteReference :: RefName -> m ()
     sourceReferences :: Producer m RefName
 
     -- Object lookup
-    lookupCommit  :: CommitOid m -> m (Commit m)
-    lookupTree    :: TreeOid m -> m (Tree m)
-    lookupBlob    :: BlobOid m -> m (Blob m)
-    lookupTag     :: TagOid m -> m (Tag m)
-    lookupObject  :: Oid m -> m (Object m)
-    existsObject  :: Oid m -> m Bool
-    sourceObjects :: Maybe (CommitOid m)    -- ^ A commit we may already have
-                  -> CommitOid m            -- ^ The commit we need
+    lookupObject  :: Oid r -> m (Object r m)
+    existsObject  :: Oid r -> m Bool
+    sourceObjects :: Maybe (CommitOid r)    -- ^ A commit we may already have
+                  -> CommitOid r            -- ^ The commit we need
                   -> Bool                   -- ^ Include commit trees also?
-                  -> Producer m (ObjectOid m) -- ^ All the objects in between
+                  -> Producer m (ObjectOid r) -- ^ All the objects in between
+
+    lookupCommit  :: CommitOid r -> m (Commit r)
+    lookupTree    :: TreeOid r -> m (Tree r)
+    lookupBlob    :: BlobOid r -> m (Blob r m)
+    lookupTag     :: TagOid r -> m (Tag r)
 
     -- Working with trees
-    newTreeBuilder :: Maybe (Tree m) -> m (TreeBuilder m)
+    newTreeBuilder :: Maybe (Tree r) -> m (TreeBuilder r m)
 
-    treeOid   :: Tree m -> TreeOid m
-    treeEntry :: Tree m -> TreeFilePath -> m (Maybe (TreeEntry m))
-    sourceTreeEntries :: Tree m -> Producer m (TreeFilePath, TreeEntry m)
+    treeOid   :: Tree r -> m (TreeOid r)
+    treeEntry :: Tree r -> TreeFilePath -> m (Maybe (TreeEntry r))
+    sourceTreeEntries :: Tree r -> Producer m (TreeFilePath, TreeEntry r)
 
     diffContentsWithTree :: Source m (Either TreeFilePath ByteString)
-                         -> Tree m -> Producer m ByteString
+                         -> Tree r -> Producer m ByteString
 
     -- Creating other objects
-    hashContents :: BlobContents m -> m (BlobOid m)
-    createBlob   :: BlobContents m -> m (BlobOid m)
-    createCommit :: [CommitOid m] -> TreeOid m
+    hashContents :: BlobContents m -> m (BlobOid r)
+    createBlob   :: BlobContents m -> m (BlobOid r)
+    createCommit :: [CommitOid r] -> TreeOid r
                  -> Signature -> Signature -> CommitMessage -> Maybe RefName
-                 -> m (Commit m)
-    createTag :: CommitOid m -> Signature -> CommitMessage -> Text -> m (Tag m)
+                 -> m (Commit r)
+    createTag :: CommitOid r -> Signature -> CommitMessage -> Text -> m (Tag r)
 
     -- -- Pack files
-    -- buildPackFile :: FilePath -> [Either (CommitOid m) (TreeOid m)]
+    -- buildPackFile :: FilePath -> [Either (CommitOid r) (TreeOid r)]
     --               -> m FilePath
     -- buildPackFile _ _ =
     --     failure (BackendError "Backend does not support building pack files")
@@ -111,41 +111,36 @@ data RepositoryOptions = RepositoryOptions
     , repoAutoCreate :: !Bool
     }
 
-instance Default RepositoryOptions where
-    def = RepositoryOptions "" True True
+defaultRepositoryOptions :: RepositoryOptions
+defaultRepositoryOptions = RepositoryOptions "" False False
 
-data RepositoryFactory t m c
-    = RepositoryFactory
-    { openRepository  :: RepositoryOptions -> m c
-    , runRepository   :: forall a. c -> t a -> m a
-    , closeRepository :: c -> m ()
-    , getRepository   :: t c
-    , defaultOptions  :: !RepositoryOptions
-    , startupBackend  :: m ()
-    , shutdownBackend :: m ()
+data RepositoryFactory n m r = RepositoryFactory
+    { openRepository :: RepositoryOptions -> m r
+    , runRepository  :: forall a. r -> n a -> m a
     }
 
 {- $oids -}
-class (Eq o, Ord o, Show o) => IsOid o where
+class IsOid o where
     renderOid :: o -> Text
     renderOid = renderObjOid . Tagged
+
     renderObjOid :: Tagged a o -> Text
     renderObjOid = renderOid . untag
 
-type BlobOid m   = Tagged (Blob m) (Oid m)
-type TreeOid m   = Tagged (Tree m) (Oid m)
-type CommitOid m = Tagged (Commit m) (Oid m)
-type TagOid m    = Tagged (Tag m) (Oid m)
+type BlobOid r   = Tagged r (Oid r)
+type TreeOid r   = Tagged (Tree r) (Oid r)
+type CommitOid r = Tagged (Commit r) (Oid r)
+type TagOid r    = Tagged (Tag r) (Oid r)
 
-data ObjectOid m = BlobObjOid   !(BlobOid m)
-                 | TreeObjOid   !(TreeOid m)
-                 | CommitObjOid !(CommitOid m)
-                 | TagObjOid    !(TagOid m)
+data ObjectOid r = BlobObjOid   !(BlobOid r)
+                 | TreeObjOid   !(TreeOid r)
+                 | CommitObjOid !(CommitOid r)
+                 | TagObjOid    !(TagOid r)
 
-parseObjOid :: Repository m => forall o. Text -> m (Tagged o (Oid m))
+parseObjOid :: MonadGit r m => forall o. Text -> m (Tagged o (Oid r))
 parseObjOid sha = Tagged <$> parseOid sha
 
-copyOid :: (Repository m, Repository n) => Oid m -> n (Oid n)
+copyOid :: (MonadGit r m, MonadGit s n) => Oid r -> n (Oid s)
 copyOid = parseOid . renderOid
 
 newtype SHA = SHA { getSHA :: ByteString } deriving (Eq, Ord, Read)
@@ -173,16 +168,19 @@ instance Hashable SHA where
     hashWithSalt salt (SHA bs) = hashWithSalt salt bs
 
 {- $blobs -}
-data Blob m = Blob { blobOid      :: !(BlobOid m)
-                   , blobContents :: !(BlobContents m) }
+data Blob r m = Blob
+    { blobOid      :: !(BlobOid r)
+    , blobContents :: !(BlobContents m)
+    }
 
 type ByteSource m = Producer m ByteString
 
 data BlobContents m = BlobString !ByteString
+                    | BlobStringLazy !BL.ByteString
                     | BlobStream !(ByteSource m)
                     | BlobSizedStream !(ByteSource m) !Int
 
-data BlobKind = PlainBlob | ExecutableBlob | SymlinkBlob | UnknownBlob
+data BlobKind = PlainBlob | ExecutableBlob | SymlinkBlob
               deriving (Show, Eq, Enum)
 
 instance Eq (BlobContents m) where
@@ -190,64 +188,67 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
-data TreeEntry m = BlobEntry   { blobEntryOid   :: !(BlobOid m)
+data TreeEntry r = BlobEntry   { blobEntryOid   :: !(BlobOid r)
                                , blobEntryKind  :: !BlobKind }
-                 | TreeEntry   { treeEntryOid   :: !(TreeOid m) }
-                 | CommitEntry { commitEntryOid :: !(CommitOid m) }
+                 | TreeEntry   { treeEntryOid   :: !(TreeOid r) }
+                 | CommitEntry { commitEntryOid :: !(CommitOid r) }
 
-instance Repository m => Show (TreeEntry m) where
-    show (BlobEntry oid _) = "<BlobEntry " ++ T.unpack (renderObjOid oid)
-    show (TreeEntry oid)   = "<TreeEntry " ++ T.unpack (renderObjOid oid)
-    show (CommitEntry oid) = "<CommitEntry " ++ T.unpack (renderObjOid oid)
+-- instance Show (TreeEntry r) where
+--     show (BlobEntry oid _) = "<BlobEntry " ++ show oid ++ ">"
+--     show (TreeEntry oid)   = "<TreeEntry " ++ show oid ++ ">"
+--     show (CommitEntry oid) = "<CommitEntry " ++ show oid ++ ">"
 
-treeEntryToOid :: Repository m => TreeEntry m -> Oid m
+treeEntryToOid :: MonadGit r m => TreeEntry r -> Oid r
 treeEntryToOid (BlobEntry boid _) = untag boid
 treeEntryToOid (TreeEntry toid)   = untag toid
 treeEntryToOid (CommitEntry coid) = untag coid
 
-data TreeBuilder m = TreeBuilder
-    { mtbBaseTreeOid    :: Maybe (TreeOid m)
-    , mtbPendingUpdates :: HashMap TreeFilePath (TreeBuilder m)
-    , mtbNewBuilder     :: Maybe (Tree m) -> m (TreeBuilder m)
-    , mtbWriteContents  :: TreeBuilder m -> m (ModifiedBuilder m, TreeOid m)
-    , mtbLookupEntry    :: TreeFilePath -> m (Maybe (TreeEntry m))
+data TreeBuilder r m = TreeBuilder
+    { mtbBaseTreeOid    :: Maybe (TreeOid r)
+    , mtbPendingUpdates :: HashMap TreeFilePath (TreeBuilder r m)
+    , mtbNewBuilder     :: Maybe (Tree r) -> m (TreeBuilder r m)
+    , mtbWriteContents  :: TreeBuilder r m -> m (ModifiedBuilder r m, TreeOid r)
+    , mtbLookupEntry    :: TreeFilePath -> m (Maybe (TreeEntry r))
     , mtbEntryCount     :: m Int
-    , mtbPutEntry       :: TreeBuilder m -> TreeFilePath -> TreeEntry m
-                        -> m (ModifiedBuilder m)
-    , mtbDropEntry      :: TreeBuilder m -> TreeFilePath
-                        -> m (ModifiedBuilder m)
+    , mtbPutEntry       :: TreeBuilder r m -> TreeFilePath -> TreeEntry r
+                        -> m (ModifiedBuilder r m)
+    , mtbDropEntry      :: TreeBuilder r m -> TreeFilePath
+                        -> m (ModifiedBuilder r m)
     }
 
-data ModifiedBuilder m = ModifiedBuilder (TreeBuilder m)
-                         | BuilderUnchanged (TreeBuilder m)
+data ModifiedBuilder r m = ModifiedBuilder (TreeBuilder r m)
+                         | BuilderUnchanged (TreeBuilder r m)
 
-instance Monoid (ModifiedBuilder m) where
+instance Semigroup (ModifiedBuilder r m) where
+    BuilderUnchanged _  <> BuilderUnchanged b2 = BuilderUnchanged b2
+    ModifiedBuilder b1  <> BuilderUnchanged _  = ModifiedBuilder b1
+    BuilderUnchanged _  <> ModifiedBuilder b2  = ModifiedBuilder b2
+    ModifiedBuilder _   <> ModifiedBuilder b2  = ModifiedBuilder b2
+
+instance Monoid (ModifiedBuilder r m) where
     mempty = BuilderUnchanged (error "ModifiedBuilder is a semigroup")
-    BuilderUnchanged _ `mappend` BuilderUnchanged b2 = BuilderUnchanged b2
-    ModifiedBuilder b1  `mappend` BuilderUnchanged _ = ModifiedBuilder b1
-    BuilderUnchanged _ `mappend` ModifiedBuilder b2  = ModifiedBuilder b2
-    ModifiedBuilder _  `mappend` ModifiedBuilder b2  = ModifiedBuilder b2
+    x `mappend` y = x <> y
 
-fromBuilderMod :: ModifiedBuilder m -> TreeBuilder m
+fromBuilderMod :: ModifiedBuilder r m -> TreeBuilder r m
 fromBuilderMod (BuilderUnchanged tb) = tb
 fromBuilderMod (ModifiedBuilder tb)  = tb
 
 {- $commits -}
-data Commit m = Commit
-    { commitOid       :: !(CommitOid m)
-    , commitParents   :: ![CommitOid m]
-    , commitTree      :: !(TreeOid m)
+data Commit r = Commit
+    { commitOid       :: !(CommitOid r)
+    , commitParents   :: ![CommitOid r]
+    , commitTree      :: !(TreeOid r)
     , commitAuthor    :: !Signature
     , commitCommitter :: !Signature
     , commitLog       :: !CommitMessage
     , commitEncoding  :: !Text
     }
 
-sourceCommitParents :: Repository m => Commit m -> Producer m (Commit m)
+sourceCommitParents :: MonadGit r m => Commit r -> Producer m (Commit r)
 sourceCommitParents commit =
     forM_ (commitParents commit) $ yield <=< lift . lookupCommit
 
-lookupCommitParents :: Repository m => Commit m -> m [Commit m]
+lookupCommitParents :: MonadGit r m => Commit r -> m [Commit r]
 lookupCommitParents commit = sourceCommitParents commit $$ CL.consume
 
 data Signature = Signature
@@ -256,63 +257,63 @@ data Signature = Signature
     , signatureWhen  :: !ZonedTime
     } deriving Show
 
-instance Default Signature where
-    def = Signature
-        { signatureName  = T.empty
-        , signatureEmail = T.empty
-        , signatureWhen  = ZonedTime
-            { zonedTimeToLocalTime = LocalTime
-                { localDay = ModifiedJulianDay 0
-                , localTimeOfDay = TimeOfDay 0 0 0
-                }
-            , zonedTimeZone = utc
+defaultSignature :: Signature
+defaultSignature = Signature
+    { signatureName  = T.empty
+    , signatureEmail = T.empty
+    , signatureWhen  = ZonedTime
+        { zonedTimeToLocalTime = LocalTime
+            { localDay = ModifiedJulianDay 0
+            , localTimeOfDay = TimeOfDay 0 0 0
             }
+        , zonedTimeZone = utc
         }
+    }
 
 {- $tags -}
-data Tag m = Tag
-    { tagOid    :: !(TagOid m)
-    , tagCommit :: !(CommitOid m)
+data Tag r = Tag
+    { tagOid    :: !(TagOid r)
+    , tagCommit :: !(CommitOid r)
     }
 
 {- $objects -}
-data Object m = BlobObj   !(Blob m)
-              | TreeObj   !(Tree m)
-              | CommitObj !(Commit m)
-              | TagObj    !(Tag m)
+data Object r m = BlobObj   !(Blob r m)
+                | TreeObj   !(Tree r)
+                | CommitObj !(Commit r)
+                | TagObj    !(Tag r)
 
-objectOid :: Repository m => Object m -> Oid m
-objectOid (BlobObj obj)   = untag (blobOid obj)
-objectOid (TreeObj obj)   = untag (treeOid obj)
-objectOid (CommitObj obj) = untag (commitOid obj)
-objectOid (TagObj obj)    = untag (tagOid obj)
+objectOid :: MonadGit r m => Object r m -> m (Oid r)
+objectOid (BlobObj obj)   = return $ untag (blobOid obj)
+objectOid (TreeObj obj)   = untag <$> treeOid obj
+objectOid (CommitObj obj) = return $ untag (commitOid obj)
+objectOid (TagObj obj)    = return $ untag (tagOid obj)
 
-loadObject :: Repository m => ObjectOid m -> m (Object m)
+loadObject :: MonadGit r m => ObjectOid r -> m (Object r m)
 loadObject (BlobObjOid oid)   = BlobObj   <$> lookupBlob oid
 loadObject (TreeObjOid oid)   = TreeObj   <$> lookupTree oid
 loadObject (CommitObjOid oid) = CommitObj <$> lookupCommit oid
 loadObject (TagObjOid oid)    = TagObj    <$> lookupTag oid
 
-objectToObjOid :: Repository m => Object m -> ObjectOid m
-objectToObjOid (BlobObj obj)   = BlobObjOid (blobOid obj)
-objectToObjOid (TreeObj obj)   = TreeObjOid (treeOid obj)
-objectToObjOid (CommitObj obj) = CommitObjOid (commitOid obj)
-objectToObjOid (TagObj obj)    = TagObjOid (tagOid obj)
+objectToObjOid :: MonadGit r m => Object r m -> m (ObjectOid r)
+objectToObjOid (BlobObj obj)   = return $ BlobObjOid (blobOid obj)
+objectToObjOid (TreeObj obj)   = TreeObjOid <$> treeOid obj
+objectToObjOid (CommitObj obj) = return $ CommitObjOid (commitOid obj)
+objectToObjOid (TagObj obj)    = return $ TagObjOid (tagOid obj)
 
-untagObjOid :: Repository m => ObjectOid m -> Oid m
+untagObjOid :: ObjectOid r -> Oid r
 untagObjOid (BlobObjOid oid)   = untag oid
 untagObjOid (TreeObjOid oid)   = untag oid
 untagObjOid (CommitObjOid oid) = untag oid
 untagObjOid (TagObjOid oid)    = untag oid
 
 {- $references -}
-data RefTarget m = RefObj !(Oid m) | RefSymbolic !RefName
+data RefTarget (r :: *) = RefObj !(Oid r) | RefSymbolic !RefName
 
-instance Repository m => Show (RefTarget m) where
-    show (RefObj oid) = "RefObj#" ++ T.unpack (renderOid oid)
-    show (RefSymbolic name) = "RefSymbolic#" ++ T.unpack name
+-- instance Show (RefTarget r) where
+--     show (RefObj oid) = "RefObj#" ++ T.unpack (renderOid oid)
+--     show (RefSymbolic name) = "RefSymbolic#" ++ T.unpack name
 
-commitRefTarget :: Commit m -> RefTarget m
+commitRefTarget :: Commit r -> RefTarget r
 commitRefTarget = RefObj . untag . commitOid
 
 {- $merges -}
@@ -363,37 +364,38 @@ mergeStatus TypeChanged Added       = undefined
 mergeStatus TypeChanged Deleted     = LeftTypeChangedRightDeleted
 mergeStatus TypeChanged TypeChanged = BothTypeChanged
 
-data MergeResult m
+data MergeResult r
     = MergeSuccess
-        { mergeCommit    :: CommitOid m
+        { mergeCommit    :: CommitOid r
         }
     | MergeConflicted
-        { mergeCommit    :: CommitOid m
-        , mergeHeadLeft  :: CommitOid m
-        , mergeHeadRight :: CommitOid m
+        { mergeCommit    :: CommitOid r
+        , mergeHeadLeft  :: CommitOid r
+        , mergeHeadRight :: CommitOid r
         , mergeConflicts ::
-               Map TreeFilePath (ModificationKind, ModificationKind)
+            Map TreeFilePath (ModificationKind, ModificationKind)
         }
 
-copyMergeResult :: (Repository m, MonadGit m, Repository n, MonadGit n)
-                => MergeResult m -> n (MergeResult n)
+copyMergeResult :: (MonadGit r m, IsOid (Oid s))
+                => MergeResult s -> m (MergeResult r)
 copyMergeResult (MergeSuccess mc) =
-    MergeSuccess <$> (Tagged <$> parseOid (renderObjOid mc))
+    MergeSuccess <$> parseObjOid (renderObjOid mc)
 copyMergeResult (MergeConflicted hl hr mc cs) =
-    MergeConflicted <$> (Tagged <$> parseOid (renderObjOid hl))
-                    <*> (Tagged <$> parseOid (renderObjOid hr))
-                    <*> (Tagged <$> parseOid (renderObjOid mc))
+    MergeConflicted <$> parseObjOid (renderObjOid hl)
+                    <*> parseObjOid (renderObjOid hr)
+                    <*> parseObjOid (renderObjOid mc)
                     <*> pure cs
 
-instance Repository m => Show (MergeResult m) where
-    show (MergeSuccess mc) = "MergeSuccess (" ++ show mc ++ ")"
-    show (MergeConflicted mc hl hr cs) =
-        "MergeResult"
-     ++ "\n    { mergeCommit    = " ++ show mc
-     ++ "\n    , mergeHeadLeft  = " ++ show hl
-     ++ "\n    , mergeHeadRight = " ++ show hr
-     ++ "\n    , mergeConflicts = " ++ show cs
-     ++ "\n    }"
+-- instance Show (MergeResult r) where
+--     show (MergeSuccess mc) =
+--         "MergeSuccess (" ++ T.unpack (renderObjOid mc) ++ ")"
+--     show (MergeConflicted mc hl hr cs) =
+--         "MergeResult"
+--      ++ "\n    { mergeCommit    = " ++ T.unpack (renderObjOid mc)
+--      ++ "\n    , mergeHeadLeft  = " ++ T.unpack (renderObjOid hl)
+--      ++ "\n    , mergeHeadRight = " ++ T.unpack (renderObjOid hr)
+--      ++ "\n    , mergeConflicts = " ++ show cs
+--      ++ "\n    }"
 
 {- $exceptions -}
 -- | There is a separate 'GitException' for each possible failure when

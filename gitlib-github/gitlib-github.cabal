@@ -28,7 +28,6 @@ Library
     , bytestring           >= 0.9.2.1
     , conduit              >= 0.5.5
     , containers           >= 0.4.2
-    , data-default         >= 0.5.0
     , failure              >= 0.2.0.1
     , github               >= 0.5.0
     , hex                  >= 0.1.2

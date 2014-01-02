@@ -14,13 +14,11 @@ import           Git.Blob
 import           Git.Tree.Builder
 import           Git.Types
 
-listTreeEntries :: Repository m => Tree m -> m [(TreeFilePath, TreeEntry m)]
+listTreeEntries :: MonadGit r m => Tree r -> m [(TreeFilePath, TreeEntry r)]
 listTreeEntries tree = sourceTreeEntries tree $$ CL.consume
 
-copyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
-              => TreeEntry m
-              -> HashSet Text
-              -> t m (TreeEntry (t m), HashSet Text)
+copyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
+              => TreeEntry r -> HashSet Text -> t m (TreeEntry s, HashSet Text)
 copyTreeEntry (BlobEntry oid kind) needed = do
     (b,needed') <- copyBlob oid needed
     unless (renderObjOid oid == renderObjOid b) $
@@ -32,10 +30,8 @@ copyTreeEntry (CommitEntry oid) needed = do
     return (CommitEntry (Tagged coid), needed)
 copyTreeEntry (TreeEntry _) _ = error "This should never be called"
 
-copyTree :: (Repository m, Repository (t m), MonadTrans t)
-         => TreeOid m
-         -> HashSet Text
-         -> t m (TreeOid (t m), HashSet Text)
+copyTree :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
+         => TreeOid r -> HashSet Text -> t m (TreeOid s, HashSet Text)
 copyTree tr needed = do
     let oid = untag tr
         sha = renderOid oid
@@ -52,10 +48,10 @@ copyTree tr needed = do
 
         else return (Tagged oid2, needed)
   where
-    doCopyTreeEntry :: (Repository m, Repository (t m), MonadTrans t)
+    doCopyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
                     => HashSet Text
-                    -> (TreeFilePath, TreeEntry m)
-                    -> TreeT (t m) (HashSet Text)
+                    -> (TreeFilePath, TreeEntry r)
+                    -> TreeT s (t m) (HashSet Text)
     doCopyTreeEntry set (_, TreeEntry {}) = return set
     doCopyTreeEntry set (fp, ent) = do
         (ent2,set') <- lift $ copyTreeEntry ent set

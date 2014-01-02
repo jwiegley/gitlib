@@ -4,14 +4,14 @@ import Git.Types
 import Data.Conduit
 import Data.Conduit.List as CL
 
-listReferences :: Repository m => m [RefName]
+listReferences :: MonadGit r m => m [RefName]
 listReferences = sourceReferences $$ CL.consume
 
-resolveReference :: Repository m => RefName -> m (Maybe (Oid m))
+resolveReference :: MonadGit r m => RefName -> m (Maybe (Oid r))
 resolveReference name = do
     mref <- lookupReference name
     maybe (return Nothing) referenceToOid mref
 
-referenceToOid :: Repository m => RefTarget m -> m (Maybe (Oid m))
+referenceToOid :: MonadGit r m => RefTarget r -> m (Maybe (Oid r))
 referenceToOid (RefObj oid)       = return $ Just oid
 referenceToOid (RefSymbolic name) = resolveReference name

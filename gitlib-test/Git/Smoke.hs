@@ -32,15 +32,14 @@ import           Test.Hspec (Spec, Example, describe, it)
 import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
 
-sampleCommit :: Repository m => TreeOid m -> Signature -> m (Commit m)
+sampleCommit :: MonadGit r m => TreeOid r -> Signature -> m (Commit r)
 sampleCommit tr sig =
     createCommit [] tr sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (Repository t, MonadGit t,
-                  Repository t2, MonadGit t2,
-                  MonadBaseControl IO t)
-              => RepositoryFactory t IO c
-              -> RepositoryFactory t2 t c2
+smokeTestSpec :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
+                  MonadGit s n, MonadIO n, MonadBaseControl IO n)
+              => RepositoryFactory m IO r
+              -> RepositoryFactory n m s
               -> Spec
 smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
@@ -61,7 +60,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
       toid <- Git.parseOid "c0c848a2737a6a8533a18e6bd4d04266225e0271"
       tr <- lookupTree (Tagged toid)
-      let x = renderObjOid $ treeOid tr
+      x <- renderObjOid <$> treeOid tr
       liftIO $ x @?= "c0c848a2737a6a8533a18e6bd4d04266225e0271"
 
   it "create two trees" $ withNewRepository pr "twoTrees.git" $ do
@@ -389,14 +388,14 @@ data TreeitException = TreeitException Text deriving (Eq, Show, Typeable)
 
 instance Exception TreeitException
 
-mkBlob :: Repository m => TreeFilePath -> TreeT m ()
+mkBlob :: MonadGit r m => TreeFilePath -> TreeT r m ()
 mkBlob path = putBlob path
     =<< lift (createBlob $ BlobStream $
                   CB.sourceLbs (BL.fromChunks [path <> "\n"]))
 
 doTreeit :: (MonadBaseControl IO m, MonadIO m,
-             MonadGit t, Repository t)
-       => String -> RepositoryFactory t m c -> [Kind] -> TreeT t a -> m ()
+             MonadGit r n, MonadBaseControl IO n, MonadIO n)
+       => String -> RepositoryFactory n m r -> [Kind] -> TreeT r n a -> m ()
 doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     tref <- createTree action
     tree <- lookupTree tref
@@ -421,12 +420,13 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     fullPath  = normalize label <> ".git"
     normalize = map (\x -> if x == ' ' then '-' else x)
 
-treeit :: (Example (m ()), MonadGit m, MonadGit t, Repository t)
-       => String -> RepositoryFactory t m c -> [Kind] -> TreeT t a -> Spec
+treeit :: (Example (m ()), MonadIO m, MonadBaseControl IO m,
+           MonadGit r n, MonadIO n, MonadBaseControl IO n)
+       => String -> RepositoryFactory n m r -> [Kind] -> TreeT r n a -> Spec
 treeit label pr kinds action = it label $ doTreeit label pr kinds action
 
-treeitFail :: (MonadGit t, Repository t)
-           => String -> RepositoryFactory t IO c -> [Kind] -> TreeT t a
+treeitFail :: (MonadGit r m, MonadIO m, MonadBaseControl IO m)
+           => String -> RepositoryFactory m IO r -> [Kind] -> TreeT r m a
            -> Spec
 treeitFail label pr kinds action =
     it label $ doTreeit label pr kinds action

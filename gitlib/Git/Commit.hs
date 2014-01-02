@@ -17,20 +17,19 @@ import           Git.Tree
 import           Git.Types
 import           Prelude hiding (FilePath)
 
-commitTreeEntry :: Repository m
-                => Commit m
-                -> TreeFilePath
-                -> m (Maybe (TreeEntry m))
+commitTreeEntry :: MonadGit r m
+                => Commit r -> TreeFilePath -> m (Maybe (TreeEntry r))
 commitTreeEntry c path = flip treeEntry path =<< lookupTree (commitTree c)
 
-copyCommitOid :: (Repository m, Repository n) => CommitOid m -> n (CommitOid n)
+copyCommitOid :: (IsOid (Oid r), MonadGit s n)
+              => CommitOid r -> n (CommitOid s)
 copyCommitOid = parseObjOid . renderObjOid
 
-copyCommit :: (Repository m, Repository (t m), MonadTrans t)
-           => CommitOid m
+copyCommit :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
+           => CommitOid r
            -> Maybe RefName
            -> HashSet Text
-           -> t m (CommitOid (t m), HashSet Text)
+           -> t m (CommitOid s, HashSet Text)
 copyCommit cr mref needed = do
     let oid = untag cr
         sha = renderOid oid
@@ -66,17 +65,17 @@ copyCommit cr mref needed = do
         let x = cref2 `seq` (cref2:prefs)
         return $ x `seq` needed'' `seq` (x,needed'')
 
-listCommits :: Repository m
-            => Maybe (CommitOid m) -- ^ A commit we may already have
-            -> CommitOid m         -- ^ The commit we need
-            -> m [CommitOid m]     -- ^ All the objects in between
+listCommits :: MonadGit r m
+            => Maybe (CommitOid r) -- ^ A commit we may already have
+            -> CommitOid r         -- ^ The commit we need
+            -> m [CommitOid r]     -- ^ All the objects in between
 listCommits mhave need =
     sourceObjects mhave need False
         $= CL.mapM (\(CommitObjOid c) -> return c)
         $$ CL.consume
 
-traverseCommits :: Repository m => (CommitOid m -> m a) -> CommitOid m -> m [a]
+traverseCommits :: MonadGit r m => (CommitOid r -> m a) -> CommitOid r -> m [a]
 traverseCommits f need = mapM f =<< listCommits Nothing need
 
-traverseCommits_ :: Repository m => (CommitOid m -> m ()) -> CommitOid m -> m ()
+traverseCommits_ :: MonadGit r m => (CommitOid r -> m ()) -> CommitOid r -> m ()
 traverseCommits_ = (void .) . traverseCommits

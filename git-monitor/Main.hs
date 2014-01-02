@@ -32,7 +32,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
-import           Git.Libgit2 (MonadLg, LgRepository, lgFactoryLogger)
+import           Git.Libgit2 (MonadLg, LgRepo, lgFactoryLogger)
 import           Options.Applicative
 import           Shelly (silently, shelly, run)
 import           System.Directory
@@ -179,17 +179,17 @@ doMain opts = do
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots any
 --   changes that have occurred in them.
-snapshotTree :: MonadLg m
+snapshotTree :: (MonadGit LgRepo m, MonadLg m)
              => Options
              -> FilePath
              -> CommitAuthor
              -> CommitEmail
              -> RefName
              -> RefName
-             -> Commit (LgRepository m)
-             -> TreeOid (LgRepository m)
-             -> Map TreeFilePath (FileEntry (LgRepository m))
-             -> TreeT (LgRepository m) ()
+             -> Commit LgRepo
+             -> TreeOid LgRepo
+             -> Map TreeFilePath (FileEntry LgRepo)
+             -> TreeT LgRepo m ()
 snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     -- Read the current working tree's state on disk
     ft' <- lift $ readFileTree ref wd False
@@ -232,22 +232,22 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
         else loop sc' toid' ft'
 
   where
-    scanOldEntry :: MonadLg m
-                 => Map TreeFilePath (FileEntry (LgRepository m))
+    scanOldEntry :: (MonadGit LgRepo m, MonadLg m)
+                 => Map TreeFilePath (FileEntry LgRepo)
                  -> TreeFilePath
-                 -> FileEntry (LgRepository m)
-                 -> TreeT (LgRepository m) ()
+                 -> FileEntry LgRepo
+                 -> TreeT LgRepo m ()
     scanOldEntry ft fp _ = case Map.lookup fp ft of
         Nothing -> do
             lift . infoL $ "Removed: " <> B8.unpack fp
             dropEntry fp
         _ -> return ()
 
-    scanNewEntry :: MonadLg m
-                 => Map TreeFilePath (FileEntry (LgRepository m))
+    scanNewEntry :: (MonadGit LgRepo m, MonadLg m)
+                 => Map TreeFilePath (FileEntry LgRepo)
                  -> TreeFilePath
-                 -> FileEntry (LgRepository m)
-                 -> TreeT (LgRepository m) ()
+                 -> FileEntry LgRepo
+                 -> TreeT LgRepo m ()
     scanNewEntry ft fp (FileEntry mt oid kind _) =
         case Map.lookup fp ft of
             Nothing -> do
@@ -274,11 +274,11 @@ data FileEntry m = FileEntry
 
 type FileTree m = Map TreeFilePath (FileEntry m)
 
-readFileTree :: MonadLg m
+readFileTree :: (MonadGit LgRepo m, MonadLg m)
              => RefName
              -> FilePath
              -> Bool
-             -> LgRepository m (FileTree (LgRepository m))
+             -> m (FileTree LgRepo)
 readFileTree ref wdir getHash = do
     h <- resolveReference ref
     case h of
@@ -287,9 +287,9 @@ readFileTree ref wdir getHash = do
             tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
             readFileTree' tr wdir getHash
 
-readFileTree' :: MonadLg m
-              => Tree (LgRepository m) -> FilePath -> Bool
-              -> LgRepository m (FileTree (LgRepository m))
+readFileTree' :: (MonadGit LgRepo m, MonadLg m)
+              => Tree LgRepo -> FilePath -> Bool
+              -> m (FileTree LgRepo)
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
     foldlM (\m (fp,oid,kind) -> do
@@ -297,13 +297,13 @@ readFileTree' tr wdir getHash = do
                  return $ maybe m (flip (Map.insert fp) m) fent)
            Map.empty blobs
 
-readModTime :: MonadLg m
+readModTime :: (MonadGit LgRepo m, MonadLg m)
             => FilePath
             -> Bool
             -> FilePath
-            -> BlobOid (LgRepository m)
+            -> BlobOid LgRepo
             -> BlobKind
-            -> LgRepository m (Maybe (FileEntry (LgRepository m)))
+            -> m (Maybe (FileEntry LgRepo))
 readModTime wdir getHash fp oid kind = do
     let path = wdir </> fp
     debugL $ "Checking file: " ++ path
@@ -321,10 +321,10 @@ readModTime wdir getHash fp oid kind = do
                       else return oid)
         else return Nothing
 
-infoL :: (Repository m, MonadIO m) => String -> m ()
+infoL :: MonadIO m => String -> m ()
 infoL = liftIO . infoM "git-monitor"
 
-debugL :: (Repository m, MonadIO m) => String -> m ()
+debugL :: MonadIO m => String -> m ()
 debugL = liftIO . debugM "git-monitor"
 
 -- Main.hs (git-monitor) ends here
