@@ -1453,7 +1453,7 @@ addS3Backend :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
              -> m LgRepo
 addS3Backend repo bucket prefix access secret
     mmanager mockAddr level dir callbacks = do
-    manager <- maybe (liftIO $ newManager def) return mmanager
+    manager <- maybe (liftIO $ newManager conduitManagerSettings) return mmanager
     odbS3   <- odbS3Backend
         (case mockAddr of
             Nothing   -> defServiceConfig

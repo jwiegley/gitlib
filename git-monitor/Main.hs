@@ -33,7 +33,6 @@ import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
 import           Git.Libgit2 (MonadLg, LgRepo, lgFactoryLogger)
-import           Language.Haskell.TH.Syntax hiding (lift)
 import           Options.Applicative
 import           Shelly (silently, shelly, run)
 import           System.Directory
@@ -57,8 +56,7 @@ logMLogger _loc src lvl str =
     prio LevelError     = ERROR
     prio (LevelOther _) = INFO
 
-    convert (LS str) = str
-    convert (LB bs)  = T.unpack (T.decodeUtf8 bs)
+    convert = T.unpack . T.decodeUtf8 . fromLogStr
 
 toStrict :: TL.Text -> T.Text
 #if MIN_VERSION_shelly(1, 0, 0)
