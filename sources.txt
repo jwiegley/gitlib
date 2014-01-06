@@ -6,7 +6,6 @@
 ./gitlib-cmdline
 ./gitlib-cross
 ./hlibgit2
-./vendor/aws
 ./vendor/c2hsc
 ./git-monitor
 ./git-gpush
