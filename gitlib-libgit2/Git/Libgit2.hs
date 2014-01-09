@@ -44,6 +44,7 @@ module Git.Libgit2
        , lgDiffContentsWithTree
        , lgWrap
        , oidToSha
+       , shaToCOid
        , shaToOid
        , openLgRepository
        , runLgRepository
@@ -1076,7 +1077,7 @@ lgDiffContentsWithTree contents tree = do
                     Just boid -> withBlob boid $ \blobp ->
                         case mcontent of
                             Just (Left sha) -> do
-                                boid2 <- liftIO $ shaToOid sha
+                                boid2 <- liftIO $ shaToCOid sha
                                 if boid == boid2
                                     then withBlob boid2 $
                                         liftIO . db blobp
@@ -1269,12 +1270,15 @@ oidToSha oidPtr =
     Git.SHA <$> B.packCStringLen
         (castPtr oidPtr, sizeOf (undefined :: C'git_oid))
 
-shaToOid :: Git.SHA -> IO (ForeignPtr C'git_oid)
-shaToOid (Git.SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
+shaToCOid :: Git.SHA -> IO (ForeignPtr C'git_oid)
+shaToCOid (Git.SHA bs) = BU.unsafeUseAsCString bs $ \bytes -> do
     ptr <- mallocForeignPtr
     withForeignPtr ptr $ \ptr' -> do
         c'git_oid_fromraw ptr' (castPtr bytes)
         return ptr
+
+shaToOid :: Git.SHA -> IO OidPtr
+shaToOid = fmap mkOid . shaToCOid
 
 lgCopyPackFile :: MonadLg m => FilePath -> ReaderT LgRepo m ()
 lgCopyPackFile packFile = do
@@ -1383,7 +1387,7 @@ lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, Failure Git.GitException m,
 lgReadFromPack idxPath sha metadataOnly =
     control $ \run -> alloca $ \objectPtrPtr ->
         run $ lgWithPackFile idxPath $ \odbPtr -> do
-            foid <- liftIO $ shaToOid sha
+            foid <- liftIO $ shaToCOid sha
             if metadataOnly
                 then readMetadata odbPtr foid
                 else readObject odbPtr foid objectPtrPtr
