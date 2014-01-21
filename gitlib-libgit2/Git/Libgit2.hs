@@ -395,9 +395,9 @@ lgMakeBuilder builder = Git.TreeBuilder
     , Git.mtbLookupEntry    = lgLookupBuilderEntry builder
     , Git.mtbEntryCount     = lgBuilderEntryCount builder
     , Git.mtbPutEntry       = \tb name ent ->
-        lgPutEntry builder name ent >> return (Git.BuilderUnchanged tb)
+        Git.BuilderUnchanged tb <$ lgPutEntry builder name ent
     , Git.mtbDropEntry      = \tb name ->
-        lgDropEntry builder name >> return (Git.BuilderUnchanged tb)
+        Git.BuilderUnchanged tb <$ lgDropEntry builder name
     }
 
 -- | Create a new, empty tree.

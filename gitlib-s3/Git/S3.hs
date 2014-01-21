@@ -1139,7 +1139,7 @@ writeCallback oid be obj_data len obj_type = do
         0 -> do
             (dets, sha) <- liftIO $ unpackDetails be oid
             wrap (T.unpack $ "S3.writeCallback " <> shaToText sha)
-                (go dets sha >> return c'GIT_OK)
+                (c'GIT_OK <$ go dets sha)
                 (return c'GIT_ERROR)
         n -> do
             lgDebug "S3.writeCallback failed to hash data"
@@ -1222,7 +1222,7 @@ packAddCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
                 -> m CInt
 packAddCallback wp dataPtr len _progress =
     wrap "S3.packAddCallback"
-        (go >> return c'GIT_OK)
+        (c'GIT_OK <$ go)
         (return c'GIT_ERROR)
   where
     go = do
