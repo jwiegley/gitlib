@@ -5,7 +5,6 @@ import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Trans.Class
-import qualified Data.Binary as Bin
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as BL
@@ -159,10 +158,6 @@ instance IsOid SHA where
 
 instance Show SHA where
     show = T.unpack . shaToText
-
-instance Bin.Binary SHA where
-    put (SHA t) = Bin.put t
-    get = SHA <$> Bin.get
 
 instance Hashable SHA where
     hashWithSalt salt (SHA bs) = hashWithSalt salt bs
