@@ -10,6 +10,7 @@
 module Main where
 
 import           Control.Concurrent (threadDelay)
+import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Logger
@@ -307,19 +308,19 @@ readModTime :: (MonadGit LgRepo m, MonadLg m)
 readModTime wdir getHash fp oid kind = do
     let path = wdir </> fp
     debugL $ "Checking file: " ++ path
-    status <- liftIO $ getSymbolicLinkStatus path
-    if isRegularFile status
-        then Just <$>
-             (FileEntry
-                  <$> pure (posixSecondsToUTCTime
-                            (realToFrac (modificationTime status)))
-                  <*> pure oid
-                  <*> pure kind
-                  <*> if getHash
-                      then hashContents . BlobString
-                          =<< liftIO (B.readFile path)
-                      else return oid)
-        else return Nothing
+    estatus <- liftIO $ try $ getSymbolicLinkStatus path
+    case (estatus :: Either SomeException FileStatus) of
+        Right status | isRegularFile status ->
+            Just <$> (FileEntry
+                          <$> pure (posixSecondsToUTCTime
+                                    (realToFrac (modificationTime status)))
+                          <*> pure oid
+                          <*> pure kind
+                          <*> if getHash
+                              then hashContents . BlobString
+                                  =<< liftIO (B.readFile path)
+                              else return oid)
+        _ -> return Nothing
 
 infoL :: MonadIO m => String -> m ()
 infoL = liftIO . infoM "git-monitor"
