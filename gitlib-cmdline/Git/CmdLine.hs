@@ -677,6 +677,11 @@ cliCreateTag oid@(renderObjOid -> sha) tagger msg name = do
         , ""] <> TL.lines (fromStrict msg)
     Tag <$> mkOid (TL.init tsha) <*> pure oid
 
+cliWorkingTreeDirty :: MonadCli m => ReaderT CliRepo m Bool
+cliWorkingTreeDirty = do
+    status <- runGit [ "status", "-s", "-uno", "-z" ]
+    return $ TL.length status > 0
+
 cliFactory :: MonadCli m => RepositoryFactory (ReaderT CliRepo m) m CliRepo
 cliFactory = RepositoryFactory
     { openRepository  = openCliRepository
