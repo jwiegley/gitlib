@@ -966,6 +966,16 @@ lgThrow f = do
                 peekCString (c'git_error'message err)
     failure (f (pack errStr))
 
+-- withLgTempRepo :: MonadLg m => ReaderT LgRepo m a -> m a
+-- withLgTempRepo f = withTempDir $ \dir -> do
+--     repo <- liftIO (removeTree dir) >> openLgRepository
+--         defaultRepositoryOptions
+--             { repoPath       = F.encodeString dir
+--             , repoIsBare     = True
+--             , repoAutoCreate = True
+--             }
+--     runProjectLgRepository $ f `finally` closeRepository
+
 lgDiffContentsWithTree
     :: MonadLg m
     => Source (ReaderT LgRepo m)
