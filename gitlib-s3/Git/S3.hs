@@ -325,6 +325,16 @@ wrap msg f g = catch
                lgWarn $ show (e :: SomeException)
                g
 
+wrap' :: MonadS3 m => String -> m a -> m a -> m a
+wrap' msg f g = catch
+    (do lgDebug $ msg ++ "..."
+        r <- f
+        lgDebug $ msg ++ "...done"
+        return r)
+    $ \e -> do lgWarn $ msg ++ "...FAILED"
+               lgWarn $ show (e :: SomeException)
+               g
+
 orElse :: MonadS3 m => m a -> m a -> m a
 orElse f g = catch f $ \e -> do
     lgWarn "A callback operation failed"
@@ -405,8 +415,8 @@ wrapGetObject :: MonadS3 m
               -> Maybe (Int64, Int64)
               -> ResourceT m (Maybe (Either Text BL.ByteString))
 wrapGetObject f bucket path range =
-    wrap ("getObject: " ++ show bucket ++ "/" ++ show path
-             ++ " " ++ show range)
+    wrap' ("getObject: " ++ show bucket ++ "/" ++ show path
+               ++ " " ++ show range)
         (f bucket path range)
         (return Nothing)
 
