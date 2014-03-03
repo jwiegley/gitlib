@@ -505,7 +505,7 @@ testFileS3 dets filepath = do
         path   = T.append (objectPrefix dets) filepath
 
     cbResult <- wrapHeadObject (headObject (callbacks dets))
-                    bucket path `orElse` return Nothing
+                    bucket path `orElse` return (Just False)
     case cbResult of
         Just r  -> return r
         Nothing -> do
@@ -527,8 +527,10 @@ getFileS3 dets filepath range = do
         path   = T.unpack (objectPrefix dets) <> filepath
 
     cbResult <- wrapGetObject (getObject (callbacks dets))
-                    bucket (T.pack path) range `orElse` return Nothing
+                    bucket (T.pack path) range
+        `orElse` return (Just (Left "Failed to get object from callback"))
     case cbResult of
+        Just (Left e) -> throwIO $ Git.BackendError e
         Just (Right r) ->
             transResourceT liftIO $
                 fst <$> (sourceLbs r $$+ Data.Conduit.Binary.take 0)
@@ -553,8 +555,9 @@ putFileS3 dets filepath src = do
 
     cbResult <- wrapPutObject (putObject (callbacks dets)) bucket path
                     (ObjectLength (BL.length lbs)) lbs
-                    `orElse` return Nothing
+        `orElse` return (Just (Left "Failed to get object from callback"))
     case cbResult of
+        Just (Left e) -> throwIO $ Git.BackendError e
         Just (Right r) -> return r
         _ -> do
             lgDebug $ "Aws.putObject: " ++ show filepath
