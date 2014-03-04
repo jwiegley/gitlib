@@ -39,6 +39,8 @@ module Git.Libgit2
        , lgExcTrap
        , lgBuildPackFile
        , lgReadFromPack
+       , lgOpenPackFile
+       , lgClosePackFile
        , lgWithPackFile
        , lgCopyPackFile
        , lgDiffContentsWithTree
@@ -1350,15 +1352,15 @@ lgCopyPackFile packFile = do
         checkResult r "c'git_odb_writepack'commit failed"
 
 lgLoadPackFileInMemory
-    :: (MonadBaseControl IO m, MonadIO m, Failure Git.GitException m,
-        MonadUnsafeIO m, MonadThrow m, MonadLogger m)
+    :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
+        Failure Git.GitException m)
     => FilePath
     -> Ptr (Ptr C'git_odb_backend)
     -> Ptr (Ptr C'git_odb)
-    -> ResourceT m (Ptr C'git_odb)
+    -> m (Ptr C'git_odb)
 lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
     lgDebug "Create temporary, in-memory object database"
-    (_,odbPtr) <- flip allocate c'git_odb_free $ do
+    odbPtr <- liftIO $ do
         r <- c'git_odb_new odbPtrPtr
         checkResult r "c'git_odb_new failed"
         peek odbPtrPtr
@@ -1382,58 +1384,62 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 
     return odbPtr
 
-lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, Failure Git.GitException m,
-                   MonadUnsafeIO m, MonadThrow m, MonadLogger m)
-               => FilePath -> (Ptr C'git_odb -> ResourceT m a) -> m a
-lgWithPackFile idxPath f = control $ \run ->
+lgOpenPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
+                   Failure Git.GitException m)
+               => FilePath -> m (Ptr C'git_odb)
+lgOpenPackFile idxPath = control $ \run ->
     alloca $ \odbPtrPtr ->
-    alloca $ \backendPtrPtr -> run $ runResourceT $
-        f =<< lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
+    alloca $ \backendPtrPtr -> run $
+        lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
-lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, Failure Git.GitException m,
-                   MonadUnsafeIO m, MonadThrow m, MonadLogger m)
-               => FilePath -> Git.SHA -> Bool
+lgClosePackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
+                   Failure Git.GitException m)
+               => Ptr C'git_odb -> m ()
+lgClosePackFile = liftIO . c'git_odb_free
+
+lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
+                   Failure Git.GitException m)
+               => FilePath -> (Ptr C'git_odb -> m a) -> m a
+lgWithPackFile idxPath = bracket (lgOpenPackFile idxPath) lgClosePackFile
+
+lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
+                   Failure Git.GitException m)
+               => Ptr C'git_odb -> Git.SHA -> Bool
                -> m (Maybe (C'git_otype, CSize, ByteString))
-lgReadFromPack idxPath sha metadataOnly =
-    control $ \run -> alloca $ \objectPtrPtr ->
-        run $ lgWithPackFile idxPath $ \odbPtr -> do
-            foid <- liftIO $ shaToCOid sha
-            if metadataOnly
-                then readMetadata odbPtr foid
-                else readObject odbPtr foid objectPtrPtr
+lgReadFromPack odbPtr sha metadataOnly = liftIO $ do
+    foid <- shaToCOid sha
+    if metadataOnly
+        then readMetadata odbPtr foid
+        else readObject odbPtr foid
   where
-    readMetadata odbPtr foid =
-        liftIO $ alloca $ \sizePtr -> alloca $ \typPtr -> do
-            r <- withForeignPtr foid $
-                 c'git_odb_read_header sizePtr typPtr odbPtr
-            if r == 0
-                then Just <$> ((,,) <$> peek typPtr
-                                    <*> peek sizePtr
-                                    <*> pure B.empty)
-                else do
-                    unless (r == c'GIT_ENOTFOUND) $
-                        checkResult r "c'git_odb_read_header failed"
-                    return Nothing
-
-    readObject odbPtr foid objectPtrPtr = do
-        r <- liftIO $ withForeignPtr foid $
-             c'git_odb_read objectPtrPtr odbPtr
-        mr <-
-            if r == 0
-            then do
-                objectPtr <- liftIO $ peek objectPtrPtr
-                void $ register $ c'git_odb_object_free objectPtr
-                return $ Just objectPtr
+    readMetadata odbPtr foid = alloca $ \sizePtr -> alloca $ \typPtr -> do
+        r <- withForeignPtr foid $
+             c'git_odb_read_header sizePtr typPtr odbPtr
+        if r == 0
+            then Just <$> ((,,) <$> peek typPtr
+                                <*> peek sizePtr
+                                <*> pure B.empty)
             else do
                 unless (r == c'GIT_ENOTFOUND) $
-                    checkResult r "c'git_odb_read failed"
+                    checkResult r "c'git_odb_read_header failed"
                 return Nothing
-        forM mr $ \objectPtr -> liftIO $ do
+
+    readObject odbPtr foid = alloca $ \objectPtrPtr -> do
+        r <- withForeignPtr foid $
+             c'git_odb_read objectPtrPtr odbPtr
+        mr <- if r == 0
+              then Just <$> peek objectPtrPtr
+              else do
+                  unless (r == c'GIT_ENOTFOUND) $
+                      checkResult r "c'git_odb_read failed"
+                  return Nothing
+        forM mr $ \objectPtr -> do
             typ <- c'git_odb_object_type objectPtr
             len <- c'git_odb_object_size objectPtr
             ptr <- c'git_odb_object_data objectPtr
             bytes <- curry B.packCStringLen (castPtr ptr)
                          (fromIntegral len)
+            c'git_odb_object_free objectPtr
             return (typ,len,bytes)
 
 lgRemoteFetch :: MonadLg m => Text -> Text -> ReaderT LgRepo m ()

@@ -50,7 +50,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
 import           Data.Conduit
-import           Data.Conduit.Binary hiding (drop)
+import           Data.Conduit.Binary hiding (mapM_, drop)
 import qualified Data.Conduit.List as CList
 import           Data.Default
 import           Data.Foldable (for_)
@@ -271,6 +271,7 @@ data OdbS3Details = OdbS3Details
       -- via the 'lookupObject' callback above.  If it is present, it can be
       -- one of the CacheEntry's possible states.
     , knownObjects    :: TVar (HashMap SHA CacheEntry)
+    , knownPackFiles  :: TVar (HashMap FilePath (Ptr C'git_odb, [SHA]))
     , tempDirectory   :: FilePath
     }
 
@@ -643,9 +644,18 @@ catalogPackFile dets packSha idxPath = do
     -- what it contains.  When 'withPackFile' returns, the pack file will be
     -- closed and any associated resources freed.
     lgDebug $ "catalogPackFile: " ++ show packSha
-    _ <- lgWithPackFile idxPath $
-        observePackObjects dets packSha idxPath True
-    return []
+    m <- liftIO $ atomically $ readTVar (knownPackFiles dets)
+    case M.lookup idxPath m of
+        Nothing  ->
+            bracketOnError
+                (lgOpenPackFile idxPath)
+                lgClosePackFile
+                $ \odbPtr -> do
+                    shas <- observePackObjects dets packSha idxPath True odbPtr
+                    liftIO $ atomically $ modifyTVar (knownPackFiles dets) $
+                        M.insert idxPath (odbPtr, shas)
+                    return shas
+        Just (_, shas) -> return shas
 
 observeCacheObjects :: OdbS3Details -> IO ()
 observeCacheObjects dets = do
@@ -755,7 +765,11 @@ cacheLoadObject dets sha ce metadataOnly = do
             then do
                 lgDebug $ "getObjectFromPack " ++ show packPath ++ " "
                        ++ show sha
-                mresult <- lgReadFromPack idxPath sha metadataOnly
+                m <- liftIO $ atomically $ readTVar (knownPackFiles dets)
+                mresult <- case M.lookup idxPath m of
+                    Nothing  -> throwIO $ Git.BackendError $
+                        "Accessing unknown pack file " <> T.pack idxPath
+                    Just (ptr, _) -> lgReadFromPack ptr sha metadataOnly
                 for mresult $ \(typ, len, bytes) ->
                     return $ ObjectInfo (fromLength len) (fromType typ)
                         Nothing (Just (BL.fromChunks [bytes]))
@@ -990,9 +1004,14 @@ accessObject dets sha checkRemote = do
                                 return $ Just LooseRemote
                             else do
                                 -- This can be a very time consuming operation
-                                runResourceT $ remoteCatalogContents dets
-
-                                cacheLookupEntry dets sha
+                                m <- liftIO $ atomically $
+                                    readTVar (knownPackFiles dets)
+                                if M.null m
+                                    then do
+                                        runResourceT $
+                                            remoteCatalogContents dets
+                                        cacheLookupEntry dets sha
+                                    else return Nothing
                     | otherwise -> return Nothing
 
 -- All of these functions follow the same general outline:
@@ -1206,6 +1225,8 @@ freeCallback be = do
     dets  <- deRefStablePtr (details odbS3)
 
     shuttingDown (callbacks dets)
+    packFiles <- atomically $ readTVar (knownPackFiles dets)
+    mapM_ (runNoLoggingT . lgClosePackFile . fst) (M.elems packFiles)
 
     packFreeCallback (packWriter odbS3)
     freeStablePtr (details odbS3)
@@ -1398,7 +1419,8 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
     writePackCommitFun <-
         liftIO $ mk'git_odb_writepack_commit_callback writePackCommitFun'
 
-    objects <- liftIO $ newTVarIO M.empty
+    objects   <- liftIO $ newTVarIO M.empty
+    packFiles <- liftIO $ newTVarIO M.empty
 
     let odbS3details = OdbS3Details
             { httpManager     = manager
@@ -1408,6 +1430,7 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
             , s3configuration = s3config
             , callbacks       = callbacks
             , knownObjects    = objects
+            , knownPackFiles  = packFiles
             , tempDirectory   = dir
             }
         odbS3Parent = C'git_odb_backend
