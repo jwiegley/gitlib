@@ -106,12 +106,13 @@ class (Applicative m, Monad m, Failure GitException m,
 
 data RepositoryOptions = RepositoryOptions
     { repoPath       :: !FilePath
+    , repoWorkingDir :: !(Maybe FilePath)
     , repoIsBare     :: !Bool
     , repoAutoCreate :: !Bool
     }
 
 defaultRepositoryOptions :: RepositoryOptions
-defaultRepositoryOptions = RepositoryOptions "" False False
+defaultRepositoryOptions = RepositoryOptions "" Nothing False False
 
 data RepositoryFactory n m r = RepositoryFactory
     { openRepository :: RepositoryOptions -> m r

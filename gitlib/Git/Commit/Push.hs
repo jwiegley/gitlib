@@ -57,6 +57,7 @@ copyRepository :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
 copyRepository factory mname refName gitDir isBare =
     withRepository' factory RepositoryOptions
         { repoPath       = gitDir
+        , repoWorkingDir = Nothing
         , repoIsBare     = isBare
         , repoAutoCreate = True
         }

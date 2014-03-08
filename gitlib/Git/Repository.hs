@@ -18,6 +18,7 @@ withNewRepository factory path action = do
     -- we want exceptions to leave the repo behind
     a <- withRepository' factory RepositoryOptions
         { repoPath       = path
+        , repoWorkingDir = Nothing
         , repoIsBare     = True
         , repoAutoCreate = True
         } action
@@ -35,6 +36,7 @@ withNewRepository' factory path action =
     bracket_ recover recover $
         withRepository' factory RepositoryOptions
             { repoPath       = path
+            , repoWorkingDir = Nothing
             , repoIsBare     = True
             , repoAutoCreate = True
             } action

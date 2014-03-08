@@ -76,6 +76,9 @@ newtype CliRepo = CliRepo RepositoryOptions
 cliRepoPath :: CliRepo -> TL.Text
 cliRepoPath (CliRepo options) = TL.pack $ repoPath options
 
+cliWorkingDir :: CliRepo -> Maybe TL.Text
+cliWorkingDir (CliRepo options) = TL.pack <$> repoWorkingDir options
+
 -- class HasCliRepo env where
 --     getCliRepo :: env -> CliRepo
 
@@ -141,20 +144,23 @@ formatCliTime = T.pack . formatTime defaultTimeLocale "%s %z"
 lexer :: TokenParser u
 lexer = makeTokenParser haskellDef
 
-git :: [TL.Text] -> Sh TL.Text
-git = run "git"
+gitStdOpts :: CliRepo -> [TL.Text]
+gitStdOpts repo = [ "--git-dir", cliRepoPath repo ]
+    ++ maybe [] (\w -> [ "--work-tree", w ]) (cliWorkingDir repo)
 
-git_ :: [TL.Text] -> Sh ()
-git_ = run_ "git"
+git :: CliRepo -> [TL.Text] -> Sh TL.Text
+git repo args = run "git" $ gitStdOpts repo ++ args
+
+git_ :: CliRepo -> [TL.Text] -> Sh ()
+git_ repo args = run_ "git" $ gitStdOpts repo ++ args
 
 doRunGit :: MonadCli m
          => (F.FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
          -> ReaderT CliRepo m a
 doRunGit f args act = do
     repo <- getRepository
-    shellyNoDir $ silently $ do
-        act
-        f "git" $ ["--git-dir", cliRepoPath repo] <> args
+    shellyNoDir $ silently $
+        act >> f "git" (gitStdOpts repo <> args)
 
 runGit :: MonadCli m => [TL.Text] -> ReaderT CliRepo m TL.Text
 runGit = flip (doRunGit run) (return ())
@@ -162,11 +168,11 @@ runGit = flip (doRunGit run) (return ())
 runGit_ :: MonadCli m => [TL.Text] -> ReaderT CliRepo m ()
 runGit_ = flip (doRunGit run_) (return ())
 
-cliRepoDoesExist :: Text -> Sh (Either GitException ())
-cliRepoDoesExist remoteURI = do
+cliRepoDoesExist :: CliRepo -> Text -> Sh (Either GitException ())
+cliRepoDoesExist repo remoteURI = do
     setenv "SSH_ASKPASS" "echo"
     setenv "GIT_ASKPASS" "echo"
-    git_ [ "ls-remote", fromStrict remoteURI ]
+    git_ repo [ "ls-remote", fromStrict remoteURI ]
     ec <- lastExitCode
     return $ if ec == 0
              then Right ()
@@ -184,14 +190,15 @@ cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
         for_ msshCmd $ \sshCmd ->
             setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
 
-        eres <- cliRepoDoesExist remoteNameOrURI
+        eres <- cliRepoDoesExist repo remoteNameOrURI
         case eres of
             Left e -> return $ Just e
             Right () -> do
-                git_ $ [ "--git-dir", cliRepoPath repo ]
-                    <> [ "push", fromStrict remoteNameOrURI
-                       , TL.concat [ fromStrict (renderObjOid cname)
-                                   , ":", fromStrict remoteRefName ] ]
+                git_ repo [ "push", fromStrict remoteNameOrURI
+                          , TL.concat [ fromStrict (renderObjOid cname)
+                                      , ":", fromStrict remoteRefName
+                                      ]
+                          ]
                 r <- lastExitCode
                 if r == 0
                     then return Nothing
@@ -223,19 +230,14 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     eres     <- shellyNoDir $ silently $ errExit False $ do
         for_ msshCmd $ \sshCmd ->
             setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
-        eres <- cliRepoDoesExist remoteNameOrURI
+        eres <- cliRepoDoesExist repo remoteNameOrURI
         case eres of
             Left e -> return (Left e)
             Right () -> do
-                git_ [ "--git-dir", cliRepoPath repo
-                     , "config", "user.name", fromStrict user
-                     ]
-                git_ [ "--git-dir", cliRepoPath repo
-                     , "config", "user.email", fromStrict email
-                     ]
-                git_ $ [ "--git-dir", cliRepoPath repo
-                       , "-c", "merge.conflictstyle=merge"
-                       ]
+                git_ repo [ "config", "user.name", fromStrict user ]
+                git_ repo [ "config", "user.email", fromStrict email ]
+                git_ repo $
+                       [ "-c", "merge.conflictstyle=merge" ]
                     <> [ "pull", "--quiet"
                        , fromStrict remoteNameOrURI
                        , fromStrict remoteRefName
@@ -261,11 +263,9 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
         rightHead <- Tagged <$> getOid "MERGE_HEAD"
         xs <- shellyNoDir $ silently $ errExit False $ do
             xs <- returnConflict . TL.init
-                  <$> git [ "--git-dir", cliRepoPath repo
-                          , "status", "-z", "--porcelain" ]
+                  <$> git repo [ "status", "-z", "--porcelain" ]
             forM_ (Map.assocs xs) $ uncurry (handleFile repo)
-            git_ [ "--git-dir", cliRepoPath repo
-                 , "commit", "-F", ".git/MERGE_MSG" ]
+            git_ repo [ "commit", "-F", ".git/MERGE_MSG" ]
             return xs
         MergeConflicted
             <$> (Tagged <$> getOid "HEAD")
@@ -279,17 +279,11 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     isConflict _                          = True
 
     handleFile repo fp (Deleted, Deleted) =
-        git_ [ "--git-dir", cliRepoPath repo, "rm", "--cached"
-             , fromStrict . T.decodeUtf8 $ fp
-             ]
+        git_ repo [ "rm", "--cached", fromStrict . T.decodeUtf8 $ fp ]
     handleFile repo fp (Unchanged, Deleted) =
-        git_ [ "--git-dir", cliRepoPath repo, "rm", "--cached"
-             , fromStrict . T.decodeUtf8 $ fp
-             ]
+        git_ repo [ "rm", "--cached", fromStrict . T.decodeUtf8 $ fp ]
     handleFile repo fp (_, _) =
-        git_ [ "--git-dir", cliRepoPath repo, "add"
-             , fromStrict . T.decodeUtf8 $ fp
-             ]
+        git_ repo [ "add", fromStrict . T.decodeUtf8 $ fp ]
 
     getOid :: MonadCli m => Text -> ReaderT CliRepo m (Oid CliRepo)
     getOid name = do
@@ -336,8 +330,8 @@ cliLookupBlob oid@(renderObjOid -> sha) = do
     repo <- getRepository
     (r,out,_) <-
         liftIO $ readProcessWithExitCode "git"
-            [ "--git-dir", TL.unpack (cliRepoPath repo)
-            , "cat-file", "-p", TL.unpack (fromStrict sha) ]
+            (map TL.unpack (gitStdOpts repo)
+                 ++ [ "cat-file", "-p", TL.unpack (fromStrict sha) ])
             B.empty
     if r == ExitSuccess
         then return (Blob oid (BlobString out))
@@ -352,8 +346,10 @@ cliDoCreateBlob b persist = do
     bs        <- blobContentsToByteString b
     (r,out,_) <-
         liftIO $ readProcessWithExitCode "git"
-            ([ "--git-dir", TL.unpack (cliRepoPath repo), "hash-object" ]
-             <> ["-w" | persist] <> ["--stdin"])
+            (map TL.unpack (gitStdOpts repo)
+                 ++ [ "hash-object" ]
+                 ++ ["-w" | persist]
+                 ++ ["--stdin"])
             bs
     if r == ExitSuccess
         then mkOid . fromStrict . T.init . T.decodeUtf8 $ out
@@ -373,7 +369,7 @@ cliExistsObject :: MonadCli m => SHA -> ReaderT CliRepo m Bool
 cliExistsObject (shaToText -> sha) = do
     repo <- getRepository
     shellyNoDir $ silently $ errExit False $ do
-        git_ [ "--git-dir", cliRepoPath repo, "cat-file", "-e", fromStrict sha ]
+        git_ repo [ "cat-file", "-e", fromStrict sha ]
         ec <- lastExitCode
         return (ec == 0)
 
@@ -434,7 +430,7 @@ cliWriteTree :: MonadCli m
 cliWriteTree entMap = do
     rendered <- mapM renderLine (HashMap.toList entMap)
     when (null rendered) $ failure TreeEmptyCreateFailed
-    oid      <- doRunGit run ["mktree", "-z", "--missing"]
+    oid      <- doRunGit run [ "mktree", "-z", "--missing" ]
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
     mkOid (TL.init oid)
   where
@@ -465,9 +461,7 @@ cliLookupTree :: MonadCli m
 cliLookupTree oid@(renderObjOid -> sha) = do
     repo <- getRepository
     ec <- shellyNoDir $ silently $ errExit False $ do
-        git_ [ "--git-dir", cliRepoPath repo
-             , "cat-file", "-t", fromStrict sha
-             ]
+        git_ repo [ "cat-file", "-t", fromStrict sha ]
         lastExitCode
     if ec == 0
         then return $ CmdLineTree oid
@@ -480,11 +474,10 @@ cliTreeEntry tree fp = do
     repo <- getRepository
     toid <- treeOid tree
     mentryLines <- shellyNoDir $ silently $ errExit False $ do
-        contents <- git [ "--git-dir", cliRepoPath repo
-                        , "ls-tree", "-z"
-                        , fromStrict (renderObjOid toid)
-                        , "--", fromStrict . T.decodeUtf8 $ fp
-                        ]
+        contents <- git repo [ "ls-tree", "-z"
+                             , fromStrict (renderObjOid toid)
+                             , "--", fromStrict . T.decodeUtf8 $ fp
+                             ]
         ec <- lastExitCode
         return $ if ec == 0
                  then Just $ L.init (TL.splitOn "\NUL" contents)
@@ -606,7 +599,7 @@ cliShowRef :: MonadCli m
 cliShowRef mrefName = do
     repo <- getRepository
     shellyNoDir $ silently $ errExit False $ do
-        rev <- git $ [ "--git-dir", cliRepoPath repo, "show-ref" ]
+        rev <- git repo $ [ "show-ref" ]
                  <> [ fromStrict (fromJust mrefName) | isJust mrefName ]
         ec  <- lastExitCode
         return $ if ec == 0
@@ -619,9 +612,7 @@ cliLookupRef :: MonadCli m
 cliLookupRef refName = do
     repo <- getRepository
     (ec,rev) <- shellyNoDir $ silently $ errExit False $ do
-        rev <- git [ "--git-dir", cliRepoPath repo
-                   , "symbolic-ref", fromStrict refName
-                   ]
+        rev <- git repo [ "symbolic-ref", fromStrict refName ]
         ec  <- lastExitCode
         return (ec,rev)
     if ec == 0
@@ -649,9 +640,9 @@ cliResolveRef :: MonadCli m => Text -> ReaderT CliRepo m (Maybe (Oid CliRepo))
 cliResolveRef refName = do
     repo <- getRepository
     (rev, ec) <- shellyNoDir $ silently $ errExit False $ do
-        rev <- git [ "--git-dir", cliRepoPath repo
-                   , "rev-parse", "--quiet", "--verify"
-                   , fromStrict refName ]
+        rev <- git repo [ "rev-parse", "--quiet", "--verify"
+                        , fromStrict refName
+                        ]
         ec <- lastExitCode
         return (rev, ec)
     if ec == 0
@@ -695,9 +686,7 @@ openCliRepository opts = do
     when (not exists && repoAutoCreate opts) $ do
         liftIO $ createDirectoryIfMissing True path
         shellyNoDir $ silently $
-            git_ $ ["--git-dir", TL.pack path]
-                <> ["--bare" | repoIsBare opts]
-                <> ["init"]
+            git_ (CliRepo opts) $ ["--bare" | repoIsBare opts] <> ["init"]
     return $ CliRepo opts
 
 -- Cli.hs
