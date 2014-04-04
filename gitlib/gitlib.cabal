@@ -1,10 +1,10 @@
 Name:                gitlib
-Version:             3.0.1
+Version:             3.0.2
 Synopsis:            API library for working with Git repositories
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley
-Maintainer:          johnw@fpcomplete.com
+Maintainer:          johnw@newartisans.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
@@ -21,7 +21,7 @@ Description:
 
 Source-repository head
   type: git
-  location: git://github.com/fpco/gitlib.git
+  location: git://github.com/jwiegley/gitlib.git
 
 -- Test-suite doctests
 --     Default-language: Haskell98
@@ -42,7 +42,7 @@ Library
           base                 >= 3 && < 5
         , base16-bytestring    >= 0.1.1.5
         , bytestring           >= 0.9.2.1
-        , conduit              >= 1.0.0
+        , conduit              >= 1.1.0
         , containers           >= 0.4.2.1
         , directory            >= 1.1.0.2
         , failure              >= 0.2.0.1

@@ -6,6 +6,5 @@
 ./gitlib-cmdline
 ./gitlib-cross
 ./hlibgit2
-./vendor/c2hsc
 ./git-monitor
 ./git-gpush

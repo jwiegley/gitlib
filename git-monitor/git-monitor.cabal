@@ -1,14 +1,14 @@
 Name:    git-monitor
-Version: 3.1.0
+Version: 3.1.1
 
 Synopsis:    Passively snapshots working tree changes efficiently.
 Description: Passively snapshots working tree changes efficiently.
 
-Homepage:           http://github.com/fpco/gitlib
+Homepage:           http://github.com/jwiegley/gitlib
 License:            BSD3
 License-file:       LICENSE
 Author:             John Wiegley
-Maintainer:         John Wiegley <johnw@fpcomplete.com>
+Maintainer:         John Wiegley <johnw@newartisans.com>
 Category:           Development
 Build-type:         Simple
 Cabal-version:      >= 1.10
@@ -43,4 +43,4 @@ Executable git-monitor
 
 Source-repository head
   type:     git
-  location: git://github.com/fpco/gitlib
+  location: git://github.com/jwiegley/gitlib

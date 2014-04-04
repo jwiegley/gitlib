@@ -1,11 +1,11 @@
 Name:                hlibgit2
-Version:             0.18.0.12
+Version:             0.18.0.13
 Synopsis:            Low-level bindings to libgit2
 Description:         Bindings to libgit2 v0.18.0.
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
-Maintainer:          johnw@fpcomplete.com
+Maintainer:          johnw@newartisans.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
@@ -23,7 +23,7 @@ Extra-source-files:
 
 Source-repository head
   type: git
-  location: git://github.com/fpco/gitlib.git
+  location: git://github.com/jwiegley/gitlib.git
 
 Test-suite smoke
   default-language: Haskell98

@@ -1,14 +1,14 @@
 Name:    git-gpush
-Version: 3.0.0
+Version: 3.0.1
 
 Synopsis:    More intelligent push-to-GitHub utility.
 Description: More intelligent push-to-GitHub utility.
 
-Homepage:           git://github.com/fpco/gitlib
+Homepage:           http://github.com/jwiegley/gitlib
 License:            BSD3
 License-file:       LICENSE
 Author:             John Wiegley
-Maintainer:         John Wiegley <johnw@fpcomplete.com>
+Maintainer:         John Wiegley <johnw@newartisans.com>
 Category:           Development
 Build-type:         Simple
 Cabal-version:      >= 1.10
@@ -39,4 +39,4 @@ Executable git-gpush
 
 Source-repository head
   type:     git
-  location: git://github.com/fpco/gitlib
+  location: git://github.com/jwiegley/gitlib

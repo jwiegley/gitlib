@@ -1,10 +1,10 @@
 Name:                gitlib-lens
-Version:             3.0.0
+Version:             3.0.1
 Synopsis:            Lenses for working with gitlib more conveniently
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley
-Maintainer:          johnw@fpcomplete.com
+Maintainer:          johnw@newartisans.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
@@ -14,7 +14,7 @@ Description:
 
 Source-repository head
   type: git
-  location: git://github.com/fpco/gitlib.git
+  location: git://github.com/jwiegley/gitlib.git
 
 Library
     default-language:   Haskell98
