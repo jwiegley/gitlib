@@ -1,8 +1,8 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
@@ -10,77 +10,44 @@
 module Main where
 
 import           Control.Concurrent (threadDelay)
+import           Control.Concurrent.Async.Lifted
 import           Control.Exception
+import           Control.Logging
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
 import qualified Data.ByteString.Char8 as B8
-import           Data.Foldable (foldlM)
+import           Data.Foldable (foldl')
 import           Data.Function (fix)
-import           Data.Map (Map)
-import qualified Data.Map as Map
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as Map
 import           Data.Maybe
 import           Data.Tagged
+import           Data.Text (pack)
 import qualified Data.Text as T
-#if MIN_VERSION_shelly(1, 0, 0)
-import qualified Data.Text as TL
-#else
-import qualified Data.Text.Lazy as TL
-#endif
 import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
 import           Git.Libgit2 (MonadLg, LgRepo, lgFactoryLogger)
 import           Options.Applicative
+import           Prelude hiding (log)
 import           Shelly (silently, shelly, run)
 import           System.Directory
 import           System.FilePath.Posix
-import           System.IO (stderr)
 import           System.Locale (defaultTimeLocale)
-import           System.Log.FastLogger
-import           System.Log.Formatter (tfLogFormatter)
-import           System.Log.Handler (setFormatter)
-import           System.Log.Handler.Simple (streamHandler)
-import           System.Log.Logger
 import           System.Posix.Files
 
-logMLogger :: Loc -> LogSource -> LogLevel -> LogStr -> IO ()
-logMLogger _loc src lvl str =
-    logM (T.unpack src) (prio lvl) (convert str)
-  where
-    prio LevelDebug     = DEBUG
-    prio LevelInfo      = INFO
-    prio LevelWarn      = WARNING
-    prio LevelError     = ERROR
-    prio (LevelOther _) = INFO
-
-    convert = T.unpack . T.decodeUtf8 . fromLogStr
-
-toStrict :: TL.Text -> T.Text
-#if MIN_VERSION_shelly(1, 0, 0)
-toStrict = id
-#else
-toStrict = TL.toStrict
-#endif
-
-fromStrict :: T.Text -> TL.Text
-#if MIN_VERSION_shelly(1, 0, 0)
-fromStrict = id
-#else
-fromStrict = TL.fromStrict
-#endif
-
 data Options = Options
-    { quiet      :: Bool
-    , verbose    :: Bool
-    , debug      :: Bool
-    , gitDir     :: FilePath
-    , workingDir :: FilePath
-    , interval   :: Int
-    , resume     :: Bool
+    { optQuiet      :: Bool
+    , optVerbose    :: Bool
+    , optDebug      :: Bool
+    , optGitDir     :: FilePath
+    , optWorkingDir :: FilePath
+    , optInterval   :: Int
+    , optResume     :: Bool
     }
 
 options :: Parser Options
@@ -95,61 +62,55 @@ options = Options
                    <> help "The working tree to snapshot (def: \".\")")
     <*> option (short 'i' <> long "interval" <> value 60
                 <> help "Snapshot each N seconds")
-    <*> switch (short 'r' <> long "resume" <> value False
+    <*> switch (short 'r' <> long "resume"
                 <> help "Resumes using last set of snapshots")
 
 main :: IO ()
-main = execParser opts >>= doMain
+main = execParser opts >>= withStdoutLogging . doMain
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
-    hdr  = "git-monitor 1.0.0 - quickly snapshot working tree changes"
+    hdr  = "git-monitor 3.1.0 - quickly snapshot working tree changes"
     desc = "\nPassively snapshot working tree changes efficiently.\n\nThe intended usage is to run \"git monitor &\" in your project\ndirectory before you begin a hacking session.\n\nSnapshots are kept in refs/snapshots/refs/heads/$BRANCH"
 
 doMain :: Options -> IO ()
 doMain opts = do
     -- Setup logging service if --verbose is used
-    unless (quiet opts) $ initLogging (debug opts)
+    setLogTimeFormat "%H:%M:%S"
+    setLogLevel $ if optQuiet opts
+                  then LevelError
+                  else if optDebug opts
+                       then LevelDebug
+                       else LevelInfo
 
     -- Ask Git for the user name and email in this repository
     (userName,userEmail) <- shelly $ silently $
-        (,) <$> (TL.init <$> run "git" ["config", "user.name"])
-            <*> (TL.init <$> run "git" ["config", "user.email"])
+        (,) <$> (T.init <$> run "git" ["config", "user.name"])
+            <*> (T.init <$> run "git" ["config", "user.email"])
 
-    let gDir = gitDir opts
+    let gDir = optGitDir opts
     isDir <- doesDirectoryExist gDir
     gd    <- if isDir
              then return gDir
              else shelly $ silently $
-                  TL.unpack . TL.init <$> run "git" ["rev-parse", "--git-dir"]
+                  T.unpack . T.init <$> run "git" ["rev-parse", "--git-dir"]
 
-    let wDir = workingDir opts
+    let wDir = optWorkingDir opts
         wd   = if null wDir then takeDirectory gd else wDir
 
     -- Make sure we're in a known branch, and if so, let it begin
-    forever $ flip runLoggingT logMLogger $
-        withRepository lgFactoryLogger gd $ do
-            infoL $ "Saving snapshots under " ++ gd
-            infoL $ "Working tree: " ++ wd
-            ref <- lookupReference "HEAD"
-            case ref of
-                Just (RefSymbolic name) -> do
-                    infoL $ "Tracking branch " ++ T.unpack name
-                    void $ start wd (toStrict userName) (toStrict userEmail)
-                        name
-                _ -> do
-                    infoL "Cannot use git-monitor if no branch is checked out"
-                    liftIO $ threadDelay (interval opts * 1000000)
+    forever $ withRepository lgFactoryLogger gd $ do
+        log' $ pack $ "Saving snapshots under " ++ gd
+        log' $ pack $ "Working tree: " ++ wd
+        ref <- lookupReference "HEAD"
+        case ref of
+            Just (RefSymbolic name) -> do
+                log' $ "Tracking branch " <> name
+                void $ start wd userName userEmail name
+            _ -> do
+                log' "Cannot use git-monitor if no branch is checked out"
+                liftIO $ threadDelay (optInterval opts * 1000000)
   where
-    initLogging debugMode = do
-        let level | debugMode = DEBUG
-                  | otherwise = INFO
-        h <- (`setFormatter` tfLogFormatter "%H:%M:%S" "$time - [$prio] $msg")
-             <$> streamHandler System.IO.stderr level
-        removeAllHandlers
-        updateGlobalLogger "git-monitor" (setLevel level)
-        updateGlobalLogger "git-monitor" (addHandler h)
-
     start wd userName userEmail ref = do
         let sref = "refs/snapshots/" <> ref
 
@@ -162,20 +123,24 @@ doMain opts = do
         -- Also, it is useful to root the snapshot history at the current HEAD
         -- commit.  Note that it must be a Just value at this point, see
         -- above.
-        scr  <- if resume opts
+        scr  <- if optResume opts
                 then resolveReference sref
                 else return Nothing
-        scr' <- maybe (fromJust <$> resolveReference "HEAD") return scr
-        sc   <- lookupCommit (Tagged scr')
-        let toid = commitTree sc
-        tree <- lookupTree toid
-        ft   <- readFileTree' tree wd (isNothing scr)
+        scr' <- maybe (resolveReference "HEAD") (return . Just) scr
+        case scr' of
+            Nothing -> errorL "Failed to lookup reference"
+            Just r -> do
+                sc   <- lookupCommit (Tagged r)
+                let toid = commitTree sc
+                tree <- lookupTree toid
+                ft   <- readFileTree' tree wd (isNothing scr)
 
-        -- Begin the snapshotting process, which continues indefinitely until
-        -- the process is stopped.  It is safe to cancel this process at any
-        -- time, typically using SIGINT (C-c) or even SIGKILL.
-        mutateTreeOid toid $
-            snapshotTree opts wd userName userEmail ref sref sc toid ft
+                -- Begin the snapshotting process, which continues
+                -- indefinitely until the process is stopped.  It is safe to
+                -- cancel this process at any time, typically using SIGINT
+                -- (C-c) or even SIGKILL.
+                mutateTreeOid toid $
+                    snapshotTree opts wd userName userEmail ref sref sc toid ft
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots any
@@ -189,7 +154,7 @@ snapshotTree :: (MonadGit LgRepo m, MonadLg m)
              -> RefName
              -> Commit LgRepo
              -> TreeOid LgRepo
-             -> Map TreeFilePath (FileEntry LgRepo)
+             -> HashMap TreeFilePath (FileEntry LgRepo)
              -> TreeT LgRepo m ()
 snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     -- Read the current working tree's state on disk
@@ -216,50 +181,48 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
 
               c <- lift $ createCommit [commitOid sc] toid'
                   sig sig (T.pack msg) (Just sref)
-              lift $ infoL $ "Commit "
-                  ++ (T.unpack . renderObjOid . commitOid $ c)
+              lift $ log' $ "Commit " <> (renderObjOid . commitOid $ c)
               return c
           else return sc
 
     -- Wait a given number of seconds
-    liftIO $ threadDelay (interval opts * 1000000)
+    liftIO $ threadDelay (optInterval opts * 1000000)
 
     -- Rinse, wash, repeat.
     ref' <- lift $ lookupReference "HEAD"
     let curRef = case ref' of Just (RefSymbolic ref'') -> ref''; _ -> ""
     if ref /= curRef
-        then lift $ infoL $ "Branch changed to " ++ T.unpack curRef
-            ++ ", restarting"
+        then lift $ log' $ "Branch changed to " <> curRef <> ", restarting"
         else loop sc' toid' ft'
 
   where
     scanOldEntry :: (MonadGit LgRepo m, MonadLg m)
-                 => Map TreeFilePath (FileEntry LgRepo)
+                 => HashMap TreeFilePath (FileEntry LgRepo)
                  -> TreeFilePath
                  -> FileEntry LgRepo
                  -> TreeT LgRepo m ()
     scanOldEntry ft fp _ = case Map.lookup fp ft of
         Nothing -> do
-            lift . infoL $ "Removed: " <> B8.unpack fp
+            log' $ "Removed: " <> T.decodeUtf8 fp
             dropEntry fp
         _ -> return ()
 
     scanNewEntry :: (MonadGit LgRepo m, MonadLg m)
-                 => Map TreeFilePath (FileEntry LgRepo)
+                 => HashMap TreeFilePath (FileEntry LgRepo)
                  -> TreeFilePath
                  -> FileEntry LgRepo
                  -> TreeT LgRepo m ()
     scanNewEntry ft fp (FileEntry mt oid kind _) =
         case Map.lookup fp ft of
             Nothing -> do
-                lift . infoL $ "Added to snapshot: " ++ B8.unpack fp
+                log' $ "Added to snapshot: " <> T.decodeUtf8 fp
                 putBlob' fp oid kind
             Just (FileEntry oldMt oldOid oldKind fileOid)
                 | oid /= oldOid || kind /= oldKind -> do
-                    lift . infoL $ "Changed: " ++ B8.unpack fp
+                    log' $ "Changed: " <> T.decodeUtf8 fp
                     putBlob' fp oid kind
                 | mt /= oldMt || oid /= fileOid -> do
-                    lift . infoL $ "Changed: " ++ B8.unpack fp
+                    log' $ "Changed: " <> T.decodeUtf8 fp
                     path <- liftIO $ canonicalizePath (wd </> B8.unpack fp)
                     contents <- liftIO $ B.readFile path
                     newOid   <- lift $ createBlob (BlobString contents)
@@ -273,7 +236,7 @@ data FileEntry m = FileEntry
     , fileChecksum :: BlobOid m
     }
 
-type FileTree m = Map TreeFilePath (FileEntry m)
+type FileTree m = HashMap TreeFilePath (FileEntry m)
 
 readFileTree :: (MonadGit LgRepo m, MonadLg m)
              => RefName
@@ -293,10 +256,13 @@ readFileTree' :: (MonadGit LgRepo m, MonadLg m)
               -> m (FileTree LgRepo)
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
-    foldlM (\m (fp,oid,kind) -> do
-                 fent <- readModTime wdir getHash (B8.unpack fp) oid kind
-                 return $ maybe m (flip (Map.insert fp) m) fent)
-           Map.empty blobs
+    stats <- mapConcurrently go blobs
+    return $ foldl' (\m (!fp,!fent) -> maybe m (flip (Map.insert fp) m) fent)
+        Map.empty stats
+  where
+    go (!fp,!oid,!kind) = do
+        fent <- readModTime wdir getHash (B8.unpack fp) oid kind
+        fent `seq` return (fp,fent)
 
 readModTime :: (MonadGit LgRepo m, MonadLg m)
             => FilePath
@@ -307,7 +273,7 @@ readModTime :: (MonadGit LgRepo m, MonadLg m)
             -> m (Maybe (FileEntry LgRepo))
 readModTime wdir getHash fp oid kind = do
     let path = wdir </> fp
-    debugL $ "Checking file: " ++ path
+    debug' $ pack $ "Checking file: " ++ path
     estatus <- liftIO $ try $ getSymbolicLinkStatus path
     case (estatus :: Either SomeException FileStatus) of
         Right status | isRegularFile status ->
@@ -321,11 +287,5 @@ readModTime wdir getHash fp oid kind = do
                                   =<< liftIO (B.readFile path)
                               else return oid)
         _ -> return Nothing
-
-infoL :: MonadIO m => String -> m ()
-infoL = liftIO . infoM "git-monitor"
-
-debugL :: MonadIO m => String -> m ()
-debugL = liftIO . debugM "git-monitor"
 
 -- Main.hs (git-monitor) ends here
