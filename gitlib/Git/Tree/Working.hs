@@ -1,5 +1,6 @@
 module Git.Tree.Working where
 
+import           Control.Applicative
 import           Control.Concurrent.Async.Lifted
 import           Control.Exception
 import           Control.Monad
@@ -15,7 +16,6 @@ import           Data.Tagged
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
-import           Options.Applicative
 import           Prelude hiding (log)
 import           System.FilePath.Posix
 import           System.Posix.Files
