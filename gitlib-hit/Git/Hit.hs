@@ -23,9 +23,12 @@ import           Control.Monad
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.Git as DG
+import qualified Data.Git.Storage.Object as DGO
+import qualified Data.Git.Ref as DGR
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
 import qualified Data.Map as Map
@@ -119,7 +122,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
     treeOid (CmdLineTree toid) = return toid
     treeEntry         = cliTreeEntry
     sourceTreeEntries = cliSourceTreeEntries
-    hashContents      = cliHashContents
+    hashContents      = hitHashContents
     createBlob        = cliCreateBlob
     createCommit      = cliCreateCommit
     createTag         = cliCreateTag
@@ -354,10 +357,14 @@ cliDoCreateBlob b persist = do
         then mkOid . fromStrict . T.init . T.decodeUtf8 $ out
         else failure $ BlobCreateFailed "Failed to create blob"
 
-cliHashContents :: MonadCli m
+hitHashContents :: MonadCli m
                 => BlobContents (ReaderT HitRepo m)
                 -> ReaderT HitRepo m (BlobOid HitRepo)
-cliHashContents b = cliDoCreateBlob b False
+hitHashContents b = do
+    bs <- blobContentsToLazyByteString b
+    let sz = fromIntegral $ BL.length bs
+    let h = DGO.objectHash DGO.TypeBlob sz bs
+    return $ Tagged $ SHA $ DGR.toBinary h
 
 cliCreateBlob :: MonadCli m
               => BlobContents (ReaderT HitRepo m)

@@ -39,6 +39,10 @@ smokeTestSpec :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
               -> RepositoryFactory n m s
               -> Spec
 smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
+  it "hash without persisting" $ withNewRepository pr "hashObject.git" $ do
+      r <- hashContents $ BlobString "flim-flam"
+      liftIO $ renderObjOid r @?= "5cc144cc0c3c101342b3f0c546c014d1e0e66da9"
+
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
