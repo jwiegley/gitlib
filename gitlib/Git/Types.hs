@@ -67,6 +67,8 @@ class (Applicative m, Monad m, Failure GitException m,
     lookupBlob    :: BlobOid r -> m (Blob r m)
     lookupTag     :: TagOid r -> m (Tag r)
 
+    readIndex :: m (Tree r)
+
     -- Working with trees
     newTreeBuilder :: Maybe (Tree r) -> m (TreeBuilder r m)
 
