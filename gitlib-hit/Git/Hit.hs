@@ -78,6 +78,9 @@ newtype HitRepo = HitRepo RepositoryOptions
 hitRepoPath :: HitRepo -> TL.Text
 hitRepoPath (HitRepo options) = TL.pack $ repoPath options
 
+hitRepoFPath :: HitRepo -> F.FilePath
+hitRepoFPath (HitRepo options) = F.decodeString $ repoPath options
+
 hitWorkingDir :: HitRepo -> Maybe TL.Text
 hitWorkingDir (HitRepo options) = TL.pack <$> repoWorkingDir options
 
@@ -123,7 +126,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
     treeEntry         = cliTreeEntry
     sourceTreeEntries = cliSourceTreeEntries
     hashContents      = hitHashContents
-    createBlob        = cliCreateBlob
+    createBlob        = hitCreateBlob
     createCommit      = cliCreateCommit
     createTag         = cliCreateTag
 
@@ -339,24 +342,6 @@ cliLookupBlob oid@(renderObjOid -> sha) = do
         then return (Blob oid (BlobString out))
         else failure BlobLookupFailed
 
-cliDoCreateBlob :: MonadCli m
-                => BlobContents (ReaderT HitRepo m)
-                -> Bool
-                -> ReaderT HitRepo m (BlobOid HitRepo)
-cliDoCreateBlob b persist = do
-    repo      <- getRepository
-    bs        <- blobContentsToByteString b
-    (r,out,_) <-
-        liftIO $ readProcessWithExitCode "git"
-            (map TL.unpack (gitStdOpts repo)
-                 ++ [ "hash-object" ]
-                 ++ ["-w" | persist]
-                 ++ ["--stdin"])
-            bs
-    if r == ExitSuccess
-        then mkOid . fromStrict . T.init . T.decodeUtf8 $ out
-        else failure $ BlobCreateFailed "Failed to create blob"
-
 hitHashContents :: MonadCli m
                 => BlobContents (ReaderT HitRepo m)
                 -> ReaderT HitRepo m (BlobOid HitRepo)
@@ -366,10 +351,15 @@ hitHashContents b = do
     let h = DGO.objectHash DGO.TypeBlob sz bs
     return $ Tagged $ SHA $ DGR.toBinary h
 
-cliCreateBlob :: MonadCli m
+hitCreateBlob :: MonadCli m
               => BlobContents (ReaderT HitRepo m)
               -> ReaderT HitRepo m (BlobOid HitRepo)
-cliCreateBlob b = cliDoCreateBlob b True
+hitCreateBlob b = do
+    repo <- getRepository
+    bs <- blobContentsToLazyByteString b
+    let obj = DGO.ObjBlob (DG.Blob bs)
+    h <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DG.setObject obj)
+    return $ Tagged $ SHA $ DGR.toBinary h
 
 cliExistsObject :: MonadCli m => SHA -> ReaderT HitRepo m Bool
 cliExistsObject (shaToText -> sha) = do
