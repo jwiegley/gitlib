@@ -28,7 +28,8 @@ import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.Git as DG
 import qualified Data.Git.Storage.Object as DGO
-import qualified Data.Git.Ref as DGR
+import qualified Data.Git.Repository as DGR
+import qualified Data.Git.Ref as DGF
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
 import qualified Data.Map as Map
@@ -115,7 +116,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
     deleteReference   = cliDeleteRef
     sourceReferences  = cliSourceRefs
     lookupCommit      = cliLookupCommit
-    lookupTree        = cliLookupTree
+    lookupTree        = hitLookupTree
     lookupBlob        = cliLookupBlob
     lookupTag         = error "Not defined cliLookupTag"
     lookupObject      = error "Not defined cliLookupObject"
@@ -132,12 +133,12 @@ instance (Applicative m, Failure GitException m, MonadIO m)
 
     diffContentsWithTree = error "Not defined cliDiffContentsWithTree"
 
-type MonadCli m = (Applicative m, Failure GitException m, MonadIO m)
+type MonadHit m = (Applicative m, Failure GitException m, MonadIO m)
 
-mkOid :: MonadCli m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
+mkOid :: MonadHit m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
 mkOid = fmap Tagged <$> textToSha . toStrict
 
-shaToRef :: MonadCli m => TL.Text -> ReaderT HitRepo m (RefTarget HitRepo)
+shaToRef :: MonadHit m => TL.Text -> ReaderT HitRepo m (RefTarget HitRepo)
 shaToRef = fmap (RefObj . untag) . mkOid
 
 parseCliTime :: String -> ZonedTime
@@ -159,7 +160,7 @@ git repo args = run "git" $ gitStdOpts repo ++ args
 git_ :: HitRepo -> [TL.Text] -> Sh ()
 git_ repo args = run_ "git" $ gitStdOpts repo ++ args
 
-doRunGit :: MonadCli m
+doRunGit :: MonadHit m
          => (F.FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
          -> ReaderT HitRepo m a
 doRunGit f args act = do
@@ -167,10 +168,10 @@ doRunGit f args act = do
     shelly $ silently $
         act >> f "git" (gitStdOpts repo <> args)
 
-runGit :: MonadCli m => [TL.Text] -> ReaderT HitRepo m TL.Text
+runGit :: MonadHit m => [TL.Text] -> ReaderT HitRepo m TL.Text
 runGit = flip (doRunGit run) (return ())
 
-runGit_ :: MonadCli m => [TL.Text] -> ReaderT HitRepo m ()
+runGit_ :: MonadHit m => [TL.Text] -> ReaderT HitRepo m ()
 runGit_ = flip (doRunGit run_) (return ())
 
 cliRepoDoesExist :: HitRepo -> Text -> Sh (Either GitException ())
@@ -186,7 +187,7 @@ cliRepoDoesExist repo remoteURI = do
 cliFilePathToURI :: (Functor m, MonadIO m) => FilePath -> m FilePath
 cliFilePathToURI = fmap ("file://localhost" <>) . liftIO . canonicalizePath
 
-cliPushCommit :: MonadCli m
+cliPushCommit :: MonadHit m
               => CommitOid HitRepo -> Text -> Text -> Maybe FilePath
               -> ReaderT HitRepo m (CommitOid HitRepo)
 cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
@@ -222,11 +223,11 @@ cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
                 Just cref -> return $ Tagged cref
         Just err -> failure err
 
-cliResetHard :: MonadCli m => Text -> ReaderT HitRepo m ()
+cliResetHard :: MonadHit m => Text -> ReaderT HitRepo m ()
 cliResetHard refname =
     doRunGit run_ [ "reset", "--hard", fromStrict refname ] $ return ()
 
-cliPullCommit :: MonadCli m
+cliPullCommit :: MonadHit m
               => Text -> Text -> Text -> Text -> Maybe FilePath
               -> ReaderT HitRepo m (MergeResult HitRepo)
 cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
@@ -261,7 +262,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
   where
     -- jww (2013-05-15): This function should not overwrite head, but simply
     -- create a detached commit and return its id.
-    recordMerge :: MonadCli m
+    recordMerge :: MonadHit m
                 => CommitOid HitRepo -> ReaderT HitRepo m (MergeResult HitRepo)
     recordMerge leftHead = do
         repo <- getRepository
@@ -290,7 +291,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     handleFile repo fp (_, _) =
         git_ repo [ "add", fromStrict . T.decodeUtf8 $ fp ]
 
-    getOid :: MonadCli m => Text -> ReaderT HitRepo m (Oid HitRepo)
+    getOid :: MonadHit m => Text -> ReaderT HitRepo m (Oid HitRepo)
     getOid name = do
         mref <- cliResolveRef name
         case mref of
@@ -328,7 +329,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
         (Just x, Just y)     -> (x, y)
         (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
-cliLookupBlob :: MonadCli m
+cliLookupBlob :: MonadHit m
               => BlobOid HitRepo
               -> ReaderT HitRepo m (Blob HitRepo (ReaderT HitRepo m))
 cliLookupBlob oid@(renderObjOid -> sha) = do
@@ -342,16 +343,16 @@ cliLookupBlob oid@(renderObjOid -> sha) = do
         then return (Blob oid (BlobString out))
         else failure BlobLookupFailed
 
-hitHashContents :: MonadCli m
+hitHashContents :: MonadHit m
                 => BlobContents (ReaderT HitRepo m)
                 -> ReaderT HitRepo m (BlobOid HitRepo)
 hitHashContents b = do
     bs <- blobContentsToLazyByteString b
     let sz = fromIntegral $ BL.length bs
     let h = DGO.objectHash DGO.TypeBlob sz bs
-    return $ Tagged $ SHA $ DGR.toBinary h
+    return $ Tagged $ SHA $ DGF.toBinary h
 
-hitCreateBlob :: MonadCli m
+hitCreateBlob :: MonadHit m
               => BlobContents (ReaderT HitRepo m)
               -> ReaderT HitRepo m (BlobOid HitRepo)
 hitCreateBlob b = do
@@ -359,9 +360,9 @@ hitCreateBlob b = do
     bs <- blobContentsToLazyByteString b
     let obj = DGO.ObjBlob (DG.Blob bs)
     h <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DG.setObject obj)
-    return $ Tagged $ SHA $ DGR.toBinary h
+    return $ Tagged $ SHA $ DGF.toBinary h
 
-cliExistsObject :: MonadCli m => SHA -> ReaderT HitRepo m Bool
+cliExistsObject :: MonadHit m => SHA -> ReaderT HitRepo m Bool
 cliExistsObject (shaToText -> sha) = do
     repo <- getRepository
     shelly $ silently $ errExit False $ do
@@ -369,7 +370,7 @@ cliExistsObject (shaToText -> sha) = do
         ec <- lastExitCode
         return (ec == 0)
 
-cliSourceObjects :: MonadCli m
+cliSourceObjects :: MonadHit m
                  => Maybe (CommitOid HitRepo) -> CommitOid HitRepo -> Bool
                  -> Producer (ReaderT HitRepo m) (ObjectOid HitRepo)
 cliSourceObjects mhave need alsoTrees = do
@@ -394,7 +395,7 @@ cliSourceObjects mhave need alsoTrees = do
     go x = failure (BackendError $
                     "Unexpected output from git-log: " <> T.pack (show x))
 
-cliReadTree :: MonadCli m
+cliReadTree :: MonadHit m
             => Tree HitRepo -> ReaderT HitRepo m (Pure.EntryHashMap HitRepo)
 cliReadTree (CmdLineTree (renderObjOid -> sha)) = do
     contents <- runGit ["ls-tree", "-z", fromStrict sha]
@@ -403,7 +404,7 @@ cliReadTree (CmdLineTree (renderObjOid -> sha)) = do
     HashMap.fromList
         <$> mapM cliParseLsTree (L.init (TL.splitOn "\NUL" contents))
 
-cliParseLsTree :: MonadCli m
+cliParseLsTree :: MonadHit m
                => TL.Text -> ReaderT HitRepo m (TreeFilePath, TreeEntry HitRepo)
 cliParseLsTree line =
     let [prefix,path] = TL.splitOn "\t" line
@@ -421,7 +422,7 @@ cliParseLsTree line =
         "tree"   -> TreeEntry <$> mkOid sha
         _ -> failure $ BackendError "This cannot happen"
 
-cliWriteTree :: MonadCli m
+cliWriteTree :: MonadHit m
              => Pure.EntryHashMap HitRepo -> ReaderT HitRepo m (TreeOid HitRepo)
 cliWriteTree entMap = do
     rendered <- mapM renderLine (HashMap.toList entMap)
@@ -452,18 +453,22 @@ cliWriteTree entMap = do
             , path
             ]
 
-cliLookupTree :: MonadCli m
+hitLookupTree :: MonadHit m
               => TreeOid HitRepo -> ReaderT HitRepo m (Tree HitRepo)
-cliLookupTree oid@(renderObjOid -> sha) = do
+hitLookupTree oid = do
     repo <- getRepository
-    ec <- shelly $ silently $ errExit False $ do
-        git_ repo [ "cat-file", "-t", fromStrict sha ]
-        lastExitCode
-    if ec == 0
-        then return $ CmdLineTree oid
-        else failure (ObjectLookupFailed sha 40)
+    let sha = untag oid
+    let hex = shaToText sha
+    if hex == emptyTreeId
+      then return $ CmdLineTree oid
+      else do
+        let ref = DGF.fromBinary $ getSHA sha
+        mtr <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DGR.getTreeMaybe ref)
+        maybe (failure $ ObjectLookupFailed hex 40)
+              (\_ -> return $ CmdLineTree oid)
+              mtr
 
-cliTreeEntry :: MonadCli m
+cliTreeEntry :: MonadHit m
              => Tree HitRepo -> TreeFilePath
              -> ReaderT HitRepo m (Maybe (TreeEntry HitRepo))
 cliTreeEntry tree fp = do
@@ -486,7 +491,7 @@ cliTreeEntry tree fp = do
                 []        -> Nothing
                 ((_,x):_) -> Just x
 
-cliSourceTreeEntries :: MonadCli m
+cliSourceTreeEntries :: MonadHit m
                      => Tree HitRepo
                      -> Producer (ReaderT HitRepo m) (TreeFilePath, TreeEntry HitRepo)
 cliSourceTreeEntries tree = do
@@ -498,7 +503,7 @@ cliSourceTreeEntries tree = do
     forM_ (L.init (TL.splitOn "\NUL" contents)) $
         yield <=< lift . cliParseLsTree
 
-cliLookupCommit :: MonadCli m
+cliLookupCommit :: MonadHit m
                 => CommitOid HitRepo -> ReaderT HitRepo m (Commit HitRepo)
 cliLookupCommit (renderObjOid -> sha) = do
     output <- doRunGit run ["cat-file", "--batch"] $
@@ -508,7 +513,7 @@ cliLookupCommit (renderObjOid -> sha) = do
         Left e  -> failure $ CommitLookupFailed (T.pack (show e))
         Right c -> return c
   where
-    parseOutput :: (Stream s  (ReaderT HitRepo m) Char, MonadCli m)
+    parseOutput :: (Stream s  (ReaderT HitRepo m) Char, MonadHit m)
                 => ParsecT s u (ReaderT HitRepo m) (Commit HitRepo)
     parseOutput = do
         coid       <- manyTill alphaNum space
@@ -540,7 +545,7 @@ cliLookupCommit (renderObjOid -> sha) = do
             <*> (T.pack <$> manyTill anyChar (try (string "> ")))
             <*> (parseCliTime <$> manyTill anyChar newline)
 
-cliCreateCommit :: MonadCli m
+cliCreateCommit :: MonadHit m
                 => [CommitOid HitRepo]
                 -> TreeOid HitRepo
                 -> Signature
@@ -590,7 +595,7 @@ data CliReference = CliReference
     { referenceRef    :: Text
     , referenceObject :: CliObjectRef } deriving Show
 
-cliShowRef :: MonadCli m
+cliShowRef :: MonadHit m
            => Maybe Text -> ReaderT HitRepo m (Maybe [(TL.Text,TL.Text)])
 cliShowRef mrefName = do
     repo <- getRepository
@@ -603,7 +608,7 @@ cliShowRef mrefName = do
                            $ TL.lines rev
                  else Nothing
 
-cliLookupRef :: MonadCli m
+cliLookupRef :: MonadHit m
              => Text -> ReaderT HitRepo m (Maybe (RefTarget HitRepo))
 cliLookupRef refName = do
     repo <- getRepository
@@ -615,24 +620,24 @@ cliLookupRef refName = do
         then return . Just . RefSymbolic . toStrict . TL.init $ rev
         else fmap RefObj <$> cliResolveRef refName
 
-cliUpdateRef :: MonadCli m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
+cliUpdateRef :: MonadHit m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
 cliUpdateRef refName (RefObj (renderOid -> sha)) =
     runGit_ ["update-ref", fromStrict refName, fromStrict sha]
 
 cliUpdateRef refName (RefSymbolic targetName) =
     runGit_ ["symbolic-ref", fromStrict refName, fromStrict targetName]
 
-cliDeleteRef :: MonadCli m => Text -> ReaderT HitRepo m ()
+cliDeleteRef :: MonadHit m => Text -> ReaderT HitRepo m ()
 cliDeleteRef refName = runGit_ ["update-ref", "-d", fromStrict refName]
 
-cliSourceRefs :: MonadCli m => Producer (ReaderT HitRepo m) Text
+cliSourceRefs :: MonadHit m => Producer (ReaderT HitRepo m) Text
 cliSourceRefs = do
     mxs <- lift $ cliShowRef Nothing
     yieldMany $ case mxs of
         Nothing -> []
         Just xs -> map (toStrict . fst) xs
 
-cliResolveRef :: MonadCli m => Text -> ReaderT HitRepo m (Maybe (Oid HitRepo))
+cliResolveRef :: MonadHit m => Text -> ReaderT HitRepo m (Maybe (Oid HitRepo))
 cliResolveRef refName = do
     repo <- getRepository
     (rev, ec) <- shelly $ silently $ errExit False $ do
@@ -645,11 +650,11 @@ cliResolveRef refName = do
         then Just <$> textToSha (toStrict (TL.init rev))
         else return Nothing
 
--- cliLookupTag :: MonadCli m
+-- cliLookupTag :: MonadHit m
 --              => TagOid HitRepo -> ReaderT HitRepo m (Tag HitRepo)
 -- cliLookupTag oid = undefined
 
-cliCreateTag :: MonadCli m
+cliCreateTag :: MonadHit m
              => CommitOid HitRepo -> Signature -> Text -> Text
              -> ReaderT HitRepo m (Tag HitRepo)
 cliCreateTag oid@(renderObjOid -> sha) tagger msg name = do
@@ -664,12 +669,12 @@ cliCreateTag oid@(renderObjOid -> sha) tagger msg name = do
         , ""] <> TL.lines (fromStrict msg)
     Tag <$> mkOid (TL.init tsha) <*> pure oid
 
-cliWorkingTreeDirty :: MonadCli m => ReaderT HitRepo m Bool
+cliWorkingTreeDirty :: MonadHit m => ReaderT HitRepo m Bool
 cliWorkingTreeDirty = do
     status <- runGit [ "status", "-s", "-uno", "-z" ]
     return $ TL.length status > 0
 
-hitFactory :: MonadCli m => RepositoryFactory (ReaderT HitRepo m) m HitRepo
+hitFactory :: MonadHit m => RepositoryFactory (ReaderT HitRepo m) m HitRepo
 hitFactory = RepositoryFactory
     { openRepository  = openHitRepository
     , runRepository   = flip runReaderT
