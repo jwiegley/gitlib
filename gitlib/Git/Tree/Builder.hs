@@ -57,8 +57,6 @@ toModifyTreeResult :: (TreeEntry r -> ModifyTreeResult r)
 toModifyTreeResult _ Nothing  = TreeEntryNotFound
 toModifyTreeResult f (Just x) = f x
 
-newtype TreeT r m a = TreeT { runTreeT :: StateT (TreeBuilder r m) m a }
-
 instance Functor m => Functor (TreeT r m) where
     fmap f (TreeT t) = TreeT (fmap f t)
 

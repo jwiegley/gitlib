@@ -459,6 +459,13 @@ cliLookupTree oid@(renderObjOid -> sha) = do
     ec <- shellyNoDir $ silently $ errExit False $ do
         git_ repo [ "cat-file", "-t", fromStrict sha ]
         lastExitCode
+        -- res <- git repo [ "cat-file", "-t", fromStrict sha ]
+        -- ec <- lastExitCode
+        -- return $ if ec == 0
+        --          then if res == "tree"
+        --               then 0
+        --               else (-1)
+        --          else ec
     if ec == 0
         then return $ CmdLineTree oid
         else throwM (ObjectLookupFailed sha 40)

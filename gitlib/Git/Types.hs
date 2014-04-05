@@ -4,6 +4,7 @@ import           Conduit
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
 import           Control.Monad
+import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as BL
@@ -66,7 +67,8 @@ class (Applicative m, Monad m, MonadThrow m,
     lookupBlob    :: BlobOid r -> m (Blob r m)
     lookupTag     :: TagOid r -> m (Tag r)
 
-    readIndex :: m (Tree r)
+    readIndex :: TreeT r m ()
+    writeIndex :: TreeT r m ()
 
     -- Working with trees
     newTreeBuilder :: Maybe (Tree r) -> m (TreeBuilder r m)
@@ -183,6 +185,8 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
+newtype TreeT r m a = TreeT { runTreeT :: StateT (TreeBuilder r m) m a }
+
 data TreeEntry r = BlobEntry   { blobEntryOid   :: !(BlobOid r)
                                , blobEntryKind  :: !BlobKind }
                  | TreeEntry   { treeEntryOid   :: !(TreeOid r) }

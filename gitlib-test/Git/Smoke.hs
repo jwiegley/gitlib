@@ -29,6 +29,7 @@ import           Test.HUnit
 import           Test.Hspec (Spec, Example, describe, it)
 import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
+import Control.Concurrent
 
 sampleCommit :: MonadGit r m => TreeOid r -> Signature -> m (Commit r)
 sampleCommit tr sig =
