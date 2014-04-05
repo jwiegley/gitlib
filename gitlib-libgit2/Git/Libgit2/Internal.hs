@@ -8,8 +8,8 @@ module Git.Libgit2.Internal (module Git.Libgit2.Internal, oidToStr) where
 
 import           Bindings.Libgit2
 import           Control.Applicative
-import           Control.Failure
 import           Control.Monad
+import           Control.Monad.Catch
 import           Control.Monad.Trans.Control
 import           Data.ByteString
 import qualified Data.Text as T
@@ -85,7 +85,7 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
               let p = castPtr ptr'
               fptr <- FC.newForeignPtr p (c'git_object_free p)
               run $ Right <$> createFn coidCopy (castForeignPtr fptr) ptr'
-    either (failure . Git.BackendError) return result
+    either (throwM . Git.BackendError) return result
 
 -- lgLookupObject :: Text -> LgRepository Dynamic
 -- lgLookupObject str

@@ -3,7 +3,6 @@ module Git.Types where
 import           Conduit
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
-import           Control.Failure
 import           Control.Monad
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
@@ -33,7 +32,7 @@ type TreeFilePath  = RawFilePath
 
 -- | 'Repository' is the central point of contact between user code and Git
 --   data objects.  Every object must belong to some repository.
-class (Applicative m, Monad m, Failure GitException m,
+class (Applicative m, Monad m, MonadThrow m,
        IsOid (Oid r), Show (Oid r), Eq (Oid r), Ord (Oid r))
       => MonadGit r m | m -> r where
     type Oid r :: *

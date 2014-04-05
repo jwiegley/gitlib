@@ -26,7 +26,7 @@ Library
         , hspec                >= 1.4.4
         , hspec-expectations   >= 0.3
         , bytestring
-        , failure              >= 0.2.0
+        , exceptions           >= 0.5
         , conduit              >= 1.1.0
         , conduit-combinators  >= 0.2.4
         , monad-control        >= 0.3.1

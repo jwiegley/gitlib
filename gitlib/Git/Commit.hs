@@ -1,7 +1,6 @@
 module Git.Commit where
 
 import           Conduit
-import           Control.Failure
 import           Control.Monad
 import           Data.Function
 import           Data.HashSet (HashSet)
@@ -39,7 +38,7 @@ copyCommit cr mref needed = do
         (parentRefs,needed') <- foldM copyParent ([],needed) parents
         (tr,needed'') <- copyTree (commitTree commit) needed'
         unless (renderObjOid (commitTree commit) == renderObjOid tr) $
-            failure $ BackendError $ "Error copying tree: "
+            throwM $ BackendError $ "Error copying tree: "
                 <> renderObjOid (commitTree commit)
                 <> " /= " <> renderObjOid tr
 
@@ -58,7 +57,7 @@ copyCommit cr mref needed = do
     copyParent (prefs,needed') cref = do
         (cref2,needed'') <- copyCommit cref Nothing needed'
         unless (renderObjOid cref == renderObjOid cref2) $
-            failure $ BackendError $ "Error copying commit: "
+            throwM $ BackendError $ "Error copying commit: "
                 <> renderObjOid cref <> " /= " <> renderObjOid cref2
         let x = cref2 `seq` (cref2:prefs)
         return $ x `seq` needed'' `seq` (x,needed'')
