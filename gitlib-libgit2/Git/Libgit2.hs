@@ -203,6 +203,7 @@ instance (Applicative m, MonadThrow m, MonadCatch m,
     lookupTree        = lgLookupTree
     lookupBlob        = lgLookupBlob
     lookupTag         = error "Not implemented: LgRepository.lookupTag"
+    readIndex         = lgReadIndex
     lookupObject      = lgLookupObject
     existsObject      = lgExistsObject
     sourceObjects     = lgSourceObjects
@@ -594,6 +595,37 @@ lgLookupCommit oid =
       $ \coid obj _ -> liftIO $ withForeignPtr obj $
           lgObjToCommit (Tagged (mkOid coid))
 
+lgReadIndex :: MonadLg m => Git.TreeT LgRepo (ReaderT LgRepo m) ()
+lgReadIndex = do
+  repo <- lift Git.getRepository
+  xs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
+    alloca $ \indexPp -> do
+      r <- c'git_repository_index indexPp repoPtr
+      idx <- if r < 0
+             then lgThrow Git.BackendError
+             else peek indexPp
+      cnt <- c'git_index_entrycount idx
+      forM [0..pred cnt] $ \i -> do
+        entryPtr <- c'git_index_get_byindex idx i
+        entry <- peek entryPtr
+        let oid  = c'git_index_entry'oid entry
+            mode = c'git_index_entry'mode entry
+            path = c'git_index_entry'path entry
+        oid'  <- new oid
+        foid' <- newForeignPtr_ oid'
+        path' <- peekFilePath path
+        return (path',
+                if 0 /= mode .&. undefined -- directoryMode
+                then Git.TreeEntry (Tagged (mkOid foid'))
+                else Git.BlobEntry (Tagged (mkOid foid')) $
+                     if (0 /= mode .&. undefined -- ownerExecuteMode
+                        )
+                     then Git.ExecutableBlob
+                     else Git.PlainBlob
+                          -- jww (2014-04-05): Handle CommitEntry
+                )
+  forM_ xs $ uncurry Git.putEntry
+
 data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
                | TreePtr (ForeignPtr C'git_commit)
                | CommitPtr (ForeignPtr C'git_commit)
@@ -955,7 +987,7 @@ lgSourceRefs =
 
 --compareRef = c'git_reference_cmp
 
-lgThrow :: (MonadIO m, MonadThrow m, Exception e) => (Text -> e) -> m ()
+lgThrow :: (MonadIO m, MonadThrow m, Exception e) => (Text -> e) -> m a
 lgThrow f = do
     errStr <- liftIO $ do
         errPtr <- c'giterr_last
