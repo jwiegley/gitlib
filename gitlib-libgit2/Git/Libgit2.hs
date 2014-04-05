@@ -605,25 +605,30 @@ lgReadIndex = do
              then lgThrow Git.BackendError
              else peek indexPp
       cnt <- c'git_index_entrycount idx
-      forM [0..pred cnt] $ \i -> do
+      fmap Prelude.concat $ forM [0..pred cnt] $ \i -> do
         entryPtr <- c'git_index_get_byindex idx i
         entry <- peek entryPtr
-        let oid  = c'git_index_entry'oid entry
-            mode = c'git_index_entry'mode entry
-            path = c'git_index_entry'path entry
-        oid'  <- new oid
-        foid' <- newForeignPtr_ oid'
-        path' <- peekFilePath path
-        return (path',
-                if 0 /= mode .&. undefined -- directoryMode
-                then Git.TreeEntry (Tagged (mkOid foid'))
-                else Git.BlobEntry (Tagged (mkOid foid')) $
-                     if (0 /= mode .&. undefined -- ownerExecuteMode
-                        )
-                     then Git.ExecutableBlob
-                     else Git.PlainBlob
-                          -- jww (2014-04-05): Handle CommitEntry
-                )
+        let oid   = c'git_index_entry'oid entry
+            mode  = c'git_index_entry'mode entry
+            path  = c'git_index_entry'path entry
+            flags = c'git_index_entry'flags entry
+        if 0 /= flags .&. 2 -- c'GIT_IDXENTRY_REMOVE
+            then return []
+            else do
+                oid'  <- new oid
+                foid' <- newForeignPtr_ oid'
+                path' <- peekFilePath path
+                return
+                    [(path',
+                      if 0 /= mode .&. 16384 -- check if directory
+                      then Git.TreeEntry (Tagged (mkOid foid'))
+                      else Git.BlobEntry (Tagged (mkOid foid')) $
+                           if (0 /= mode .&. 64 -- check if owner executable
+                              )
+                           then Git.ExecutableBlob
+                           else Git.PlainBlob
+                                -- jww (2014-04-05): Handle CommitEntry
+                     )]
   forM_ xs $ uncurry Git.putEntry
 
 data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
