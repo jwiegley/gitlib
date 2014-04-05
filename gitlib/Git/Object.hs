@@ -1,13 +1,11 @@
 module Git.Object where
 
-import           Control.Monad
-import           Control.Monad.Trans.Class
-import           Data.Conduit
-import qualified Data.Conduit.List as CL
-import           Data.Function
-import           Data.Maybe
-import           Git.Types
-import           Prelude hiding (FilePath)
+import Conduit
+import Control.Monad
+import Data.Function
+import Data.Maybe
+import Git.Types
+import Prelude hiding (FilePath)
 
 listObjects :: MonadGit r m
             => Maybe (CommitOid r) -- ^ A commit we may already have
@@ -15,7 +13,7 @@ listObjects :: MonadGit r m
             -> Bool                -- ^ Include commit trees also?
             -> m [ObjectOid r]     -- ^ All the objects in between
 listObjects mhave need alsoTrees =
-    sourceObjects mhave need alsoTrees $$ CL.consume
+    sourceObjects mhave need alsoTrees $$ sinkList
 
 traverseObjects :: MonadGit r m => (ObjectOid r -> m a) -> CommitOid r -> m [a]
 traverseObjects f need = mapM f =<< listObjects Nothing need False
@@ -41,4 +39,4 @@ expandTreeObjects = awaitForever $ \obj -> case obj of
 listAllObjects :: MonadGit r m
                => Maybe (CommitOid r) -> CommitOid r -> m [ObjectOid r]
 listAllObjects mhave need =
-    sourceObjects mhave need True $= expandTreeObjects $$ CL.consume
+    sourceObjects mhave need True $= expandTreeObjects $$ sinkList

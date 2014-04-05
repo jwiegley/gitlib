@@ -1,10 +1,8 @@
 module Git.Commit where
 
+import           Conduit
 import           Control.Failure
 import           Control.Monad
-import           Control.Monad.Trans.Class
-import           Data.Conduit
-import qualified Data.Conduit.List as CL
 import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
@@ -71,8 +69,8 @@ listCommits :: MonadGit r m
             -> m [CommitOid r]     -- ^ All the objects in between
 listCommits mhave need =
     sourceObjects mhave need False
-        $= CL.mapM (\(CommitObjOid c) -> return c)
-        $$ CL.consume
+        $= mapMC (\(CommitObjOid c) -> return c)
+        $$ sinkList
 
 traverseCommits :: MonadGit r m => (CommitOid r -> m a) -> CommitOid r -> m [a]
 traverseCommits f need = mapM f =<< listCommits Nothing need

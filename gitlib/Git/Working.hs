@@ -2,14 +2,11 @@
 
 module Git.Working where
 
+import Conduit
 import Control.Applicative
 import Control.Failure
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Resource
-import Data.Conduit
-import Data.Conduit.List as CL
-import Data.Text as T
 import Data.Semigroup
+import Data.Text as T
 import Git.Blob
 import Git.Types
 import System.Directory
@@ -26,7 +23,7 @@ checkoutFiles :: (MonadGit r m, MonadBaseControl IO m, MonadIO m,
               -> Bool
               -> m ()
 checkoutFiles destPath tree decode cloneSubmodules =
-    sourceTreeEntries tree $$ CL.mapM_ $ \(path, entry) ->
+    sourceTreeEntries tree $$ mapM_C $ \(path, entry) ->
         case (destPath </>) <$> decode path of
             Left e ->  decodeError path e
             Right fullPath -> do

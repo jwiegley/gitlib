@@ -1,15 +1,13 @@
 module Git.Types where
 
+import           Conduit
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
 import           Control.Failure
 import           Control.Monad
-import           Control.Monad.Trans.Class
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as BL
-import           Data.Conduit
-import qualified Data.Conduit.List as CL
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
 import           Data.Map (Map)
@@ -169,7 +167,7 @@ data Blob r m = Blob
     , blobContents :: !(BlobContents m)
     }
 
-type ByteSource m = Producer m ByteString
+type ByteSource m = Source m ByteString
 
 data BlobContents m = BlobString !ByteString
                     | BlobStringLazy !BL.ByteString
@@ -245,7 +243,7 @@ sourceCommitParents commit =
     forM_ (commitParents commit) $ yield <=< lift . lookupCommit
 
 lookupCommitParents :: MonadGit r m => Commit r -> m [Commit r]
-lookupCommitParents commit = sourceCommitParents commit $$ CL.consume
+lookupCommitParents commit = sourceCommitParents commit $$ sinkList
 
 data Signature = Signature
     { signatureName  :: !CommitAuthor

@@ -14,6 +14,7 @@
 
 module Git.GitHub where
 
+import           Conduit
 import           Control.Applicative
 import           Control.Concurrent
 import           Control.Exception
@@ -28,7 +29,6 @@ import           Data.Aeson hiding (Success)
 import           Data.Attempt
 import           Data.ByteString as B hiding (pack, putStrLn, map, null)
 import qualified Data.ByteString.Base64 as B64
-import           Data.Conduit
 import           Data.Default ( Default(..) )
 import           Data.Foldable (for_)
 import           Data.Function

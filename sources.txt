@@ -8,3 +8,6 @@
 ./hlibgit2
 ./git-monitor
 ./git-gpush
+https://github.com/aristidb/aws
+https://github.com/cgaebel/stm-conduit
+https://github.com/jwiegley/cereal-conduit.git

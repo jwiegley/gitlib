@@ -16,6 +16,7 @@
 
 module Git.CmdLine where
 
+import           Conduit
 import           Control.Applicative hiding (many)
 import           Control.Failure
 import           Control.Monad
@@ -24,8 +25,6 @@ import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Data.ByteString as B
-import           Data.Conduit hiding (MonadBaseControl)
-import qualified Data.Conduit.List as CL
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.HashMap.Strict as HashMap
@@ -632,7 +631,7 @@ cliDeleteRef refName = runGit_ ["update-ref", "-d", fromStrict refName]
 cliSourceRefs :: MonadCli m => Producer (ReaderT CliRepo m) Text
 cliSourceRefs = do
     mxs <- lift $ cliShowRef Nothing
-    CL.sourceList $ case mxs of
+    yieldMany $ case mxs of
         Nothing -> []
         Just xs -> map (toStrict . fst) xs
 

@@ -43,6 +43,7 @@ Library
         , base16-bytestring    >= 0.1.1.5
         , bytestring           >= 0.9.2.1
         , conduit              >= 1.1.0
+        , conduit-combinators  >= 0.2.4
         , containers           >= 0.4.2.1
         , directory            >= 1.1.0.2
         , failure              >= 0.2.0.1
@@ -52,8 +53,9 @@ Library
         , monad-control        >= 0.3.2.1
         , monad-logger         >= 0.3.4.1
         , mtl                  >= 2.1.2
-        , resourcet            >= 0.4.8
+        , resourcet            >= 1.1.0
         , semigroups           >= 0.11
+        , system-filepath      >= 0.4.10
         , tagged               >= 0.2.3.1
         , text                 >= 0.11.2
         , time                 >= 1.4

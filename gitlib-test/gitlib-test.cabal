@@ -28,6 +28,7 @@ Library
         , bytestring
         , failure              >= 0.2.0
         , conduit              >= 1.1.0
+        , conduit-combinators  >= 0.2.4
         , monad-control        >= 0.3.1
         , tagged               >= 0.4.4
         , text                 >= 0.11.2

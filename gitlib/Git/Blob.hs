@@ -1,20 +1,16 @@
 module Git.Blob where
 
+import           Conduit
 import           Control.Applicative
 import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Resource
 import           Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import           Data.Conduit
-import qualified Data.Conduit.List as CL
-import qualified Data.Conduit.Binary as CB
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Tagged
 import           Data.Text as T
 import           Data.Text.Encoding as T
+import           Filesystem.Path.CurrentOS
 import           Git.Types
 
 createBlobUtf8 :: MonadGit r m => Text -> m (BlobOid r)
@@ -34,9 +30,9 @@ blobContentsToByteString (BlobString bs) = return bs
 blobContentsToByteString (BlobStringLazy bs) =
     return $ B.concat (BL.toChunks bs)
 blobContentsToByteString (BlobStream bs) =
-    B.concat <$> (bs $$ CL.consume)
+    B.concat . BL.toChunks <$> (bs $$ sinkLazy)
 blobContentsToByteString (BlobSizedStream bs _) =
-    B.concat <$> (bs $$ CL.consume)
+    B.concat . BL.toChunks <$> (bs $$ sinkLazy)
 
 blobToByteString :: MonadGit r m => Blob r m -> m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
@@ -45,22 +41,22 @@ blobContentsToLazyByteString :: MonadGit r m
                              => BlobContents m -> m BL.ByteString
 blobContentsToLazyByteString (BlobString bs) = return $ BL.fromChunks [bs]
 blobContentsToLazyByteString (BlobStringLazy bs) = return bs
-blobContentsToLazyByteString (BlobStream bs) = bs $$ CB.sinkLbs
-blobContentsToLazyByteString (BlobSizedStream bs _) = bs $$ CB.sinkLbs
+blobContentsToLazyByteString (BlobStream bs) = bs $$ sinkLazy
+blobContentsToLazyByteString (BlobSizedStream bs _) = bs $$ sinkLazy
 
 blobToLazyByteString :: MonadGit r m => Blob r m -> m BL.ByteString
 blobToLazyByteString (Blob _ contents) = blobContentsToLazyByteString contents
 
 writeBlob :: (MonadGit r m, MonadIO m, MonadResource m)
-          => FilePath -> BlobContents m -> m ()
+          => Prelude.FilePath -> BlobContents m -> m ()
 writeBlob path (BlobString bs)         = liftIO $ B.writeFile path bs
-writeBlob path (BlobStringLazy bs)     = CB.sourceLbs bs $$ CB.sinkFile path
-writeBlob path (BlobStream str)        = str $$ CB.sinkFile path
-writeBlob path (BlobSizedStream str _) = str $$ CB.sinkFile path
+writeBlob path (BlobStringLazy bs)     = sourceLazy bs $$ sinkFile (decodeString path)
+writeBlob path (BlobStream str)        = str $$ sinkFile (decodeString path)
+writeBlob path (BlobSizedStream str _) = str $$ sinkFile (decodeString path)
 
 treeBlobEntries :: MonadGit r m
                 => Tree r -> m [(TreeFilePath, BlobOid r, BlobKind)]
-treeBlobEntries tree = sourceTreeBlobEntries tree $$ CL.consume
+treeBlobEntries tree = sourceTreeBlobEntries tree $$ sinkList
 
 sourceTreeBlobEntries
     :: MonadGit r m

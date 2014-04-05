@@ -3,7 +3,7 @@ module Git.Repository where
 import Control.Exception.Lifted
 import Control.Monad
 import Control.Monad.IO.Class
-import Data.Conduit
+import Control.Monad.Trans.Control
 import Git.Types
 import System.Directory
 

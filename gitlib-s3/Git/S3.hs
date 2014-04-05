@@ -28,14 +28,13 @@ import           Aws
 import           Aws.Core
 import qualified Aws.S3 as Aws
 import           Bindings.Libgit2
+import           Conduit
 import           Control.Applicative
 import           Control.Concurrent.STM hiding (orElse)
 import           Control.Exception.Lifted
-import           Control.Lens ((??), under, reversed)
+import           Control.Lens ((??), under, reversed, has, _Left)
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Control.Monad.Logger hiding (LogLevel)
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Reader
@@ -49,9 +48,7 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
-import           Data.Conduit
-import           Data.Conduit.Binary hiding (mapM_, drop)
-import qualified Data.Conduit.List as CList
+import           Data.Conduit.Internal hiding (yield)
 import           Data.Default
 import           Data.Foldable (for_)
 import           Data.HashMap.Strict (HashMap)
@@ -478,7 +475,7 @@ awsRetry :: (MonadIO m, Transaction r a)
          -> ResourceT m (Response (ResponseMetadata a) a)
 awsRetry cfg svcfg mgr r =
     transResourceT liftIO $
-        retrying def (isFailure . responseResult) $ aws cfg svcfg mgr r
+        retrying def (has _Left . responseResult) $ aws cfg svcfg mgr r
 
 listBucketS3 :: MonadS3 m => OdbS3Details -> ResourceT m [Text]
 listBucketS3 dets = do
@@ -544,7 +541,7 @@ getFileS3 dets filepath range = do
         Just (Left e) -> throwIO $ Git.BackendError e
         Just (Right r) ->
             transResourceT liftIO $
-                fst <$> (sourceLbs r $$+ Data.Conduit.Binary.take 0)
+                return $ ResumableSource (sourceLazy r) (return ())
         _ -> do
             lgDebug $ "Aws.getObject: " ++ show filepath ++ " " ++ show range
             res <- awsRetry (configuration dets) (s3configuration dets)
@@ -562,7 +559,7 @@ putFileS3 dets filepath src = do
 
     let bucket = bucketName dets
         path   = T.append (objectPrefix dets) filepath
-    lbs <- BL.fromChunks <$> (src $$ CList.consume)
+    lbs <- src $$ sinkLazy
 
     cbResult <- wrapPutObject (putObject (callbacks dets)) bucket path
                     (ObjectLength (BL.length lbs)) lbs
@@ -637,7 +634,7 @@ observePackObjects dets packSha idxFile _alsoWithRemote odbPtr = do
            ++ show (Prelude.length shas) ++ " objects"
     return shas
 
-catalogPackFile :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+catalogPackFile :: (MonadS3 m, MonadThrow m)
                 => OdbS3Details -> Text -> FilePath -> m [SHA]
 catalogPackFile dets packSha idxPath = do
     -- Load the pack file, and iterate over the objects within it to determine
@@ -710,7 +707,7 @@ cacheUpdateEntry dets sha ce = do
     lgDebug $ "cacheUpdateEntry " ++ show (shaToText sha) ++ " " ++ show ce
     liftIO $ atomically $ modifyTVar (knownObjects dets) $ M.insert sha ce
 
-cacheLoadObject :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+cacheLoadObject :: (MonadS3 m, MonadThrow m)
                 => OdbS3Details -> SHA -> CacheEntry -> Bool
                 -> m (Maybe ObjectInfo)
 cacheLoadObject dets sha ce metadataOnly = do
@@ -853,7 +850,7 @@ remoteReadFile dets path = do
         liftIO $ removeFile path
     blocks <- do
         result <- getFileS3 dets (takeFileName path) Nothing
-        transResourceT liftIO $ result $$+- CList.consume
+        transResourceT liftIO $ result $$+- sinkList
     lgDebug $ "remoteReadFile: downloaded " ++ show path
     case blocks of
       [] -> return Nothing
@@ -942,7 +939,7 @@ remoteWriteFile dets path typ bytes = do
                                fromIntegral (getObjectType typ))
                               :: (Int64,Int64))
             payload = BL.append hdr bytes
-        putFileS3 dets path (sourceLbs payload)
+        putFileS3 dets path (sourceLazy payload)
 
 remoteLoadObject :: MonadS3 m
                  => OdbS3Details -> SHA -> ResourceT m (Maybe ObjectInfo)
@@ -958,7 +955,7 @@ remoteStoreObject dets sha (ObjectInfo _ typ _ (Just bytes)) =
 remoteStoreObject _ _ _ =
     throw (Git.BackendError "remoteStoreObject was not given any data")
 
-remoteCatalogContents :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+remoteCatalogContents :: (MonadS3 m, MonadThrow m)
                       => OdbS3Details -> ResourceT m ()
 remoteCatalogContents dets = do
     lgDebug "remoteCatalogContents"
@@ -982,7 +979,7 @@ remoteCatalogContents dets = do
 
            | otherwise -> return ()
 
-accessObject :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+accessObject :: (MonadS3 m, MonadThrow m)
              => OdbS3Details -> SHA -> Bool -> m (Maybe CacheEntry)
 accessObject dets sha checkRemote = do
     mentry <- cacheLookupEntry dets sha
@@ -1032,19 +1029,19 @@ accessObject dets sha checkRemote = do
 --     cache and with the callback interface.  This is to avoid recataloging
 --     in the future.
 
-objectExists :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+objectExists :: (MonadS3 m, MonadThrow m)
              => OdbS3Details -> SHA -> Bool -> m CacheEntry
 objectExists dets sha checkRemote = do
     mce <- accessObject dets sha checkRemote
     return $ fromMaybe DoesNotExist mce
 
-readObject :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+readObject :: (MonadS3 m, MonadThrow m)
            => OdbS3Details -> SHA -> Bool -> m (Maybe ObjectInfo)
 readObject dets sha metadataOnly = do
     ce <- objectExists dets sha True
     cacheLoadObject dets sha ce metadataOnly `orElse` return Nothing
 
-readObjectMetadata :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+readObjectMetadata :: (MonadS3 m, MonadThrow m)
                    => OdbS3Details -> SHA -> m (Maybe ObjectInfo)
 readObjectMetadata dets sha = readObject dets sha True
 
@@ -1054,7 +1051,7 @@ writeObject dets sha info = do
     callbackRegisterObject dets sha info
     cacheStoreObject dets sha info
 
-writePackFile :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+writePackFile :: (MonadS3 m, MonadThrow m)
               => OdbS3Details -> BL.ByteString -> m ()
 writePackFile dets bytes = do
     let dir = tempDirectory dets
@@ -1073,7 +1070,7 @@ writePackFile dets bytes = do
     shas <- catalogPackFile dets packSha idxPath
     callbackRegisterPackFile dets packSha shas
 
-readCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+readCallback :: (MonadS3 m, MonadThrow m)
              => Ptr (Ptr ())
              -> Ptr CSize
              -> Ptr C'git_otype
@@ -1104,7 +1101,7 @@ readCallback data_p len_p type_p be oid = do
             BU.unsafeUseAsCString chunk $ copyBytes p ?? len
             return $ p `plusPtr` len
 
-readPrefixCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+readPrefixCallback :: (MonadS3 m, MonadThrow m)
                    => Ptr C'git_oid
                    -> Ptr (Ptr ())
                    -> Ptr CSize
@@ -1140,7 +1137,7 @@ readPrefixCallback oid_p data_p len_p type_p be oid (fromIntegral -> len) = do
                 go dets sha False
             | otherwise = return Nothing
 
-readHeaderCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+readHeaderCallback :: (MonadS3 m, MonadThrow m)
                    => Ptr CSize
                    -> Ptr C'git_otype
                    -> Ptr C'git_odb_backend
@@ -1158,7 +1155,7 @@ readHeaderCallback len_p type_p be oid = do
             poke len_p (toLength len)
             poke type_p (toType typ)
 
-writeCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+writeCallback :: (MonadS3 m, MonadThrow m)
               => Ptr C'git_oid
               -> Ptr C'git_odb_backend
               -> Ptr ()
@@ -1184,7 +1181,7 @@ writeCallback oid be obj_data len obj_type = do
             (ObjectInfo (fromLength len) (fromType obj_type)
                  Nothing (Just (BL.fromChunks [bytes])))
 
-existsCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+existsCallback :: (MonadS3 m, MonadThrow m)
                => Ptr C'git_odb_backend -> Ptr C'git_oid -> CInt -> m CInt
 existsCallback be oid confirmNotExists = do
     (dets, sha) <- liftIO $ unpackDetails be oid
@@ -1194,18 +1191,18 @@ existsCallback be oid confirmNotExists = do
             return $ if ce == DoesNotExist then 0 else 1)
         (return c'GIT_ERROR)
 
-refreshCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+refreshCallback :: (MonadS3 m, MonadThrow m)
                 => Ptr C'git_odb_backend -> m CInt
 refreshCallback _ =
     return c'GIT_OK             -- do nothing
 
-foreachCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+foreachCallback :: (MonadS3 m, MonadThrow m)
                 => Ptr C'git_odb_backend -> C'git_odb_foreach_cb -> Ptr ()
                 -> m CInt
 foreachCallback _be _callback _payload =
     return c'GIT_ERROR          -- fallback to standard method
 
-writePackCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+writePackCallback :: (MonadS3 m, MonadThrow m)
                   => Ptr (Ptr C'git_odb_writepack)
                   -> Ptr C'git_odb_backend
                   -> C'git_transfer_progress_callback
@@ -1248,7 +1245,7 @@ foreign export ccall "freeCallback"
 foreign import ccall "&freeCallback"
   freeCallbackPtr :: FunPtr F'git_odb_backend_free_callback
 
-packAddCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+packAddCallback :: (MonadS3 m, MonadThrow m)
                 => Ptr C'git_odb_writepack
                 -> Ptr ()
                 -> CSize
@@ -1267,7 +1264,7 @@ packAddCallback wp dataPtr len _progress =
                      (castPtr dataPtr) (fromIntegral len)
         writePackFile dets (BL.fromChunks [bytes])
 
-packCommitCallback :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+packCommitCallback :: (MonadS3 m, MonadThrow m)
                    => Ptr C'git_odb_writepack -> Ptr C'git_transfer_progress
                    -> m CInt
 packCommitCallback _wp _progress =
@@ -1380,7 +1377,7 @@ embedIO9 x = liftBaseWith $ \run -> do
              liftIO $ writeIORef result res
         readIORef result
 
-odbS3Backend :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+odbS3Backend :: (MonadS3 m, MonadThrow m)
              => Aws.S3Configuration NormalQuery
              -> Configuration
              -> Manager
@@ -1475,7 +1472,7 @@ odbS3Backend s3config config manager bucket prefix dir callbacks = do
 
 -- | Given a repository object obtained from Libgit2, add an S3 backend to it,
 --   making it the primary store for objects associated with that repository.
-addS3Backend :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+addS3Backend :: (MonadS3 m, MonadThrow m)
              => LgRepo
              -> Text             -- ^ bucket
              -> Text             -- ^ prefix
@@ -1505,7 +1502,7 @@ addS3Backend repo bucket prefix access secret
     void $ liftIO $ odbBackendAdd repo odbS3 100
     return repo
 
-s3Factory :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+s3Factory :: (MonadS3 m, MonadThrow m)
           => Maybe Text -> Text -> Text -> FilePath -> BackendCallbacks
           -> Git.RepositoryFactory (ReaderT LgRepo (NoLoggingT m)) m LgRepo
 s3Factory bucket accessKey secretKey dir callbacks = lgFactory
@@ -1528,7 +1525,7 @@ s3Factory bucket accessKey secretKey dir callbacks = lgFactory
             dir
             callbacks
 
-s3FactoryLogger :: (MonadS3 m, MonadUnsafeIO m, MonadThrow m)
+s3FactoryLogger :: (MonadS3 m, MonadThrow m)
                 => Maybe Text -> Text -> Text -> FilePath -> BackendCallbacks
                 -> Git.RepositoryFactory (ReaderT LgRepo m) m LgRepo
 s3FactoryLogger bucket accessKey secretKey dir callbacks = lgFactoryLogger

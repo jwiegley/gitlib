@@ -1,11 +1,10 @@
 module Git.Reference where
 
+import Conduit
 import Git.Types
-import Data.Conduit
-import Data.Conduit.List as CL
 
 listReferences :: MonadGit r m => m [RefName]
-listReferences = sourceReferences $$ CL.consume
+listReferences = sourceReferences $$ sinkList
 
 resolveReference :: MonadGit r m => RefName -> m (Maybe (Oid r))
 resolveReference name = do

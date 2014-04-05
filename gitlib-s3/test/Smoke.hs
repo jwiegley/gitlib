@@ -31,7 +31,7 @@ import           Test.Hspec.Runner
 
 s3Factory
     :: (Failure Git.GitException m, MonadIO m, MonadBaseControl IO m,
-        MonadUnsafeIO m, MonadThrow m)
+        MonadThrow m)
     => Git.RepositoryFactory (ReaderT Lg.LgRepo (NoLoggingT m)) m Lg.LgRepo
 s3Factory = Lg.lgFactory
     { Git.runRepository = \ctxt m ->

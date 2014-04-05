@@ -10,14 +10,11 @@
 
 module Git.Smoke where
 
+import           Conduit
 import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Control
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.Conduit.Binary as CB
 import           Data.List (sort)
 import           Data.Monoid
 import           Data.Tagged
@@ -391,7 +388,7 @@ instance Exception TreeitException
 mkBlob :: MonadGit r m => TreeFilePath -> TreeT r m ()
 mkBlob path = putBlob path
     =<< lift (createBlob $ BlobStream $
-                  CB.sourceLbs (BL.fromChunks [path <> "\n"]))
+                  sourceLazy (BL.fromChunks [path <> "\n"]))
 
 doTreeit :: (MonadBaseControl IO m, MonadIO m,
              MonadGit r n, MonadBaseControl IO n, MonadIO n)

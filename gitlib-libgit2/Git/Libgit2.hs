@@ -55,6 +55,7 @@ module Git.Libgit2
        ) where
 
 import           Bindings.Libgit2
+import           Conduit
 import           Control.Applicative
 import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async.Lifted
@@ -62,10 +63,8 @@ import           Control.Concurrent.STM
 import           Control.Exception.Lifted
 import           Control.Failure
 import           Control.Monad hiding (forM, forM_, mapM, mapM_, sequence)
-import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Loops
-import           Control.Monad.Morph hiding (embed)
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
@@ -75,7 +74,6 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Unsafe as BU
-import           Data.Conduit
 import           Data.Conduit.Async
 import           Data.Foldable
 import           Data.IORef

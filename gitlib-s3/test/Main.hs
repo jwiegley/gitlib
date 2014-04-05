@@ -5,12 +5,10 @@ module Main where
 import           Aws
 import           Aws.Core
 import           Aws.S3
+import           Conduit
 import           Control.Applicative
 import           Data.ByteString
 import qualified Data.ByteString.Lazy as BL
-import           Data.Conduit
-import           Data.Conduit.Binary
-import           Data.Conduit.List hiding (mapM_)
 import           Data.Maybe (isJust)
 import           Data.Text as T
 import qualified Data.Text.Encoding as E
