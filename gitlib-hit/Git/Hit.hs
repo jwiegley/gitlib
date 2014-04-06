@@ -6,6 +6,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TupleSections #-}
@@ -18,6 +19,7 @@ module Git.Hit where
 
 import           Conduit
 import           Control.Applicative hiding (many)
+import qualified Control.Exception as X
 import           Control.Monad
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
@@ -28,10 +30,12 @@ import qualified Data.ByteString.Char8 as BC
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.Git as DG
+import qualified Data.Git.Named as DGN
+import qualified Data.Git.Ref as DGF
+import qualified Data.Git.Repository as DGR
+import qualified Data.Git.Revision as DGV
 import qualified Data.Git.Storage as DGS
 import qualified Data.Git.Storage.Object as DGO
-import qualified Data.Git.Repository as DGR
-import qualified Data.Git.Ref as DGF
 import qualified Data.Git.Types as DGT
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
@@ -85,6 +89,20 @@ oidToRef = DGF.fromBinary . getSHA . untag
 
 oidToHex :: Tagged a (Oid HitRepo) -> Text
 oidToHex = shaToText . untag
+
+--- This is a duplicate of an unexported function in Data.Git.Named
+toRefTy :: String -> DGN.RefSpecTy
+toRefTy s
+    | "refs/tags/" `isPrefixOf` s    = DGN.RefTag $ DGN.RefName $ drop 10 s
+    | "refs/heads/" `isPrefixOf` s   = DGN.RefBranch $ DGN.RefName $ drop 11 s
+    | "refs/remotes/" `isPrefixOf` s = DGN.RefRemote $ DGN.RefName $ drop 13 s
+    | "refs/patches/" `isPrefixOf` s = DGN.RefPatches $ drop 13 s
+    | "refs/stash" == s              = DGN.RefStash
+    | "HEAD" == s                    = DGN.RefHead
+    | "ORIG_HEAD" == s               = DGN.RefOrigHead
+    | "FETCH_HEAD" == s              = DGN.RefFetchHead
+    | otherwise                      = DGN.RefOther $ s
+
 
 instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
@@ -224,7 +242,7 @@ cliPullCommit :: MonadHit m
               -> ReaderT HitRepo m (MergeResult HitRepo)
 cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     repo     <- getRepository
-    leftHead <- fmap Tagged <$> cliResolveRef "HEAD"
+    leftHead <- fmap Tagged <$> hitResolveRef "HEAD"
     eres     <- shelly $ silently $ errExit False $ do
         for_ msshCmd $ \sshCmd ->
             setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
@@ -285,7 +303,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
 
     getOid :: MonadHit m => Text -> ReaderT HitRepo m (Oid HitRepo)
     getOid name = do
-        mref <- cliResolveRef name
+        mref <- hitResolveRef name
         case mref of
             Nothing  -> throwM $ BackendError
                                 $ T.append "Reference missing: " name
@@ -632,7 +650,7 @@ cliLookupRef refName = do
         return (ec,rev)
     if ec == 0
         then return . Just . RefSymbolic . toStrict . TL.init $ rev
-        else fmap RefObj <$> cliResolveRef refName
+        else fmap RefObj <$> hitResolveRef refName
 
 cliUpdateRef :: MonadHit m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
 cliUpdateRef refName (RefObj (renderOid -> sha)) =
@@ -651,18 +669,20 @@ cliSourceRefs = do
         Nothing -> []
         Just xs -> map (toStrict . fst) xs
 
-cliResolveRef :: MonadHit m => Text -> ReaderT HitRepo m (Maybe (Oid HitRepo))
-cliResolveRef refName = do
-    repo <- getRepository
-    (rev, ec) <- shelly $ silently $ errExit False $ do
-        rev <- git repo [ "rev-parse", "--quiet", "--verify"
-                        , fromStrict refName
-                        ]
-        ec <- lastExitCode
-        return (rev, ec)
-    if ec == 0
-        then Just <$> textToSha (toStrict (TL.init rev))
-        else return Nothing
+hitResolveRef :: MonadHit m => Text -> ReaderT HitRepo m (Maybe (Oid HitRepo))
+hitResolveRef refName@(TL.unpack -> name) = do
+    path <- DGS.gitRepoPath <$> hitGit <$> getRepository
+    let readThru spec = do
+        mr :: Either X.IOException DGN.RefContentTy
+           <- X.try $ DGN.readRefFile path spec
+        trace $ "REF " ++ name ++ ": " ++ show spec ++ " » " ++ show mr
+        case mr of
+            Left _ -> return Nothing
+            Right (DGN.RefDirect ref) -> return $ Just $ refToSHA ref
+            Right (DGN.RefContentUnknown _) -> throwM $ ReferenceLookupFailed refName
+            Right (DGN.RefLink spec') -> readThru spec'
+    liftIO $ readThru $ toRefTy name
+
 
 -- cliLookupTag :: MonadHit m
 --              => TagOid HitRepo -> ReaderT HitRepo m (Tag HitRepo)
