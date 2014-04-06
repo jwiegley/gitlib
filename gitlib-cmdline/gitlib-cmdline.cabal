@@ -26,7 +26,7 @@ Library
     , conduit-combinators  >= 0.2.4
     , containers           >= 0.4.2.1
     , directory            >= 1.1.0.2
-    , failure              >= 0.2.0.1
+    , exceptions           >= 0.5
     , monad-control        >= 0.3.2
     , mtl                  >= 2.1.2
     , old-locale           >= 1.0.0.4

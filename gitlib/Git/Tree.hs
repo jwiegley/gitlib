@@ -1,7 +1,6 @@
 module Git.Tree where
 
 import           Conduit
-import           Control.Failure
 import           Control.Monad
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
@@ -20,7 +19,7 @@ copyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
 copyTreeEntry (BlobEntry oid kind) needed = do
     (b,needed') <- copyBlob oid needed
     unless (renderObjOid oid == renderObjOid b) $
-        failure $ BackendError $ "Error copying blob: "
+        throwM $ BackendError $ "Error copying blob: "
             <> renderObjOid oid <> " /= " <> renderObjOid b
     return (BlobEntry b kind, needed')
 copyTreeEntry (CommitEntry oid) needed = do

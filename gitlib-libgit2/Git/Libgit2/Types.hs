@@ -10,7 +10,7 @@ module Git.Libgit2.Types where
 
 import           Bindings.Libgit2
 import           Control.Applicative
-import           Control.Failure
+import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Control
@@ -52,7 +52,7 @@ type RefTarget   = Git.RefTarget LgRepo
 type TreeBuilder = Git.TreeBuilder LgRepo
 type Options     = Git.Options LgRepo
 
-type MonadLg m = (Applicative m, Failure Git.GitException m,
+type MonadLg m = (Applicative m, MonadThrow m, MonadCatch m,
                   MonadIO m, MonadBaseControl IO m, MonadLogger m)
 
 -- Types.hs

@@ -13,7 +13,7 @@
 module Git.Sample ( SampleRepository(..), sampleFactory ) where
 
 import           Control.Applicative
-import           Control.Failure
+import           Control.Monad.Catch
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Git
@@ -43,7 +43,7 @@ instance HasSampleRepository SampleRepository where
 instance HasSampleRepository (e, SampleRepository) where
     getSampleRepository = snd
 
-instance (Applicative m, Failure Git.GitException m,
+instance (Applicative m, MonadThrow m,
           MonadReader env m, HasSampleRepository env)
          => Git.MonadGit SampleRepository m where
     type Oid SampleRepository     = Void

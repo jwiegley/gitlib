@@ -18,7 +18,6 @@ import           Conduit
 import           Control.Applicative
 import           Control.Concurrent
 import           Control.Exception
-import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Base
 import           Control.Monad.IO.Class

@@ -1,8 +1,8 @@
 module Git.Commit.Push where
 
 import           Control.Applicative
-import           Control.Failure
 import           Control.Monad
+import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
@@ -33,14 +33,14 @@ pushCommit coid remoteRefName = do
     mrref'  <- for mrref $ \rref ->
         if rref `elem` commits
         then lift $ copyCommitOid rref
-        else failure $ PushNotFastForward
-                     $ "SHA " <> renderObjOid rref
-                    <> " not found in remote"
+        else throwM $ PushNotFastForward
+                    $ "SHA " <> renderObjOid rref
+                   <> " not found in remote"
     objs <- lift $ listAllObjects mrref' coid
     let shas = HashSet.fromList $ map (renderOid . untagObjOid) objs
     (cref,_) <- copyCommit coid Nothing shas
     unless (renderObjOid coid == renderObjOid cref) $
-        failure $ BackendError $ "Error copying commit: "
+        throwM $ BackendError $ "Error copying commit: "
             <> renderObjOid coid <> " /= " <> renderObjOid cref
     -- jww (2013-04-18): This is something the user must decide to do
     -- updateReference_ remoteRefName (RefObj cref)
@@ -79,6 +79,6 @@ copyRepository factory mname refName gitDir isBare =
 
         mref <- fmap renderOid <$> resolveReference refName
         unless (maybe False (renderObjOid coid ==) mref) $
-            failure (BackendError $
-                     "Could not resolve destination reference '"
-                     <> refName <> "'in project")
+            throwM (BackendError $
+                    "Could not resolve destination reference '"
+                    <> refName <> "'in project")

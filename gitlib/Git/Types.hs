@@ -3,8 +3,8 @@ module Git.Types where
 import           Conduit
 import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
-import           Control.Failure
 import           Control.Monad
+import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as BL
@@ -33,7 +33,7 @@ type TreeFilePath  = RawFilePath
 
 -- | 'Repository' is the central point of contact between user code and Git
 --   data objects.  Every object must belong to some repository.
-class (Applicative m, Monad m, Failure GitException m,
+class (Applicative m, Monad m, MonadThrow m,
        IsOid (Oid r), Show (Oid r), Eq (Oid r), Ord (Oid r))
       => MonadGit r m | m -> r where
     type Oid r :: *
@@ -66,6 +66,9 @@ class (Applicative m, Monad m, Failure GitException m,
     lookupTree    :: TreeOid r -> m (Tree r)
     lookupBlob    :: BlobOid r -> m (Blob r m)
     lookupTag     :: TagOid r -> m (Tag r)
+
+    readIndex :: TreeT r m ()
+    writeIndex :: TreeT r m ()
 
     -- Working with trees
     newTreeBuilder :: Maybe (Tree r) -> m (TreeBuilder r m)
@@ -182,6 +185,8 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
+newtype TreeT r m a = TreeT { runTreeT :: StateT (TreeBuilder r m) m a }
+
 data TreeEntry r = BlobEntry   { blobEntryOid   :: !(BlobOid r)
                                , blobEntryKind  :: !BlobKind }
                  | TreeEntry   { treeEntryOid   :: !(TreeOid r) }

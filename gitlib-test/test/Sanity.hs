@@ -13,7 +13,6 @@ module Main where
 
 import           Control.Applicative
 import           Control.Exception
-import           Control.Failure
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Reader
@@ -68,9 +67,6 @@ instance Monad MockRepository where
 
 instance MonadIO MockRepository where
     liftIO m = MockRepository (liftIO m)
-
-instance Failure Git.GitException MockRepository where
-    failure e = liftIO $ throwIO e
 
 instance Git.RepositoryBase MockRepository where
     data Oid MockRepository    = Oid BL.ByteString

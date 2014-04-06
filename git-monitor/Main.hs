@@ -31,6 +31,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
+import           Git.Tree.Working
 import           Git.Libgit2 (MonadLg, LgRepo, lgFactoryLogger)
 import           Options.Applicative
 import           Prelude hiding (log)
@@ -228,64 +229,5 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
                     newOid   <- lift $ createBlob (BlobString contents)
                     putBlob' fp newOid kind
                 | otherwise -> return ()
-
-data FileEntry m = FileEntry
-    { fileModTime  :: UTCTime
-    , fileBlobOid  :: BlobOid m
-    , fileBlobKind :: BlobKind
-    , fileChecksum :: BlobOid m
-    }
-
-type FileTree m = HashMap TreeFilePath (FileEntry m)
-
-readFileTree :: (MonadGit LgRepo m, MonadLg m)
-             => RefName
-             -> FilePath
-             -> Bool
-             -> m (FileTree LgRepo)
-readFileTree ref wdir getHash = do
-    h <- resolveReference ref
-    case h of
-        Nothing -> pure Map.empty
-        Just h' -> do
-            tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
-            readFileTree' tr wdir getHash
-
-readFileTree' :: (MonadGit LgRepo m, MonadLg m)
-              => Tree LgRepo -> FilePath -> Bool
-              -> m (FileTree LgRepo)
-readFileTree' tr wdir getHash = do
-    blobs <- treeBlobEntries tr
-    stats <- mapConcurrently go blobs
-    return $ foldl' (\m (!fp,!fent) -> maybe m (flip (Map.insert fp) m) fent)
-        Map.empty stats
-  where
-    go (!fp,!oid,!kind) = do
-        fent <- readModTime wdir getHash (B8.unpack fp) oid kind
-        fent `seq` return (fp,fent)
-
-readModTime :: (MonadGit LgRepo m, MonadLg m)
-            => FilePath
-            -> Bool
-            -> FilePath
-            -> BlobOid LgRepo
-            -> BlobKind
-            -> m (Maybe (FileEntry LgRepo))
-readModTime wdir getHash fp oid kind = do
-    let path = wdir </> fp
-    debug' $ pack $ "Checking file: " ++ path
-    estatus <- liftIO $ try $ getSymbolicLinkStatus path
-    case (estatus :: Either SomeException FileStatus) of
-        Right status | isRegularFile status ->
-            Just <$> (FileEntry
-                          <$> pure (posixSecondsToUTCTime
-                                    (realToFrac (modificationTime status)))
-                          <*> pure oid
-                          <*> pure kind
-                          <*> if getHash
-                              then hashContents . BlobString
-                                  =<< liftIO (B.readFile path)
-                              else return oid)
-        _ -> return Nothing
 
 -- Main.hs (git-monitor) ends here

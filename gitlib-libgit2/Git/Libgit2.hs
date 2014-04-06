@@ -60,9 +60,9 @@ import           Control.Applicative
 import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async.Lifted
 import           Control.Concurrent.STM
-import           Control.Exception.Lifted
-import           Control.Failure
+--import           Control.Exception.Lifted
 import           Control.Monad hiding (forM, forM_, mapM, mapM_, sequence)
+import           Control.Monad.Catch
 import           Control.Monad.Logger
 import           Control.Monad.Loops
 import           Control.Monad.Reader.Class
@@ -152,11 +152,11 @@ lgParseOidIO str len = do
 
 lgParseOid :: MonadLg m => Text -> m Oid
 lgParseOid str
-  | len > 40 = failure (Git.OidParseFailed str)
+  | len > 40 = throwM (Git.OidParseFailed str)
   | otherwise = do
       moid <- liftIO $ lgParseOidIO str len
       case moid of
-          Nothing  -> failure (Git.OidParseFailed str)
+          Nothing  -> throwM (Git.OidParseFailed str)
           Just oid -> return oid
   where
     len = T.length str
@@ -177,7 +177,7 @@ instance Ord OidPtr where
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
-instance (Applicative m, Failure Git.GitException m,
+instance (Applicative m, MonadThrow m, MonadCatch m,
           MonadBaseControl IO m, MonadIO m, MonadLogger m)
          => Git.MonadGit LgRepo (ReaderT LgRepo m) where
     type Oid LgRepo = OidPtr
@@ -203,6 +203,7 @@ instance (Applicative m, Failure Git.GitException m,
     lookupTree        = lgLookupTree
     lookupBlob        = lgLookupBlob
     lookupTag         = error "Not implemented: LgRepository.lookupTag"
+    readIndex         = lgReadIndex
     lookupObject      = lgLookupObject
     existsObject      = lgExistsObject
     sourceObjects     = lgSourceObjects
@@ -232,7 +233,7 @@ lgWrap f = f `catch` \e -> do
     etrap <- lgExcTrap
     mexc  <- liftIO $ readIORef etrap
     liftIO $ writeIORef etrap Nothing
-    maybe (throw (e :: SomeException)) throw mexc
+    maybe (throwM (e :: SomeException)) throwM mexc
 
 lgHashContents :: MonadLg m
                => Git.BlobContents (ReaderT LgRepo m)
@@ -341,7 +342,7 @@ lgTreeOid (LgTree (Just tree)) = liftIO $ do
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
-gatherFrom' :: (MonadIO m, MonadBaseControl IO m)
+gatherFrom' :: (MonadIO m, MonadBaseControl IO m, MonadThrow m)
            => Int                -- ^ Size of the queue to create
            -> (TBQueue o -> m ()) -- ^ Action that generates output values
            -> Producer m o
@@ -357,7 +358,7 @@ gatherFrom' size scatter = do
         liftIO $ threadDelay 1
         mapM_ yield xs
         case mres of
-            Just (Left e)  -> liftIO $ throwIO (e :: SomeException)
+            Just (Left e)  -> throwM (e :: SomeException)
             Just (Right r) -> return r
             Nothing        -> gather worker chan
 
@@ -425,7 +426,7 @@ lgNewTreeBuilder mtree = do
                 return $ Just fptr
     case mfptr of
         Nothing ->
-            failure (Git.TreeCreateFailed "Failed to create new tree builder")
+            throwM (Git.TreeCreateFailed "Failed to create new tree builder")
         Just fptr -> do
             toid <- mapM Git.treeOid mtree
             return (lgMakeBuilder fptr) { Git.mtbBaseTreeOid = toid }
@@ -439,7 +440,7 @@ lgPutEntry builder key (treeEntryToOid -> (oid, mode)) = do
         withFilePath key $ \name ->
             c'git_treebuilder_insert nullPtr ptr name coid
                 (fromIntegral mode)
-    when (r2 < 0) $ failure (Git.TreeBuilderInsertFailed key)
+    when (r2 < 0) $ throwM (Git.TreeBuilderInsertFailed key)
 
 treeEntryToOid :: TreeEntry -> (Oid, CUInt)
 treeEntryToOid (Git.BlobEntry oid kind) =
@@ -501,7 +502,7 @@ lgCloneBuilder fptr =
     liftIO $ withForeignPtr fptr $ \builder -> alloca $ \pptr -> do
         r <- c'git_treebuilder_create pptr nullPtr
         when (r < 0) $
-            failure (Git.BackendError "Could not create new treebuilder")
+            throwM (Git.BackendError "Could not create new treebuilder")
         builder' <- peek pptr
         bracket
             (mk'git_treebuilder_filter_cb (callback builder'))
@@ -520,7 +521,7 @@ lgCloneBuilder fptr =
             coid
             fmode
         when (r < 0) $
-            failure (Git.BackendError "Could not insert entry in treebuilder")
+            throwM (Git.BackendError "Could not insert entry in treebuilder")
         return 0
 
 lgLookupTree :: MonadLg m => TreeOid -> ReaderT LgRepo m Tree
@@ -545,7 +546,7 @@ entryToTreeEntry entry = do
                         0o100644 -> return Git.PlainBlob
                         0o100755 -> return Git.ExecutableBlob
                         0o120000 -> return Git.SymlinkBlob
-                        _        -> failure $ Git.BackendError $
+                        _        -> throwM $ Git.BackendError $
                             "Unknown blob mode: " <> T.pack (show mode)
            | typ == c'GIT_OBJ_TREE ->
              return $ Git.TreeEntry (Tagged (mkOid oid))
@@ -594,6 +595,42 @@ lgLookupCommit oid =
       $ \coid obj _ -> liftIO $ withForeignPtr obj $
           lgObjToCommit (Tagged (mkOid coid))
 
+lgReadIndex :: MonadLg m => Git.TreeT LgRepo (ReaderT LgRepo m) ()
+lgReadIndex = do
+  repo <- lift Git.getRepository
+  xs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
+    alloca $ \indexPp -> do
+      r <- c'git_repository_index indexPp repoPtr
+      idx <- if r < 0
+             then lgThrow Git.BackendError
+             else peek indexPp
+      cnt <- c'git_index_entrycount idx
+      fmap Prelude.concat $ forM [0..pred cnt] $ \i -> do
+        entryPtr <- c'git_index_get_byindex idx i
+        entry <- peek entryPtr
+        let oid   = c'git_index_entry'oid entry
+            mode  = c'git_index_entry'mode entry
+            path  = c'git_index_entry'path entry
+            flags = c'git_index_entry'flags entry
+        if 0 /= flags .&. 2 -- c'GIT_IDXENTRY_REMOVE
+            then return []
+            else do
+                oid'  <- new oid
+                foid' <- newForeignPtr_ oid'
+                path' <- peekFilePath path
+                return
+                    [(path',
+                      if 0 /= mode .&. 16384 -- check if directory
+                      then Git.TreeEntry (Tagged (mkOid foid'))
+                      else Git.BlobEntry (Tagged (mkOid foid')) $
+                           if (0 /= mode .&. 64 -- check if owner executable
+                              )
+                           then Git.ExecutableBlob
+                           else Git.PlainBlob
+                                -- jww (2014-04-05): Handle CommitEntry
+                     )]
+  forM_ xs $ uncurry Git.putEntry
+
 data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
                | TreePtr (ForeignPtr C'git_commit)
                | CommitPtr (ForeignPtr C'git_commit)
@@ -640,7 +677,7 @@ lgExistsObject oid = do
                     r1 <- c'git_odb_exists ptr coid 0
                     c'git_odb_free ptr
                     return (Just (r1 == 0))
-    maybe (failure Git.RepositoryInvalid) return result
+    maybe (throwM Git.RepositoryInvalid) return result
 
 lgForEachObject :: Ptr C'git_odb
                 -> (Ptr C'git_oid -> Ptr () -> IO CInt)
@@ -661,7 +698,7 @@ lgSourceObjects mhave need alsoTrees = do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
                 c'git_revwalk_new pptr repoPtr
         when (r < 0) $
-            failure (Git.BackendError "Could not create revwalker")
+            throwM (Git.BackendError "Could not create revwalker")
         ptr <- peek pptr
         FC.newForeignPtr ptr (c'git_revwalk_free ptr)
 
@@ -671,7 +708,7 @@ lgSourceObjects mhave need alsoTrees = do
     liftIO $ withForeignPtr (getOid oid) $ \coid -> do
         r2 <- withForeignPtr walker $ flip c'git_revwalk_push coid
         when (r2 < 0) $
-            failure (Git.BackendError $ "Could not push oid "
+            throwM (Git.BackendError $ "Could not push oid "
                          <> pack (show oid) <> " onto revwalker")
 
     case mhave of
@@ -679,7 +716,7 @@ lgSourceObjects mhave need alsoTrees = do
         Just have -> liftIO $ withForeignPtr (getOid (untag have)) $ \coid -> do
             r2 <- withForeignPtr walker $ flip c'git_revwalk_hide coid
             when (r2 < 0) $
-                failure (Git.BackendError $ "Could not hide commit "
+                throwM (Git.BackendError $ "Could not hide commit "
                              <> pack (show (untag have)) <> " from revwalker")
 
     liftIO $ withForeignPtr walker $ flip c'git_revwalk_sorting
@@ -727,7 +764,7 @@ lgCreateCommit pptrs tree author committer logText ref = do
                      update_ref author' committer'
                      nullPtr message toid'
                      (fromIntegral (L.length pptrs)) parents'
-                when (r < 0) $ throwIO Git.CommitCreateFailed
+                when (r < 0) $ throwM Git.CommitCreateFailed
                 return coid
 
     return Git.Commit
@@ -829,7 +866,7 @@ lgDeleteRef name = do
                 else do
                 ref <- peek ptr
                 c'git_reference_delete ref
-    when (r < 0) $ failure (Git.ReferenceDeleteFailed name)
+    when (r < 0) $ throwM (Git.ReferenceDeleteFailed name)
 
 -- int git_reference_packall(git_repository *repo)
 
@@ -955,7 +992,7 @@ lgSourceRefs =
 
 --compareRef = c'git_reference_cmp
 
-lgThrow :: (MonadIO m, Failure e m) => (Text -> e) -> m ()
+lgThrow :: (MonadIO m, MonadThrow m, Exception e) => (Text -> e) -> m a
 lgThrow f = do
     errStr <- liftIO $ do
         errPtr <- c'giterr_last
@@ -964,7 +1001,7 @@ lgThrow f = do
             else do
                 err <- peek errPtr
                 peekCString (c'git_error'message err)
-    failure (f (pack errStr))
+    throwM (f (pack errStr))
 
 -- withLgTempRepo :: MonadLg m => ReaderT LgRepo m a -> m a
 -- withLgTempRepo f = withTempDir $ \dir -> do
@@ -983,7 +1020,7 @@ lgDiffContentsWithTree
     -> Tree
     -> Producer (ReaderT LgRepo m) ByteString
 lgDiffContentsWithTree _contents (LgTree Nothing) =
-    liftIO $ throwIO $
+    liftIO $ throwM $
         Git.DiffTreeToIndexFailed "Cannot diff against an empty tree"
 
 lgDiffContentsWithTree contents tree = do
@@ -1046,13 +1083,13 @@ lgDiffContentsWithTree contents tree = do
         --                         (Either Git.SHA ByteString)) m
         --                   (Git.TreeFilePath, Either Git.SHA ByteString)
         handlePath (Right _) =
-            lift $ failure $ Git.DiffTreeToIndexFailed
+            lift $ throwM $ Git.DiffTreeToIndexFailed
                 "Received a Right value when a Left RawFilePath was expected"
         handlePath (Left path) = do
             mcontent <- await
             case mcontent of
                 Nothing ->
-                    lift $ failure $ Git.DiffTreeToIndexFailed $
+                    lift $ throwM $ Git.DiffTreeToIndexFailed $
                         "Content not provided for " <> T.pack (show path)
                 Just x -> handleContent path x
 
@@ -1062,11 +1099,11 @@ lgDiffContentsWithTree contents tree = do
         --                            (Either Git.SHA ByteString)) m
         --                   (Git.TreeFilePath, Either Git.SHA ByteString)
         handleContent _path (Left _) =
-            lift $ failure $ Git.DiffTreeToIndexFailed
+            lift $ throwM $ Git.DiffTreeToIndexFailed
                 "Received a Left value when a Right ByteString was expected"
         handleContent path (Right content) = return (path, content)
 
-        -- diffBlob :: Failure Git.GitException m
+        -- diffBlob :: MonadThrow m
         --          => Git.TreeFilePath
         --          -> Maybe (Either Git.SHA ByteString)
         --          -> Maybe (ForeignPtr C'git_oid)
@@ -1181,8 +1218,8 @@ lgDiffContentsWithTree contents tree = do
                         B.cons (fromIntegral lineOrigin) bs
                 return 0
 
-checkResult :: (Eq a, Num a, Failure Git.GitException m) => a -> Text -> m ()
-checkResult r why = when (r /= 0) $ failure (Git.BackendError why)
+checkResult :: (Eq a, Num a, MonadThrow m) => a -> Text -> m ()
+checkResult r why = when (r /= 0) $ throwM (Git.BackendError why)
 
 lgBuildPackFile :: MonadLg m
                 => FilePath -> [Either CommitOid TreeOid]
@@ -1351,7 +1388,7 @@ lgCopyPackFile packFile = do
 
 lgLoadPackFileInMemory
     :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-        Failure Git.GitException m)
+        MonadThrow m, MonadCatch m)
     => FilePath
     -> Ptr (Ptr C'git_odb_backend)
     -> Ptr (Ptr C'git_odb)
@@ -1383,7 +1420,7 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
     return odbPtr
 
 lgOpenPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   Failure Git.GitException m)
+                   MonadThrow m, MonadCatch m)
                => FilePath -> m (Ptr C'git_odb)
 lgOpenPackFile idxPath = control $ \run ->
     alloca $ \odbPtrPtr ->
@@ -1391,17 +1428,17 @@ lgOpenPackFile idxPath = control $ \run ->
         lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
 lgClosePackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   Failure Git.GitException m)
+                    MonadThrow m, MonadCatch m)
                => Ptr C'git_odb -> m ()
 lgClosePackFile = liftIO . c'git_odb_free
 
 lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   Failure Git.GitException m)
+                   MonadThrow m, MonadCatch m)
                => FilePath -> (Ptr C'git_odb -> m a) -> m a
 lgWithPackFile idxPath = bracket (lgOpenPackFile idxPath) lgClosePackFile
 
 lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   Failure Git.GitException m)
+                   MonadThrow m, MonadCatch m)
                => Ptr C'git_odb -> Git.SHA -> Bool
                -> m (Maybe (C'git_otype, CSize, ByteString))
 lgReadFromPack odbPtr sha metadataOnly = liftIO $ do

@@ -25,11 +25,11 @@ module Git.Tree.Builder
        ) where
 
 import           Control.Applicative
-import           Control.Failure
 import           Control.Monad
+import           Control.Monad.Catch
 import           Control.Monad.Fix
-import           Control.Monad.Logger
 import           Control.Monad.IO.Class
+import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.State
 import qualified Data.ByteString as B
@@ -56,8 +56,6 @@ toModifyTreeResult :: (TreeEntry r -> ModifyTreeResult r)
                    -> ModifyTreeResult r
 toModifyTreeResult _ Nothing  = TreeEntryNotFound
 toModifyTreeResult f (Just x) = f x
-
-newtype TreeT r m a = TreeT { runTreeT :: StateT (TreeBuilder r m) m a }
 
 instance Functor m => Functor (TreeT r m) where
     fmap f (TreeT t) = TreeT (fmap f t)
@@ -143,9 +141,9 @@ queryTreeBuilder builder path kind f = do
 
     update bm _ _ (Right Nothing) = return (bm, TreeEntryNotFound)
     update _ _ _ (Right (Just BlobEntry {})) =
-        failure TreeCannotTraverseBlob
+        throwM TreeCannotTraverseBlob
     update _ _ _ (Right (Just CommitEntry {})) =
-        failure TreeCannotTraverseCommit
+        throwM TreeCannotTraverseCommit
 
     update bm name names arg = do
         sbm <- case arg of

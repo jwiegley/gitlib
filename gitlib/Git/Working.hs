@@ -4,7 +4,7 @@ module Git.Working where
 
 import Conduit
 import Control.Applicative
-import Control.Failure
+import Control.Monad.Catch
 import Data.Semigroup
 import Data.Text as T
 import Git.Blob
@@ -36,7 +36,7 @@ checkoutFiles destPath tree decode cloneSubmodules =
                         | cloneSubmodules -> cloneSubmodule oid fullPath
                         | otherwise -> liftIO $ createDirectory fullPath
   where
-    decodeError path e = failure $ PathEncodingError $
+    decodeError path e = throwM $ PathEncodingError $
         "Could not decode path " <> T.pack (show path) <> ":" <> T.pack e
 
     checkoutBlob oid kind fullPath = do

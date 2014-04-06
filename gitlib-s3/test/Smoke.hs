@@ -11,7 +11,7 @@ module Main where
 
 import           Aws
 import           Control.Applicative
-import           Control.Failure
+import           Control.Monad.Catch
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Reader
@@ -29,10 +29,8 @@ import           System.FilePath.Posix
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
-s3Factory
-    :: (Failure Git.GitException m, MonadIO m, MonadBaseControl IO m,
-        MonadThrow m)
-    => Git.RepositoryFactory (ReaderT Lg.LgRepo (NoLoggingT m)) m Lg.LgRepo
+s3Factory :: (MonadThrow m, MonadIO m, MonadBaseControl IO m)
+          => Git.RepositoryFactory (ReaderT Lg.LgRepo (NoLoggingT m)) m Lg.LgRepo
 s3Factory = Lg.lgFactory
     { Git.runRepository = \ctxt m ->
        runNoLoggingT $ Lg.runLgRepository ctxt (s3back >> m) }

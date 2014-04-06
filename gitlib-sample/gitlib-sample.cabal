@@ -34,7 +34,7 @@ Library
     ghc-options: -Wall
     build-depends:
           base                 >= 3 && < 5
-        , failure              >= 0.2.0
+        , exceptions           >= 0.5
         , gitlib               >= 3.0.0
         , mtl                  >= 2.1.2
         , transformers         >= 0.3.0.0

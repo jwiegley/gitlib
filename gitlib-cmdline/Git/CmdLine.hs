@@ -18,11 +18,8 @@ module Git.CmdLine where
 
 import           Conduit
 import           Control.Applicative hiding (many)
-import           Control.Failure
 import           Control.Monad
-import           Control.Monad.IO.Class
 import           Control.Monad.Reader.Class
-import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Data.ByteString as B
 import           Data.Foldable (for_)
@@ -87,7 +84,7 @@ cliWorkingDir (CliRepo options) = TL.pack <$> repoWorkingDir options
 -- instance HasCliRepo (env, CliRepo) where
 --     getCliRepo = snd
 
-instance (Applicative m, Failure GitException m, MonadIO m)
+instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit CliRepo (ReaderT CliRepo m) where
     type Oid CliRepo     = SHA
     data Tree CliRepo    = CmdLineTree (TreeOid CliRepo)
@@ -126,7 +123,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
 
     diffContentsWithTree = error "Not defined cliDiffContentsWithTree"
 
-type MonadCli m = (Applicative m, Failure GitException m, MonadIO m)
+type MonadCli m = (Applicative m, MonadThrow m, MonadIO m)
 
 mkOid :: MonadCli m => forall o. TL.Text -> ReaderT CliRepo m (Tagged o SHA)
 mkOid = fmap Tagged <$> textToSha . toStrict
@@ -212,9 +209,9 @@ cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
         Nothing  -> do
             mcref <- resolveReference remoteRefName
             case mcref of
-                Nothing   -> failure $ BackendError "git push failed"
+                Nothing   -> throwM $ BackendError "git push failed"
                 Just cref -> return $ Tagged cref
-        Just err -> failure err
+        Just err -> throwM err
 
 cliResetHard :: MonadCli m => Text -> ReaderT CliRepo m ()
 cliResetHard refname =
@@ -243,13 +240,13 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
                        ]
                 Right <$> lastExitCode
     case eres of
-        Left err -> failure err
+        Left err -> throwM err
         Right r  ->
             if r == 0
                 then MergeSuccess <$> (Tagged <$> getOid "HEAD")
                 else case leftHead of
                     Nothing ->
-                        failure (BackendError
+                        throwM (BackendError
                                  "Reference missing: HEAD (left)")
                     Just lh -> recordMerge lh
   where
@@ -288,7 +285,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     getOid name = do
         mref <- cliResolveRef name
         case mref of
-            Nothing  -> failure $ BackendError
+            Nothing  -> throwM $ BackendError
                                 $ T.append "Reference missing: " name
             Just ref -> return ref
 
@@ -334,7 +331,7 @@ cliLookupBlob oid@(renderObjOid -> sha) = do
             B.empty
     if r == ExitSuccess
         then return (Blob oid (BlobString out))
-        else failure BlobLookupFailed
+        else throwM BlobLookupFailed
 
 cliDoCreateBlob :: MonadCli m
                 => BlobContents (ReaderT CliRepo m)
@@ -352,7 +349,7 @@ cliDoCreateBlob b persist = do
             bs
     if r == ExitSuccess
         then mkOid . fromStrict . T.init . T.decodeUtf8 $ out
-        else failure $ BlobCreateFailed "Failed to create blob"
+        else throwM $ BlobCreateFailed "Failed to create blob"
 
 cliHashContents :: MonadCli m
                 => BlobContents (ReaderT CliRepo m)
@@ -394,8 +391,8 @@ cliSourceObjects mhave need alsoTrees = do
             toid <- lift $ parseObjOid tsha
             yield $ TreeObjOid toid
 
-    go x = failure (BackendError $
-                    "Unexpected output from git-log: " <> T.pack (show x))
+    go x = throwM (BackendError $
+                   "Unexpected output from git-log: " <> T.pack (show x))
 
 cliReadTree :: MonadCli m
             => Tree CliRepo -> ReaderT CliRepo m (Pure.EntryHashMap CliRepo)
@@ -418,17 +415,17 @@ cliParseLsTree line =
                 "100644" -> return PlainBlob
                 "100755" -> return ExecutableBlob
                 "120000" -> return SymlinkBlob
-                _        -> failure $ BackendError $
+                _        -> throwM $ BackendError $
                     "Unknown blob mode: " <> T.pack (show mode)
         "commit" -> CommitEntry <$> mkOid sha
         "tree"   -> TreeEntry <$> mkOid sha
-        _ -> failure $ BackendError "This cannot happen"
+        _ -> throwM $ BackendError "This cannot happen"
 
 cliWriteTree :: MonadCli m
              => Pure.EntryHashMap CliRepo -> ReaderT CliRepo m (TreeOid CliRepo)
 cliWriteTree entMap = do
     rendered <- mapM renderLine (HashMap.toList entMap)
-    when (null rendered) $ failure TreeEmptyCreateFailed
+    when (null rendered) $ throwM TreeEmptyCreateFailed
     oid      <- doRunGit run [ "mktree", "-z", "--missing" ]
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
     mkOid (TL.init oid)
@@ -462,9 +459,16 @@ cliLookupTree oid@(renderObjOid -> sha) = do
     ec <- shellyNoDir $ silently $ errExit False $ do
         git_ repo [ "cat-file", "-t", fromStrict sha ]
         lastExitCode
+        -- res <- git repo [ "cat-file", "-t", fromStrict sha ]
+        -- ec <- lastExitCode
+        -- return $ if ec == 0
+        --          then if res == "tree"
+        --               then 0
+        --               else (-1)
+        --          else ec
     if ec == 0
         then return $ CmdLineTree oid
-        else failure (ObjectLookupFailed sha 40)
+        else throwM (ObjectLookupFailed sha 40)
 
 cliTreeEntry :: MonadCli m
              => Tree CliRepo -> TreeFilePath
@@ -508,10 +512,10 @@ cliLookupCommit (renderObjOid -> sha) = do
         setStdin (TL.append (fromStrict sha) "\n")
     result <- runParserT parseOutput () "" (TL.unpack output)
     case result of
-        Left e  -> failure $ CommitLookupFailed (T.pack (show e))
+        Left e  -> throwM $ CommitLookupFailed (T.pack (show e))
         Right c -> return c
   where
-    parseOutput :: (Stream s  (ReaderT CliRepo m) Char, MonadCli m)
+    parseOutput :: (Stream s (ReaderT CliRepo m) Char, MonadCli m)
                 => ParsecT s u (ReaderT CliRepo m) (Commit CliRepo)
     parseOutput = do
         coid       <- manyTill alphaNum space
