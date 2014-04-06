@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -56,9 +55,6 @@ import           Shelly hiding (FilePath, trace, (</>))
 import           System.Directory
 import           System.Locale (defaultTimeLocale)
 import           System.IO (withFile, hPutStrLn, IOMode(WriteMode))
-import           Text.Parsec.Char
-import           Text.Parsec.Combinator
-import           Text.Parsec.Prim
 
 toStrict :: TL.Text -> T.Text
 toStrict = id
@@ -147,7 +143,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     updateReference   = hitUpdateRef
     deleteReference   = hitDeleteRef
     sourceReferences  = hitSourceRefs
-    lookupCommit      = cliLookupCommit
+    lookupCommit      = hitLookupCommit
     lookupTree        = hitLookupTree
     lookupBlob        = hitLookupBlob
     lookupTag         = error "Not defined cliLookupTag"
@@ -171,9 +167,6 @@ type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
 
 mkOid :: MonadHit m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
 mkOid = fmap Tagged <$> textToSha . toStrict
-
-parseCliTime :: String -> ZonedTime
-parseCliTime = fromJust . parseTime defaultTimeLocale "%s %z"
 
 formatCliTime :: ZonedTime -> Text
 formatCliTime = T.pack . formatTime defaultTimeLocale "%s %z"
@@ -388,48 +381,31 @@ cliSourceTreeEntries tree = do
                ]
     forM_ (L.init (TL.splitOn "\NUL" contents)) $
         yield <=< lift . cliParseLsTree
-
-cliLookupCommit :: MonadHit m
+
+convertPerson :: DG.Person -> Signature
+convertPerson p = Signature
+  { signatureName = T.decodeUtf8 $ DG.personName p
+  , signatureEmail = T.decodeUtf8 $ DG.personEmail p
+  , signatureWhen = DGT.toZonedTime $ DG.personTime p
+  }
+
+convertCommit :: CommitOid HitRepo -> DG.Commit -> Commit HitRepo
+convertCommit oid c = Commit
+  { commitOid       = oid
+  , commitParents   = map refToOid $ DG.commitParents c
+  , commitTree      = refToOid $ DG.commitTreeish c
+  , commitAuthor    = convertPerson $ DG.commitAuthor c
+  , commitCommitter = convertPerson $ DG.commitCommitter c
+  , commitLog       = T.decodeUtf8 $ DG.commitMessage c
+  , commitEncoding  = maybe "" T.decodeUtf8 $ DG.commitEncoding c
+  }
+
+hitLookupCommit :: MonadHit m
                 => CommitOid HitRepo -> ReaderT HitRepo m (Commit HitRepo)
-cliLookupCommit (renderObjOid -> sha) = do
-    output <- doRunGit run ["cat-file", "--batch"] $
-        setStdin (TL.append (fromStrict sha) "\n")
-    result <- runParserT parseOutput () "" (TL.unpack output)
-    case result of
-        Left e  -> throwM $ CommitLookupFailed (T.pack (show e))
-        Right c -> return c
-  where
-    parseOutput :: (Stream s  (ReaderT HitRepo m) Char, MonadHit m)
-                => ParsecT s u (ReaderT HitRepo m) (Commit HitRepo)
-    parseOutput = do
-        coid       <- manyTill alphaNum space
-        _          <- string "commit " *> manyTill digit newline
-        treeOid    <- string "tree " *> manyTill anyChar newline
-        parentOids <- many (string "parent " *> manyTill anyChar newline)
-        author     <- parseSignature "author"
-        committer  <- parseSignature "committer"
-        message    <- newline *> many anyChar
-
-        lift $ do
-            coid'  <- mkOid (TL.pack coid)
-            toid'  <- mkOid (TL.pack treeOid)
-            poids' <- mapM (mkOid . TL.pack) parentOids
-            return Commit
-                { commitOid       = coid'
-                , commitAuthor    = author
-                , commitCommitter = committer
-                , commitLog       = T.pack (init message)
-                , commitTree      = toid'
-                , commitParents   = poids'
-                , commitEncoding  = "utf-8"
-                }
-
-    parseSignature txt =
-        Signature
-            <$> (string (T.unpack txt ++ " ")
-                 *> (T.pack <$> manyTill anyChar (try (string " <"))))
-            <*> (T.pack <$> manyTill anyChar (try (string "> ")))
-            <*> (parseCliTime <$> manyTill anyChar newline)
+hitLookupCommit oid@(oidToRef -> ref) = do
+    g <- hitGit <$> getRepository
+    c <- liftIO $ DG.getCommit g ref
+    return $ convertCommit oid c
 
 cliCreateCommit :: MonadHit m
                 => [CommitOid HitRepo]
