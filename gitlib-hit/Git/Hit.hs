@@ -63,16 +63,16 @@ toStrict = id
 fromStrict :: T.Text -> TL.Text
 fromStrict = id
 
-newtype HitRepo = HitRepo RepositoryOptions
+data HitRepo = HitRepo
+    { hitOptions :: RepositoryOptions
+    , hitGit     :: DGS.Git
+    }
 
 hitRepoPath :: HitRepo -> TL.Text
-hitRepoPath (HitRepo options) = TL.pack $ repoPath options
-
-hitRepoFPath :: HitRepo -> F.FilePath
-hitRepoFPath (HitRepo options) = F.decodeString $ repoPath options
+hitRepoPath = TL.pack . repoPath . hitOptions
 
 hitWorkingDir :: HitRepo -> Maybe TL.Text
-hitWorkingDir (HitRepo options) = TL.pack <$> repoWorkingDir options
+hitWorkingDir = fmap TL.pack . repoWorkingDir . hitOptions
 
 refToSHA :: DG.Ref -> SHA
 refToSHA = SHA . DGF.toBinary
@@ -88,7 +88,7 @@ oidToHex = shaToText . untag
 
 instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
-    type Oid HitRepo     = SHA
+    type Oid HitRepo     = SHA  -- TODO maybe use DG.Ref directly here?
     data Tree HitRepo    = CmdLineTree (TreeOid HitRepo)
     data Options HitRepo = Options
 
@@ -96,7 +96,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
         { hasSymbolicReferences = True }
 
     getRepository    = ask
-    closeRepository  = return ()
+    closeRepository  = getRepository >>= liftIO . DGS.closeRepo . hitGit
     deleteRepository = getRepository >>=
         liftIO . removeDirectoryRecursive . TL.unpack . hitRepoPath
 
@@ -325,9 +325,8 @@ hitLookupBlob :: MonadHit m
               => BlobOid HitRepo
               -> ReaderT HitRepo m (Blob HitRepo (ReaderT HitRepo m))
 hitLookupBlob oid = do
-    repo <- getRepository
-    let get g = DG.getObject g (oidToRef oid) True
-    mobj <- liftIO $ DG.withRepo (hitRepoFPath repo) get
+    g <- hitGit <$> getRepository
+    mobj <- liftIO $ DG.getObject g (oidToRef oid) True
     maybe (throwM BlobLookupFailed) -- TODO: must we handle ObjDeltaOfs, ObjDeltaRef?
           (\(DGO.ObjBlob b) -> return $ Blob oid $ BlobStringLazy $ DGT.blobGetContent b)
           mobj
@@ -345,17 +344,17 @@ hitCreateBlob :: MonadHit m
               => BlobContents (ReaderT HitRepo m)
               -> ReaderT HitRepo m (BlobOid HitRepo)
 hitCreateBlob b = do
-    repo <- getRepository
+    g <- hitGit <$> getRepository
     bs <- blobContentsToLazyByteString b
     let obj = DGO.ObjBlob (DG.Blob bs)
-    ref <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DG.setObject obj)
+    ref <- liftIO $ DG.setObject g obj
     return $ refToOid ref
 
 hitExistsObject :: MonadHit m => SHA -> ReaderT HitRepo m Bool
 hitExistsObject sha = do
-    repo <- getRepository
+    g <- hitGit <$> getRepository
     let ref = DGF.fromBinary $ getSHA sha
-    mobj <- liftIO $ DG.withRepo (hitRepoFPath repo) (\g -> DGS.getObjectRaw g ref True)
+    mobj <- liftIO $ DGS.getObjectRaw g ref True
     return $ isJust mobj
 
 cliSourceObjects :: MonadHit m
@@ -444,13 +443,13 @@ cliWriteTree entMap = do
 hitLookupTree :: MonadHit m
               => TreeOid HitRepo -> ReaderT HitRepo m (Tree HitRepo)
 hitLookupTree oid = do
-    repo <- getRepository
+    g <- hitGit <$> getRepository
     let hex = oidToHex oid
     if hex == emptyTreeId
       then return $ CmdLineTree oid
       else do
         let ref = oidToRef oid
-        mtr <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DGR.getTreeMaybe ref)
+        mtr <- liftIO $ DGR.getTreeMaybe g ref
         maybe (throwM $ ObjectLookupFailed hex 40)
               (\_ -> return $ CmdLineTree oid)
               mtr
@@ -499,11 +498,12 @@ hitTreeEntry :: MonadHit m
              => Tree HitRepo -> TreeFilePath
              -> ReaderT HitRepo m (Maybe (TreeEntry HitRepo))
 hitTreeEntry tree fp = do
-    repo <- getRepository
+    HitRepo _ g <- getRepository
     toid <- treeOid tree
     let ref = oidToRef toid
-    liftIO $ trace $ "LOOK " ++ DGF.toHexString ref ++ " " ++ BC.unpack fp
-    liftIO $ DG.withRepo (hitRepoFPath repo) (findInTreeRef (BC.split '/' fp) ref)
+    liftIO $ do
+        trace $ "LOOK " ++ DGF.toHexString ref ++ " " ++ BC.unpack fp
+        findInTreeRef (BC.split '/' fp) ref g
 
 cliSourceTreeEntries :: MonadHit m
                      => Tree HitRepo
@@ -704,6 +704,7 @@ openHitRepository opts = liftIO $ do
         withFile head WriteMode $ flip hPutStrLn "ref: refs/heads/master"
         let pack = F.encodeString $ (F.</>) path $ (F.</>) "objects" "pack"
         createDirectory pack
-    return $ HitRepo opts
+    g <- DGS.openRepo path
+    return $ HitRepo opts g
 
--- Cli.hs
+-- Hit.hs
