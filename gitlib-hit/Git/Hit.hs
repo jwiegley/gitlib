@@ -49,10 +49,8 @@ import           Git
 import qualified Git.Tree.Builder.Pure as Pure
 import           Shelly hiding (FilePath, trace)
 import           System.Directory
-import           System.Exit
 import           System.Locale (defaultTimeLocale)
 import           System.IO (withFile, hPutStrLn, IOMode(WriteMode))
-import           System.Process.ByteString
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
 import           Text.Parsec.Language (haskellDef)
@@ -111,7 +109,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
     sourceReferences  = cliSourceRefs
     lookupCommit      = cliLookupCommit
     lookupTree        = hitLookupTree
-    lookupBlob        = cliLookupBlob
+    lookupBlob        = hitLookupBlob
     lookupTag         = error "Not defined cliLookupTag"
     lookupObject      = error "Not defined cliLookupObject"
     existsObject      = cliExistsObject
@@ -323,19 +321,16 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
         (Just x, Just y)     -> (x, y)
         (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
 
-cliLookupBlob :: MonadHit m
+hitLookupBlob :: MonadHit m
               => BlobOid HitRepo
               -> ReaderT HitRepo m (Blob HitRepo (ReaderT HitRepo m))
-cliLookupBlob oid@(renderObjOid -> sha) = do
+hitLookupBlob oid = do
     repo <- getRepository
-    (r,out,_) <-
-        liftIO $ readProcessWithExitCode "git"
-            (map TL.unpack (gitStdOpts repo)
-                 ++ [ "cat-file", "-p", TL.unpack (fromStrict sha) ])
-            B.empty
-    if r == ExitSuccess
-        then return (Blob oid (BlobString out))
-        else failure BlobLookupFailed
+    let get g = DG.getObject g (oidToRef oid) True
+    mobj <- liftIO $ DG.withRepo (hitRepoFPath repo) get
+    maybe (failure BlobLookupFailed) -- TODO: must we handle ObjDeltaOfs, ObjDeltaRef?
+          (\(DGO.ObjBlob b) -> return $ Blob oid $ BlobStringLazy $ DGT.blobGetContent b)
+          mobj
 
 hitHashContents :: MonadHit m
                 => BlobContents (ReaderT HitRepo m)
