@@ -90,7 +90,7 @@ oidToRef = DGF.fromBinary . getSHA . untag
 oidToHex :: Tagged a (Oid HitRepo) -> Text
 oidToHex = shaToText . untag
 
---- This is a duplicate of an unexported function in Data.Git.Named
+--- Following two are duplicates of unexported functions in Data.Git.Named
 toRefTy :: String -> DGN.RefSpecTy
 toRefTy s
     | "refs/tags/" `isPrefixOf` s    = DGN.RefTag $ DGN.RefName $ drop 10 s
@@ -103,6 +103,16 @@ toRefTy s
     | "FETCH_HEAD" == s              = DGN.RefFetchHead
     | otherwise                      = DGN.RefOther $ s
 
+fromRefTy :: DGN.RefSpecTy -> String
+fromRefTy (DGN.RefBranch h)  = "refs/heads/" ++ DGN.refNameRaw h
+fromRefTy (DGN.RefTag h)     = "refs/tags/" ++ DGN.refNameRaw h
+fromRefTy (DGN.RefRemote h)  = "refs/remotes/" ++ DGN.refNameRaw h
+fromRefTy (DGN.RefPatches h) = "refs/patches/" ++ h
+fromRefTy DGN.RefStash       = "refs/stash"
+fromRefTy DGN.RefHead        = "HEAD"
+fromRefTy DGN.RefOrigHead    = "ORIG_HEAD"
+fromRefTy DGN.RefFetchHead   = "FETCH_HEAD"
+fromRefTy (DGN.RefOther h)   = h
 
 instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
@@ -120,7 +130,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
 
     parseOid = textToSha
 
-    lookupReference   = cliLookupRef
+    lookupReference   = hitLookupRef
     createReference   = cliUpdateRef
     updateReference   = cliUpdateRef
     deleteReference   = cliDeleteRef
@@ -640,17 +650,25 @@ cliShowRef mrefName = do
                            $ TL.lines rev
                  else Nothing
 
-cliLookupRef :: MonadHit m
+tryReadRef :: F.FilePath -> DGN.RefSpecTy -> IO (Maybe DGN.RefContentTy)
+tryReadRef path spec = (Just <$> DGN.readRefFile path spec)
+    `X.catch` \(_ :: X.IOException) -> return Nothing
+
+refContentToTarget :: Text -> DGN.RefContentTy -> IO (RefTarget HitRepo)
+refContentToTarget name rc = case rc of
+  DGN.RefDirect ref -> return $ RefObj $ refToSHA ref
+  DGN.RefLink spec -> return $ RefSymbolic $ TL.pack $ fromRefTy spec
+  DGN.RefContentUnknown _ -> throwM $ ReferenceLookupFailed name
+
+hitLookupRef :: MonadHit m
              => Text -> ReaderT HitRepo m (Maybe (RefTarget HitRepo))
-cliLookupRef refName = do
-    repo <- getRepository
-    (ec,rev) <- shelly $ silently $ errExit False $ do
-        rev <- git repo [ "symbolic-ref", fromStrict refName ]
-        ec  <- lastExitCode
-        return (ec,rev)
-    if ec == 0
-        then return . Just . RefSymbolic . toStrict . TL.init $ rev
-        else fmap RefObj <$> hitResolveRef refName
+hitLookupRef refName@(TL.unpack -> name) = do
+    path <- DGS.gitRepoPath <$> hitGit <$> getRepository
+    liftIO $ do
+        mrc <- tryReadRef path $ toRefTy name
+        case mrc of
+            Nothing -> return Nothing
+            Just rc -> Just <$> refContentToTarget refName rc
 
 cliUpdateRef :: MonadHit m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
 cliUpdateRef refName (RefObj (renderOid -> sha)) =
@@ -669,19 +687,19 @@ cliSourceRefs = do
         Nothing -> []
         Just xs -> map (toStrict . fst) xs
 
+readThruRefLink :: Text -> F.FilePath -> DGN.RefSpecTy -> IO (Maybe (Oid HitRepo))
+readThruRefLink name path spec = do
+    mr <- tryReadRef path spec
+    case mr of
+        Nothing -> return Nothing
+        Just (DGN.RefDirect ref) -> return $ Just $ refToSHA ref
+        Just (DGN.RefContentUnknown _) -> throwM $ ReferenceLookupFailed name
+        Just (DGN.RefLink spec') -> readThruRefLink name path spec'
+
 hitResolveRef :: MonadHit m => Text -> ReaderT HitRepo m (Maybe (Oid HitRepo))
 hitResolveRef refName@(TL.unpack -> name) = do
     path <- DGS.gitRepoPath <$> hitGit <$> getRepository
-    let readThru spec = do
-        mr :: Either X.IOException DGN.RefContentTy
-           <- X.try $ DGN.readRefFile path spec
-        trace $ "REF " ++ name ++ ": " ++ show spec ++ " » " ++ show mr
-        case mr of
-            Left _ -> return Nothing
-            Right (DGN.RefDirect ref) -> return $ Just $ refToSHA ref
-            Right (DGN.RefContentUnknown _) -> throwM $ ReferenceLookupFailed refName
-            Right (DGN.RefLink spec') -> readThru spec'
-    liftIO $ readThru $ toRefTy name
+    liftIO $ readThruRefLink refName path $ toRefTy name
 
 
 -- cliLookupTag :: MonadHit m
