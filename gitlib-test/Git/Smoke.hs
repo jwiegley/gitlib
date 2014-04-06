@@ -205,6 +205,9 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       refs <- listReferences
       liftIO $ show refs @?= "[\"refs/heads/master\"]"
 
+      deleteReference "refs/heads/master"
+      deleteReference "HEAD"
+
       -- jww (2013-01-27): Restore
       -- ehist <- commitHistoryFirstParent c2
       -- Prelude.putStrLn $ "ehist: " ++ show ehist

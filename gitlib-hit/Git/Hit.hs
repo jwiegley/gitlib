@@ -13,10 +13,12 @@
 
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-{-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Git.Hit where
+module Git.Hit
+       ( hitFactory
+       ) where
 
+import           Prelude hiding (FilePath)
 import           Conduit
 import           Control.Applicative hiding (many)
 import qualified Control.Exception as X
@@ -27,8 +29,6 @@ import           Data.Bits ((.&.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8 as BC
-import           Data.Foldable (for_)
-import           Data.Function
 import qualified Data.Git as DG
 import qualified Data.Git.Named as DGN
 import qualified Data.Git.Ref as DGF
@@ -39,27 +39,26 @@ import qualified Data.Git.Storage.Object as DGO
 import qualified Data.Git.Types as DGT
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
-import qualified Data.Map as Map
 import           Data.Maybe
 import           Data.Monoid
+import qualified Data.Set as Set
+import           Data.String (fromString)
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text as TL
 import           Data.Time
-import qualified Filesystem.Path.CurrentOS as F
+import           Filesystem.Path.CurrentOS (FilePath, (</>), encodeString)
 import           Git
 import qualified Git.Tree.Builder.Pure as Pure
-import           Shelly hiding (FilePath, trace)
+import           Shelly hiding (FilePath, trace, (</>))
 import           System.Directory
 import           System.Locale (defaultTimeLocale)
 import           System.IO (withFile, hPutStrLn, IOMode(WriteMode))
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
-import           Text.Parsec.Language (haskellDef)
 import           Text.Parsec.Prim
-import           Text.Parsec.Token
 
 toStrict :: TL.Text -> T.Text
 toStrict = id
@@ -114,6 +113,19 @@ fromRefTy DGN.RefOrigHead    = "ORIG_HEAD"
 fromRefTy DGN.RefFetchHead   = "FETCH_HEAD"
 fromRefTy (DGN.RefOther h)   = h
 
+toPath :: FilePath -> DGN.RefSpecTy -> FilePath
+toPath gitRepo (DGN.RefBranch h)  = gitRepo </> "refs" </> "heads" </> DGV.fromString (DGN.refNameRaw h)
+toPath gitRepo (DGN.RefTag h)     = gitRepo </> "refs" </> "tags" </> DGV.fromString (DGN.refNameRaw h)
+toPath gitRepo (DGN.RefRemote h)  = gitRepo </> "refs" </> "remotes" </> DGV.fromString (DGN.refNameRaw h)
+toPath gitRepo (DGN.RefPatches h) = gitRepo </> "refs" </> "patches" </> DGV.fromString h
+toPath gitRepo DGN.RefStash       = gitRepo </> "refs" </> "stash"
+toPath gitRepo DGN.RefHead        = gitRepo </> "HEAD"
+toPath gitRepo DGN.RefOrigHead    = gitRepo </> "ORIG_HEAD"
+toPath gitRepo DGN.RefFetchHead   = gitRepo </> "FETCH_HEAD"
+toPath gitRepo (DGN.RefOther h)   = gitRepo </> DGV.fromString h
+
+-- END duplicates
+
 instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
     type Oid HitRepo     = SHA  -- TODO maybe use DG.Ref directly here?
@@ -131,10 +143,10 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     parseOid = textToSha
 
     lookupReference   = hitLookupRef
-    createReference   = cliUpdateRef
-    updateReference   = cliUpdateRef
-    deleteReference   = cliDeleteRef
-    sourceReferences  = cliSourceRefs
+    createReference   = hitUpdateRef
+    updateReference   = hitUpdateRef
+    deleteReference   = hitDeleteRef
+    sourceReferences  = hitSourceRefs
     lookupCommit      = cliLookupCommit
     lookupTree        = hitLookupTree
     lookupBlob        = hitLookupBlob
@@ -150,6 +162,8 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     createBlob        = hitCreateBlob
     createCommit      = cliCreateCommit
     createTag         = cliCreateTag
+    readIndex         = error "Not defined readIndex"
+    writeIndex        = error "Not defined writeIndex"
 
     diffContentsWithTree = error "Not defined cliDiffContentsWithTree"
 
@@ -158,30 +172,18 @@ type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
 mkOid :: MonadHit m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
 mkOid = fmap Tagged <$> textToSha . toStrict
 
-shaToRef :: MonadHit m => TL.Text -> ReaderT HitRepo m (RefTarget HitRepo)
-shaToRef = fmap (RefObj . untag) . mkOid
-
 parseCliTime :: String -> ZonedTime
 parseCliTime = fromJust . parseTime defaultTimeLocale "%s %z"
 
 formatCliTime :: ZonedTime -> Text
 formatCliTime = T.pack . formatTime defaultTimeLocale "%s %z"
 
-lexer :: TokenParser u
-lexer = makeTokenParser haskellDef
-
 gitStdOpts :: HitRepo -> [TL.Text]
 gitStdOpts repo = [ "--git-dir", hitRepoPath repo ]
     ++ maybe [] (\w -> [ "--work-tree", w ]) (hitWorkingDir repo)
 
-git :: HitRepo -> [TL.Text] -> Sh TL.Text
-git repo args = run "git" $ gitStdOpts repo ++ args
-
-git_ :: HitRepo -> [TL.Text] -> Sh ()
-git_ repo args = run_ "git" $ gitStdOpts repo ++ args
-
 doRunGit :: MonadHit m
-         => (F.FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
+         => (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
          -> ReaderT HitRepo m a
 doRunGit f args act = do
     repo <- getRepository
@@ -191,164 +193,6 @@ doRunGit f args act = do
 runGit :: MonadHit m => [TL.Text] -> ReaderT HitRepo m TL.Text
 runGit = flip (doRunGit run) (return ())
 
-runGit_ :: MonadHit m => [TL.Text] -> ReaderT HitRepo m ()
-runGit_ = flip (doRunGit run_) (return ())
-
-cliRepoDoesExist :: HitRepo -> Text -> Sh (Either GitException ())
-cliRepoDoesExist repo remoteURI = do
-    setenv "SSH_ASKPASS" "echo"
-    setenv "GIT_ASKPASS" "echo"
-    git_ repo [ "ls-remote", fromStrict remoteURI ]
-    ec <- lastExitCode
-    return $ if ec == 0
-             then Right ()
-             else Left $ RepositoryCannotAccess remoteURI
-
-cliFilePathToURI :: (Functor m, MonadIO m) => FilePath -> m FilePath
-cliFilePathToURI = fmap ("file://localhost" <>) . liftIO . canonicalizePath
-
-cliPushCommit :: MonadHit m
-              => CommitOid HitRepo -> Text -> Text -> Maybe FilePath
-              -> ReaderT HitRepo m (CommitOid HitRepo)
-cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
-    repo <- getRepository
-    merr <- shelly $ silently $ errExit False $ do
-        for_ msshCmd $ \sshCmd ->
-            setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
-
-        eres <- cliRepoDoesExist repo remoteNameOrURI
-        case eres of
-            Left e -> return $ Just e
-            Right () -> do
-                git_ repo [ "push", fromStrict remoteNameOrURI
-                          , TL.concat [ fromStrict (renderObjOid cname)
-                                      , ":", fromStrict remoteRefName
-                                      ]
-                          ]
-                r <- lastExitCode
-                if r == 0
-                    then return Nothing
-                    else Just
-                         . (\x -> if "non-fast-forward" `T.isInfixOf` x ||
-                                    "Note about fast-forwards" `T.isInfixOf` x
-                                 then PushNotFastForward x
-                                 else BackendError $
-                                          "git push failed:\n" <> x)
-                         . toStrict <$> lastStderr
-    case merr of
-        Nothing  -> do
-            mcref <- resolveReference remoteRefName
-            case mcref of
-                Nothing   -> throwM $ BackendError "git push failed"
-                Just cref -> return $ Tagged cref
-        Just err -> throwM err
-
-cliResetHard :: MonadHit m => Text -> ReaderT HitRepo m ()
-cliResetHard refname =
-    doRunGit run_ [ "reset", "--hard", fromStrict refname ] $ return ()
-
-cliPullCommit :: MonadHit m
-              => Text -> Text -> Text -> Text -> Maybe FilePath
-              -> ReaderT HitRepo m (MergeResult HitRepo)
-cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
-    repo     <- getRepository
-    leftHead <- fmap Tagged <$> hitResolveRef "HEAD"
-    eres     <- shelly $ silently $ errExit False $ do
-        for_ msshCmd $ \sshCmd ->
-            setenv "GIT_SSH" . TL.pack =<< liftIO (canonicalizePath sshCmd)
-        eres <- cliRepoDoesExist repo remoteNameOrURI
-        case eres of
-            Left e -> return (Left e)
-            Right () -> do
-                git_ repo [ "config", "user.name", fromStrict user ]
-                git_ repo [ "config", "user.email", fromStrict email ]
-                git_ repo $
-                       [ "-c", "merge.conflictstyle=merge" ]
-                    <> [ "pull", "--quiet"
-                       , fromStrict remoteNameOrURI
-                       , fromStrict remoteRefName
-                       ]
-                Right <$> lastExitCode
-    case eres of
-        Left err -> throwM err
-        Right r  ->
-            if r == 0
-                then MergeSuccess <$> (Tagged <$> getOid "HEAD")
-                else case leftHead of
-                    Nothing ->
-                        throwM (BackendError
-                                 "Reference missing: HEAD (left)")
-                    Just lh -> recordMerge lh
-  where
-    -- jww (2013-05-15): This function should not overwrite head, but simply
-    -- create a detached commit and return its id.
-    recordMerge :: MonadHit m
-                => CommitOid HitRepo -> ReaderT HitRepo m (MergeResult HitRepo)
-    recordMerge leftHead = do
-        repo <- getRepository
-        rightHead <- Tagged <$> getOid "MERGE_HEAD"
-        xs <- shelly $ silently $ errExit False $ do
-            xs <- returnConflict . TL.init
-                  <$> git repo [ "status", "-z", "--porcelain" ]
-            forM_ (Map.assocs xs) $ uncurry (handleFile repo)
-            git_ repo [ "commit", "-F", ".git/MERGE_MSG" ]
-            return xs
-        MergeConflicted
-            <$> (Tagged <$> getOid "HEAD")
-            <*> pure leftHead
-            <*> pure rightHead
-            <*> pure (Map.filter isConflict xs)
-
-    isConflict (Deleted, Deleted) = False
-    isConflict (_, Unchanged)         = False
-    isConflict (Unchanged, _)         = False
-    isConflict _                          = True
-
-    handleFile repo fp (Deleted, Deleted) =
-        git_ repo [ "rm", "--cached", fromStrict . T.decodeUtf8 $ fp ]
-    handleFile repo fp (Unchanged, Deleted) =
-        git_ repo [ "rm", "--cached", fromStrict . T.decodeUtf8 $ fp ]
-    handleFile repo fp (_, _) =
-        git_ repo [ "add", fromStrict . T.decodeUtf8 $ fp ]
-
-    getOid :: MonadHit m => Text -> ReaderT HitRepo m (Oid HitRepo)
-    getOid name = do
-        mref <- hitResolveRef name
-        case mref of
-            Nothing  -> throwM $ BackendError
-                                $ T.append "Reference missing: " name
-            Just ref -> return ref
-
-    charToModKind 'M' = Just Modified
-    charToModKind 'U' = Just Unchanged
-    charToModKind 'A' = Just Added
-    charToModKind 'D' = Just Deleted
-    charToModKind _   = Nothing
-
-    returnConflict xs =
-        Map.fromList
-            . map (\(f, (l, r)) -> (f, getModKinds l r))
-            . filter (\(_, (l, r)) -> ((&&) `on` isJust) l r)
-            -- jww (2013-08-25): What is the correct way to interpret the
-            -- output from "git status"?
-            . map (\l -> (T.encodeUtf8 . toStrict . TL.drop 3 $ l,
-                          (charToModKind (TL.index l 0),
-                           charToModKind (TL.index l 1))))
-            . init
-            . TL.splitOn "\NUL" $ xs
-
-    getModKinds l r = case (l, r) of
-        (Nothing, Just x)    -> (Unchanged, x)
-        (Just x, Nothing)    -> (x, Unchanged)
-        -- 'U' really means unmerged, but it can mean both modified and
-        -- unmodified as a result.  Example: UU means both sides have modified
-        -- a file, but AU means that the left side added the file and the
-        -- right side knows nothing about the file.
-        (Just Unchanged,
-         Just Unchanged) -> (Modified, Modified)
-        (Just x, Just y)     -> (x, y)
-        (Nothing, Nothing)   -> error "Both merge items cannot be Unchanged"
-
 hitLookupBlob :: MonadHit m
               => BlobOid HitRepo
               -> ReaderT HitRepo m (Blob HitRepo (ReaderT HitRepo m))
@@ -624,33 +468,12 @@ cliCreateCommit parentOids treeOid author committer message ref = do
             , commitEncoding  = "utf-8"
             }
     when (isJust ref) $
-        void $ cliUpdateRef (fromJust ref)
+        void $ hitUpdateRef (fromJust ref)
             (RefObj (untag (commitOid commit)))
 
     return commit
-
-data CliObjectRef = CliObjectRef
-    { objectRefType :: Text
-    , objectRefSha  :: Text } deriving Show
 
-data CliReference = CliReference
-    { referenceRef    :: Text
-    , referenceObject :: CliObjectRef } deriving Show
-
-cliShowRef :: MonadHit m
-           => Maybe Text -> ReaderT HitRepo m (Maybe [(TL.Text,TL.Text)])
-cliShowRef mrefName = do
-    repo <- getRepository
-    shelly $ silently $ errExit False $ do
-        rev <- git repo $ [ "show-ref" ]
-                 <> [ fromStrict (fromJust mrefName) | isJust mrefName ]
-        ec  <- lastExitCode
-        return $ if ec == 0
-                 then Just $ map ((\(x:y:[]) -> (y,x)) . TL.words)
-                           $ TL.lines rev
-                 else Nothing
-
-tryReadRef :: F.FilePath -> DGN.RefSpecTy -> IO (Maybe DGN.RefContentTy)
+tryReadRef :: FilePath -> DGN.RefSpecTy -> IO (Maybe DGN.RefContentTy)
 tryReadRef path spec = (Just <$> DGN.readRefFile path spec)
     `X.catch` \(_ :: X.IOException) -> return Nothing
 
@@ -670,41 +493,32 @@ hitLookupRef refName@(TL.unpack -> name) = do
             Nothing -> return Nothing
             Just rc -> Just <$> refContentToTarget refName rc
 
-cliUpdateRef :: MonadHit m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
-cliUpdateRef refName (RefObj (renderOid -> sha)) =
-    runGit_ ["update-ref", fromStrict refName, fromStrict sha]
+targetContent :: RefTarget HitRepo -> DGN.RefContentTy
+targetContent (RefObj (getSHA -> sha)) = DGN.RefDirect $ DGF.fromBinary sha
+targetContent (RefSymbolic name) = DGN.RefLink $ toRefTy $ TL.unpack name
 
-cliUpdateRef refName (RefSymbolic targetName) =
-    runGit_ ["symbolic-ref", fromStrict refName, fromStrict targetName]
+pathAction :: MonadHit m => (FilePath -> IO a) -> ReaderT HitRepo m a
+pathAction act = DGS.gitRepoPath <$> hitGit <$> getRepository >>= liftIO . act
 
-cliDeleteRef :: MonadHit m => Text -> ReaderT HitRepo m ()
-cliDeleteRef refName = runGit_ ["update-ref", "-d", fromStrict refName]
+hitUpdateRef :: MonadHit m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
+hitUpdateRef (TL.unpack -> name) target = pathAction upd
+  where upd path =
+          DGN.writeRefFile path (toRefTy name) $ targetContent target
 
-cliSourceRefs :: MonadHit m => Producer (ReaderT HitRepo m) Text
-cliSourceRefs = do
-    mxs <- lift $ cliShowRef Nothing
-    yieldMany $ case mxs of
-        Nothing -> []
-        Just xs -> map (toStrict . fst) xs
+hitDeleteRef :: MonadHit m => Text -> ReaderT HitRepo m ()
+hitDeleteRef (TL.unpack -> name) = pathAction del
+  where del path =
+          removeFile $ encodeString $ toPath path $ toRefTy name
 
-readThruRefLink :: Text -> F.FilePath -> DGN.RefSpecTy -> IO (Maybe (Oid HitRepo))
-readThruRefLink name path spec = do
-    mr <- tryReadRef path spec
-    case mr of
-        Nothing -> return Nothing
-        Just (DGN.RefDirect ref) -> return $ Just $ refToSHA ref
-        Just (DGN.RefContentUnknown _) -> throwM $ ReferenceLookupFailed name
-        Just (DGN.RefLink spec') -> readThruRefLink name path spec'
-
-hitResolveRef :: MonadHit m => Text -> ReaderT HitRepo m (Maybe (Oid HitRepo))
-hitResolveRef refName@(TL.unpack -> name) = do
-    path <- DGS.gitRepoPath <$> hitGit <$> getRepository
-    liftIO $ readThruRefLink refName path $ toRefTy name
-
-
--- cliLookupTag :: MonadHit m
---              => TagOid HitRepo -> ReaderT HitRepo m (Tag HitRepo)
--- cliLookupTag oid = undefined
+hitSourceRefs :: MonadHit m => Producer (ReaderT HitRepo m) Text
+hitSourceRefs = do
+    g <- lift $ hitGit <$> getRepository
+    -- TODO: produces branches & tags, but not remotes (compare `git show-ref`)
+    refs <- liftIO $ do
+        bb <- Set.map DGN.RefBranch <$> DG.branchList g
+        tt <- Set.map DGN.RefTag <$> DG.tagList g
+        return $ Set.union bb tt
+    yieldMany $ Set.map (TL.pack . fromRefTy) refs
 
 cliCreateTag :: MonadHit m
              => CommitOid HitRepo -> Signature -> Text -> Text
@@ -721,11 +535,7 @@ cliCreateTag oid@(renderObjOid -> sha) tagger msg name = do
         , ""] <> TL.lines (fromStrict msg)
     Tag <$> mkOid (TL.init tsha) <*> pure oid
 
-cliWorkingTreeDirty :: MonadHit m => ReaderT HitRepo m Bool
-cliWorkingTreeDirty = do
-    status <- runGit [ "status", "-s", "-uno", "-z" ]
-    return $ TL.length status > 0
-
+
 hitFactory :: MonadHit m => RepositoryFactory (ReaderT HitRepo m) m HitRepo
 hitFactory = RepositoryFactory
     { openRepository  = openHitRepository
@@ -734,13 +544,13 @@ hitFactory = RepositoryFactory
 
 openHitRepository :: MonadIO m => RepositoryOptions -> m HitRepo
 openHitRepository opts = liftIO $ do
-    let path = F.decodeString $ repoPath opts
+    let path = fromString $ repoPath opts
     exists <- DG.isRepo path
     when (not exists && repoAutoCreate opts) $ do
         DG.initRepo path -- creates dirs, but still need HEAD
-        let head = F.encodeString $ (F.</>) path "HEAD"
+        let head = encodeString $ path </> "HEAD"
         withFile head WriteMode $ flip hPutStrLn "ref: refs/heads/master"
-        let pack = F.encodeString $ (F.</>) path $ (F.</>) "objects" "pack"
+        let pack = encodeString $ path </> "objects" </> "pack"
         createDirectory pack
     g <- DGS.openRepo path
     return $ HitRepo opts g
