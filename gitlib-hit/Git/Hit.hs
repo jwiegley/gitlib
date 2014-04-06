@@ -18,7 +18,6 @@ module Git.Hit where
 
 import           Conduit
 import           Control.Applicative hiding (many)
-import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
@@ -87,7 +86,7 @@ oidToRef = DGF.fromBinary . getSHA . untag
 oidToHex :: Tagged a (Oid HitRepo) -> Text
 oidToHex = shaToText . untag
 
-instance (Applicative m, Failure GitException m, MonadIO m)
+instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
     type Oid HitRepo     = SHA
     data Tree HitRepo    = CmdLineTree (TreeOid HitRepo)
@@ -126,7 +125,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
 
     diffContentsWithTree = error "Not defined cliDiffContentsWithTree"
 
-type MonadHit m = (Applicative m, Failure GitException m, MonadIO m)
+type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
 
 mkOid :: MonadHit m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
 mkOid = fmap Tagged <$> textToSha . toStrict
@@ -212,9 +211,9 @@ cliPushCommit cname remoteNameOrURI remoteRefName msshCmd = do
         Nothing  -> do
             mcref <- resolveReference remoteRefName
             case mcref of
-                Nothing   -> failure $ BackendError "git push failed"
+                Nothing   -> throwM $ BackendError "git push failed"
                 Just cref -> return $ Tagged cref
-        Just err -> failure err
+        Just err -> throwM err
 
 cliResetHard :: MonadHit m => Text -> ReaderT HitRepo m ()
 cliResetHard refname =
@@ -243,13 +242,13 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
                        ]
                 Right <$> lastExitCode
     case eres of
-        Left err -> failure err
+        Left err -> throwM err
         Right r  ->
             if r == 0
                 then MergeSuccess <$> (Tagged <$> getOid "HEAD")
                 else case leftHead of
                     Nothing ->
-                        failure (BackendError
+                        throwM (BackendError
                                  "Reference missing: HEAD (left)")
                     Just lh -> recordMerge lh
   where
@@ -288,7 +287,7 @@ cliPullCommit remoteNameOrURI remoteRefName user email msshCmd = do
     getOid name = do
         mref <- cliResolveRef name
         case mref of
-            Nothing  -> failure $ BackendError
+            Nothing  -> throwM $ BackendError
                                 $ T.append "Reference missing: " name
             Just ref -> return ref
 
@@ -329,7 +328,7 @@ hitLookupBlob oid = do
     repo <- getRepository
     let get g = DG.getObject g (oidToRef oid) True
     mobj <- liftIO $ DG.withRepo (hitRepoFPath repo) get
-    maybe (failure BlobLookupFailed) -- TODO: must we handle ObjDeltaOfs, ObjDeltaRef?
+    maybe (throwM BlobLookupFailed) -- TODO: must we handle ObjDeltaOfs, ObjDeltaRef?
           (\(DGO.ObjBlob b) -> return $ Blob oid $ BlobStringLazy $ DGT.blobGetContent b)
           mobj
 
@@ -381,7 +380,7 @@ cliSourceObjects mhave need alsoTrees = do
             toid <- lift $ parseObjOid tsha
             yield $ TreeObjOid toid
 
-    go x = failure (BackendError $
+    go x = throwM (BackendError $
                     "Unexpected output from git-log: " <> T.pack (show x))
 
 cliReadTree :: MonadHit m
@@ -405,17 +404,17 @@ cliParseLsTree line =
                 "100644" -> return PlainBlob
                 "100755" -> return ExecutableBlob
                 "120000" -> return SymlinkBlob
-                _        -> failure $ BackendError $
+                _        -> throwM $ BackendError $
                     "Unknown blob mode: " <> T.pack (show mode)
         "commit" -> CommitEntry <$> mkOid sha
         "tree"   -> TreeEntry <$> mkOid sha
-        _ -> failure $ BackendError "This cannot happen"
+        _ -> throwM $ BackendError "This cannot happen"
 
 cliWriteTree :: MonadHit m
              => Pure.EntryHashMap HitRepo -> ReaderT HitRepo m (TreeOid HitRepo)
 cliWriteTree entMap = do
     rendered <- mapM renderLine (HashMap.toList entMap)
-    when (null rendered) $ failure TreeEmptyCreateFailed
+    when (null rendered) $ throwM TreeEmptyCreateFailed
     oid      <- doRunGit run [ "mktree", "-z", "--missing" ]
                 $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
     mkOid (TL.init oid)
@@ -452,7 +451,7 @@ hitLookupTree oid = do
       else do
         let ref = oidToRef oid
         mtr <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DGR.getTreeMaybe ref)
-        maybe (failure $ ObjectLookupFailed hex 40)
+        maybe (throwM $ ObjectLookupFailed hex 40)
               (\_ -> return $ CmdLineTree oid)
               mtr
 
@@ -525,7 +524,7 @@ cliLookupCommit (renderObjOid -> sha) = do
         setStdin (TL.append (fromStrict sha) "\n")
     result <- runParserT parseOutput () "" (TL.unpack output)
     case result of
-        Left e  -> failure $ CommitLookupFailed (T.pack (show e))
+        Left e  -> throwM $ CommitLookupFailed (T.pack (show e))
         Right c -> return c
   where
     parseOutput :: (Stream s  (ReaderT HitRepo m) Char, MonadHit m)
