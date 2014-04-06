@@ -46,8 +46,15 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
-      x <- catBlob =<< parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+      oid <- parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+      x <- catBlob oid
       liftIO $ x @?= "Hello, world!\n"
+
+      e1 <- existsObject $ untag oid
+      liftIO $ e1 @? "Expected object doesn't exist."
+
+      e2 <- existsObject =<< parseOid "efefefefefefefefefefefefefefefefefefefef"
+      liftIO $ not e2 @? "Unexpected object exists."
 
       -- jww (2013-02-01): Restore when S3 support prefix lookups
       -- x <- catBlob "af5626b"

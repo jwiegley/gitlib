@@ -29,6 +29,7 @@ import qualified Data.ByteString.Char8 as BC
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.Git as DG
+import qualified Data.Git.Storage as DGS
 import qualified Data.Git.Storage.Object as DGO
 import qualified Data.Git.Repository as DGR
 import qualified Data.Git.Ref as DGF
@@ -112,7 +113,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
     lookupBlob        = hitLookupBlob
     lookupTag         = error "Not defined cliLookupTag"
     lookupObject      = error "Not defined cliLookupObject"
-    existsObject      = cliExistsObject
+    existsObject      = hitExistsObject
     sourceObjects     = cliSourceObjects
     newTreeBuilder    = Pure.newPureTreeBuilder cliReadTree cliWriteTree
     treeOid (CmdLineTree toid) = return toid
@@ -351,13 +352,12 @@ hitCreateBlob b = do
     ref <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DG.setObject obj)
     return $ refToOid ref
 
-cliExistsObject :: MonadHit m => SHA -> ReaderT HitRepo m Bool
-cliExistsObject (shaToText -> sha) = do
+hitExistsObject :: MonadHit m => SHA -> ReaderT HitRepo m Bool
+hitExistsObject sha = do
     repo <- getRepository
-    shelly $ silently $ errExit False $ do
-        git_ repo [ "cat-file", "-e", fromStrict sha ]
-        ec <- lastExitCode
-        return (ec == 0)
+    let ref = DGF.fromBinary $ getSHA sha
+    mobj <- liftIO $ DG.withRepo (hitRepoFPath repo) (\g -> DGS.getObjectRaw g ref True)
+    return $ isJust mobj
 
 cliSourceObjects :: MonadHit m
                  => Maybe (CommitOid HitRepo) -> CommitOid HitRepo -> Bool
@@ -703,6 +703,8 @@ openHitRepository opts = liftIO $ do
         DG.initRepo path -- creates dirs, but still need HEAD
         let head = F.encodeString $ (F.</>) path "HEAD"
         withFile head WriteMode $ flip hPutStrLn "ref: refs/heads/master"
+        let pack = F.encodeString $ (F.</>) path $ (F.</>) "objects" "pack"
+        createDirectory pack
     return $ HitRepo opts
 
 -- Cli.hs
