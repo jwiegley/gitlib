@@ -22,14 +22,17 @@ import           Control.Failure
 import           Control.Monad
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
+import           Data.Bits ((.&.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Char8 as BC
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.Git as DG
 import qualified Data.Git.Storage.Object as DGO
 import qualified Data.Git.Repository as DGR
 import qualified Data.Git.Ref as DGF
+import qualified Data.Git.Types as DGT
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
 import qualified Data.Map as Map
@@ -39,11 +42,7 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-#if MIN_VERSION_shelly(1, 0, 0)
 import qualified Data.Text as TL
-#else
-import qualified Data.Text.Lazy as TL
-#endif
 import           Data.Time
 import qualified Filesystem.Path.CurrentOS as F
 import           Git
@@ -61,18 +60,10 @@ import           Text.Parsec.Prim
 import           Text.Parsec.Token
 
 toStrict :: TL.Text -> T.Text
-#if MIN_VERSION_shelly(1, 0, 0)
 toStrict = id
-#else
-toStrict = TL.toStrict
-#endif
 
 fromStrict :: T.Text -> TL.Text
-#if MIN_VERSION_shelly(1, 0, 0)
 fromStrict = id
-#else
-fromStrict = TL.fromStrict
-#endif
 
 newtype HitRepo = HitRepo RepositoryOptions
 
@@ -85,14 +76,17 @@ hitRepoFPath (HitRepo options) = F.decodeString $ repoPath options
 hitWorkingDir :: HitRepo -> Maybe TL.Text
 hitWorkingDir (HitRepo options) = TL.pack <$> repoWorkingDir options
 
--- class HasHitRepo env where
---     getHitRepo :: env -> HitRepo
+refToSHA :: DG.Ref -> SHA
+refToSHA = SHA . DGF.toBinary
 
--- instance HasHitRepo HitRepo where
---     getHitRepo = id
+refToOid :: DG.Ref -> Tagged a (Oid HitRepo)
+refToOid = Tagged . refToSHA
 
--- instance HasHitRepo (env, HitRepo) where
---     getHitRepo = snd
+oidToRef :: Tagged a (Oid HitRepo) -> DG.Ref
+oidToRef = DGF.fromBinary . getSHA . untag
+
+oidToHex :: Tagged a (Oid HitRepo) -> Text
+oidToHex = shaToText . untag
 
 instance (Applicative m, Failure GitException m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
@@ -124,7 +118,7 @@ instance (Applicative m, Failure GitException m, MonadIO m)
     sourceObjects     = cliSourceObjects
     newTreeBuilder    = Pure.newPureTreeBuilder cliReadTree cliWriteTree
     treeOid (CmdLineTree toid) = return toid
-    treeEntry         = cliTreeEntry
+    treeEntry         = hitTreeEntry
     sourceTreeEntries = cliSourceTreeEntries
     hashContents      = hitHashContents
     createBlob        = hitCreateBlob
@@ -349,8 +343,8 @@ hitHashContents :: MonadHit m
 hitHashContents b = do
     bs <- blobContentsToLazyByteString b
     let sz = fromIntegral $ BL.length bs
-    let h = DGO.objectHash DGO.TypeBlob sz bs
-    return $ Tagged $ SHA $ DGF.toBinary h
+    let ref = DGO.objectHash DGO.TypeBlob sz bs
+    return $ refToOid ref
 
 hitCreateBlob :: MonadHit m
               => BlobContents (ReaderT HitRepo m)
@@ -359,8 +353,8 @@ hitCreateBlob b = do
     repo <- getRepository
     bs <- blobContentsToLazyByteString b
     let obj = DGO.ObjBlob (DG.Blob bs)
-    h <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DG.setObject obj)
-    return $ Tagged $ SHA $ DGF.toBinary h
+    ref <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DG.setObject obj)
+    return $ refToOid ref
 
 cliExistsObject :: MonadHit m => SHA -> ReaderT HitRepo m Bool
 cliExistsObject (shaToText -> sha) = do
@@ -457,39 +451,65 @@ hitLookupTree :: MonadHit m
               => TreeOid HitRepo -> ReaderT HitRepo m (Tree HitRepo)
 hitLookupTree oid = do
     repo <- getRepository
-    let sha = untag oid
-    let hex = shaToText sha
+    let hex = oidToHex oid
     if hex == emptyTreeId
       then return $ CmdLineTree oid
       else do
-        let ref = DGF.fromBinary $ getSHA sha
+        let ref = oidToRef oid
         mtr <- liftIO $ DG.withRepo (hitRepoFPath repo) (flip DGR.getTreeMaybe ref)
         maybe (failure $ ObjectLookupFailed hex 40)
               (\_ -> return $ CmdLineTree oid)
               mtr
 
-cliTreeEntry :: MonadHit m
+blobKindFor :: DG.ModePerm -> BlobKind
+blobKindFor (DG.ModePerm 0o120000) = SymlinkBlob
+blobKindFor (DG.ModePerm bits) =
+    if bits .&. 1 == 1 then ExecutableBlob else PlainBlob
+
+convertTreeEnt :: DGT.TreeEnt -> TreeEntry HitRepo
+convertTreeEnt (DG.ModePerm 0o40000, _, ref) = TreeEntry $ refToOid ref
+convertTreeEnt (mode, _, ref) = BlobEntry (refToOid ref) (blobKindFor mode)
+
+hasName :: B.ByteString -> DGT.TreeEnt -> Bool
+hasName n (_,name,_) = name == n
+
+trace :: String -> IO ()
+trace _ = return ()
+--trace = putStrLn
+
+findInTree :: [TreeFilePath] -> DG.Tree -> DGR.Git -> IO (Maybe (TreeEntry HitRepo))
+findInTree [] _ _ = return Nothing
+findInTree (n:ns) (DG.Tree ents) g =
+    case L.find (hasName n) ents of
+        Nothing -> do
+            trace $ " FIT " ++ BC.unpack n ++ " » ∅"
+            return Nothing
+        Just ent@(_, _, ref) -> do
+            trace $ " FIT " ++ BC.unpack n ++ " » " ++ DGF.toHexString ref
+            case ns of
+                [] -> return $ Just $ convertTreeEnt ent
+                _ -> findInTreeRef ns ref g
+
+findInTreeRef :: [TreeFilePath] -> DG.Ref -> DGR.Git -> IO (Maybe (TreeEntry HitRepo))
+findInTreeRef ns ref g = do
+    mtr <- DGR.getTreeMaybe g ref
+    case mtr of
+        Nothing -> do
+            trace $ " FTR " ++ DGF.toHexString ref ++ " » ∅"
+            return Nothing
+        Just tr -> do
+            trace $ " FTR " ++ DGF.toHexString ref ++ " » " ++ show tr
+            findInTree ns tr g
+
+hitTreeEntry :: MonadHit m
              => Tree HitRepo -> TreeFilePath
              -> ReaderT HitRepo m (Maybe (TreeEntry HitRepo))
-cliTreeEntry tree fp = do
+hitTreeEntry tree fp = do
     repo <- getRepository
     toid <- treeOid tree
-    mentryLines <- shelly $ silently $ errExit False $ do
-        contents <- git repo [ "ls-tree", "-z"
-                             , fromStrict (renderObjOid toid)
-                             , "--", fromStrict . T.decodeUtf8 $ fp
-                             ]
-        ec <- lastExitCode
-        return $ if ec == 0
-                 then Just $ L.init (TL.splitOn "\NUL" contents)
-                 else Nothing
-    case mentryLines of
-        Nothing -> return Nothing
-        Just entryLines -> do
-            entries <- mapM cliParseLsTree entryLines
-            return $ case entries of
-                []        -> Nothing
-                ((_,x):_) -> Just x
+    let ref = oidToRef toid
+    liftIO $ trace $ "LOOK " ++ DGF.toHexString ref ++ " " ++ BC.unpack fp
+    liftIO $ DG.withRepo (hitRepoFPath repo) (findInTreeRef (BC.split '/' fp) ref)
 
 cliSourceTreeEntries :: MonadHit m
                      => Tree HitRepo
