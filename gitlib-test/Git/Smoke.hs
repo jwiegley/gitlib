@@ -128,6 +128,27 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
+  it "tag a single commit" $ withNewRepository pr "tagCommit.git" $ do
+      hello <- createBlobUtf8 "Hello, world!\n"
+      tr <- createTree $ putBlob "hello/world.txt" hello
+
+      goodbye <- createBlobUtf8 "Goodbye, world!\n"
+      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
+      let x = renderObjOid tr
+      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+
+      -- The Oid has been cleared in tr, so this tests that it gets
+      -- written as needed.
+      let sig  = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = fakeTime 1348980883 }
+
+      c <- sampleCommit tr sig
+      t <- createTag (commitOid c) sig "good" "name"
+      let x = renderObjOid $ tagOid t
+      liftIO $ x @?= "f2e15fe8138a30f663007005c59ab40e55857e24"
+
   it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
       tr <- createTree $ putBlob "hello/world.txt" hello
