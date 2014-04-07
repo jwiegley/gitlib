@@ -29,6 +29,7 @@ import           Data.Bits ((.&.))
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8 as BC
+import           Data.Foldable (for_)
 import qualified Data.Git as DG
 import qualified Data.Git.Named as DGN
 import qualified Data.Git.Ref as DGF
@@ -157,7 +158,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     sourceTreeEntries = cliSourceTreeEntries
     hashContents      = hitHashContents
     createBlob        = hitCreateBlob
-    createCommit      = cliCreateCommit
+    createCommit      = hitCreateCommit
     createTag         = hitCreateTag
     readIndex         = undefined
     writeIndex        = undefined
@@ -167,9 +168,6 @@ type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
 
 mkOid :: MonadHit m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
 mkOid = fmap Tagged <$> textToSha . toStrict
-
-formatCliTime :: ZonedTime -> Text
-formatCliTime = T.pack . formatTime defaultTimeLocale "%s %z"
 
 gitStdOpts :: HitRepo -> [TL.Text]
 gitStdOpts repo = [ "--git-dir", hitRepoPath repo ]
@@ -398,7 +396,7 @@ hitLookupCommit oid@(oidToRef -> ref) = do
     c <- liftIO $ DG.getCommit g ref
     return $ convertCommit oid c
 
-cliCreateCommit :: MonadHit m
+hitCreateCommit :: MonadHit m
                 => [CommitOid HitRepo]
                 -> TreeOid HitRepo
                 -> Signature
@@ -406,39 +404,30 @@ cliCreateCommit :: MonadHit m
                 -> Text
                 -> Maybe Text
                 -> ReaderT HitRepo m (Commit HitRepo)
-cliCreateCommit parentOids treeOid author committer message ref = do
-    oid <- doRunGit run
-           (["commit-tree"]
-            <> [fromStrict (renderObjOid treeOid)]
-            <> L.concat [["-p", fromStrict (renderObjOid poid)] |
-                         poid <- parentOids])
-           $ do mapM_ (\(var,f,val) -> setenv var (fromStrict (f val)))
-                      [ ("GIT_AUTHOR_NAME",  signatureName,  author)
-                      , ("GIT_AUTHOR_EMAIL", signatureEmail, author)
-                      , ("GIT_AUTHOR_DATE",
-                         formatCliTime . signatureWhen, author)
-                      , ("GIT_COMMITTER_NAME",  signatureName,  committer)
-                      , ("GIT_COMMITTER_EMAIL", signatureEmail, committer)
-                      , ("GIT_COMMITTER_DATE",
-                         formatCliTime . signatureWhen, committer)
-                      ]
-                setStdin (fromStrict message)
-
-    coid <- mkOid (TL.init oid)
-    let commit = Commit
-            { commitOid       = coid
-            , commitAuthor    = author
-            , commitCommitter = committer
-            , commitLog       = message
-            , commitTree      = treeOid
-            , commitParents   = parentOids
-            , commitEncoding  = "utf-8"
-            }
-    when (isJust ref) $
-        void $ hitUpdateRef (fromJust ref)
-            (RefObj (untag (commitOid commit)))
-
-    return commit
+hitCreateCommit parentOids treeOid author committer message ref = do
+    g <- hitGit <$> getRepository
+    let c = DG.Commit
+          { DG.commitTreeish = oidToRef treeOid
+          , DG.commitParents = map oidToRef parentOids
+          , DG.commitAuthor = sigToPerson author
+          , DG.commitCommitter = sigToPerson committer
+          , DG.commitEncoding = Nothing
+          , DG.commitExtras = []
+          , DG.commitMessage = T.encodeUtf8 message
+          }
+    h <- liftIO $ DGS.setObject g $ DGO.ObjCommit c
+    let oid = refToOid h
+    let k = Commit
+          { commitOid       = oid
+          , commitAuthor    = author
+          , commitCommitter = committer
+          , commitLog       = message
+          , commitTree      = treeOid
+          , commitParents   = parentOids
+          , commitEncoding  = "utf-8"
+          }
+    for_ ref $ flip hitUpdateRef (RefObj (untag oid))
+    return k
 
 tryReadRef :: FilePath -> DGN.RefSpecTy -> IO (Maybe DGN.RefContentTy)
 tryReadRef path spec = (Just <$> DGN.readRefFile path spec)
