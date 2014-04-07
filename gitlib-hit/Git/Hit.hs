@@ -138,7 +138,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     lookupObject      = undefined
     existsObject      = hitExistsObject
     sourceObjects     = undefined
-    newTreeBuilder    = Pure.newPureTreeBuilder cliReadTree cliWriteTree
+    newTreeBuilder    = Pure.newPureTreeBuilder hitReadTree cliWriteTree
     treeOid (HitTree toid) = return toid
     treeEntry         = hitTreeEntry
     sourceTreeEntries = cliSourceTreeEntries
@@ -205,14 +205,13 @@ hitExistsObject ref = do
     mobj <- liftIO $ DGS.getObjectRaw g ref True
     return $ isJust mobj
 
-cliReadTree :: MonadHit m
+hitReadTree :: MonadHit m
             => Tree HitRepo -> ReaderT HitRepo m (Pure.EntryHashMap HitRepo)
-cliReadTree (HitTree (renderObjOid -> sha)) = do
-    contents <- runGit ["ls-tree", "-z", sha]
-    -- Even though the tree entries are separated by \NUL, for whatever
-    -- reason @git ls-tree@ also outputs a newline at the end.
-    HashMap.fromList
-        <$> mapM cliParseLsTree (L.init (T.splitOn "\NUL" contents))
+hitReadTree (HitTree ref) = do
+    g <- hitGit <$> getRepository
+    DGT.Tree ents <- liftIO $ DGR.getTree g $ untag ref
+    let f e@(_, name, _) = (name, convertTreeEnt e)
+    return $ HashMap.fromList $ map f ents
 
 cliParseLsTree :: MonadHit m
                => T.Text -> ReaderT HitRepo m (TreeFilePath, TreeEntry HitRepo)
