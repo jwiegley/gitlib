@@ -12,6 +12,7 @@
 
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Git.Hit
        ( hitFactory
@@ -48,7 +49,6 @@ import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text as TL
 import           Data.Time
 import           Filesystem.Path.CurrentOS (FilePath, (</>), encodeString)
 import           Git
@@ -58,34 +58,17 @@ import           System.Directory
 import           System.Locale (defaultTimeLocale)
 import           System.IO (withFile, hPutStrLn, IOMode(WriteMode))
 
-toStrict :: TL.Text -> T.Text
-toStrict = id
-
-fromStrict :: T.Text -> TL.Text
-fromStrict = id
 
 data HitRepo = HitRepo
     { hitOptions :: RepositoryOptions
     , hitGit     :: DGS.Git
     }
 
-hitRepoPath :: HitRepo -> TL.Text
-hitRepoPath = TL.pack . repoPath . hitOptions
+hitRepoPath :: HitRepo -> T.Text
+hitRepoPath = T.pack . repoPath . hitOptions
 
-hitWorkingDir :: HitRepo -> Maybe TL.Text
-hitWorkingDir = fmap TL.pack . repoWorkingDir . hitOptions
-
-refToSHA :: DG.Ref -> SHA
-refToSHA = SHA . DGF.toBinary
-
-refToOid :: DG.Ref -> Tagged a (Oid HitRepo)
-refToOid = Tagged . refToSHA
-
-oidToRef :: Tagged a (Oid HitRepo) -> DG.Ref
-oidToRef = DGF.fromBinary . getSHA . untag
-
-oidToHex :: Tagged a (Oid HitRepo) -> Text
-oidToHex = shaToText . untag
+hitWorkingDir :: HitRepo -> Maybe T.Text
+hitWorkingDir = fmap T.pack . repoWorkingDir . hitOptions
 
 --- Following two are duplicates of unexported functions in Data.Git.Named
 toRefTy :: String -> DGN.RefSpecTy
@@ -124,10 +107,13 @@ toPath gitRepo (DGN.RefOther h)   = gitRepo </> DGV.fromString h
 
 -- END duplicates
 
+instance IsOid DG.Ref where
+    renderOid = T.pack . DGF.toHexString
+
 instance (Applicative m, MonadThrow m, MonadIO m)
          => MonadGit HitRepo (ReaderT HitRepo m) where
-    type Oid HitRepo     = SHA  -- TODO maybe use DG.Ref directly here?
-    data Tree HitRepo    = CmdLineTree (TreeOid HitRepo)
+    type Oid HitRepo     = DG.Ref
+    newtype Tree HitRepo = HitTree (TreeOid HitRepo)
     data Options HitRepo = Options
 
     facts = return RepositoryFacts
@@ -136,9 +122,9 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     getRepository    = ask
     closeRepository  = getRepository >>= liftIO . DGS.closeRepo . hitGit
     deleteRepository = getRepository >>=
-        liftIO . removeDirectoryRecursive . TL.unpack . hitRepoPath
+        liftIO . removeDirectoryRecursive . T.unpack . hitRepoPath
 
-    parseOid = textToSha
+    parseOid = return . DGF.fromHexString . T.unpack
 
     lookupReference   = hitLookupRef
     createReference   = hitUpdateRef
@@ -153,7 +139,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     existsObject      = hitExistsObject
     sourceObjects     = undefined
     newTreeBuilder    = Pure.newPureTreeBuilder cliReadTree cliWriteTree
-    treeOid (CmdLineTree toid) = return toid
+    treeOid (HitTree toid) = return toid
     treeEntry         = hitTreeEntry
     sourceTreeEntries = cliSourceTreeEntries
     hashContents      = hitHashContents
@@ -166,22 +152,22 @@ instance (Applicative m, MonadThrow m, MonadIO m)
 
 type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
 
-mkOid :: MonadHit m => forall o. TL.Text -> ReaderT HitRepo m (Tagged o SHA)
-mkOid = fmap Tagged <$> textToSha . toStrict
+mkOid :: MonadHit m => forall o. T.Text -> ReaderT HitRepo m (Tagged o (Oid HitRepo))
+mkOid = fmap Tagged <$> parseOid
 
-gitStdOpts :: HitRepo -> [TL.Text]
+gitStdOpts :: HitRepo -> [T.Text]
 gitStdOpts repo = [ "--git-dir", hitRepoPath repo ]
     ++ maybe [] (\w -> [ "--work-tree", w ]) (hitWorkingDir repo)
 
 doRunGit :: MonadHit m
-         => (FilePath -> [TL.Text] -> Sh a) -> [TL.Text] -> Sh ()
+         => (FilePath -> [T.Text] -> Sh a) -> [T.Text] -> Sh ()
          -> ReaderT HitRepo m a
 doRunGit f args act = do
     repo <- getRepository
     shelly $ silently $
         act >> f "git" (gitStdOpts repo <> args)
 
-runGit :: MonadHit m => [TL.Text] -> ReaderT HitRepo m TL.Text
+runGit :: MonadHit m => [T.Text] -> ReaderT HitRepo m T.Text
 runGit = flip (doRunGit run) (return ())
 
 hitLookupBlob :: MonadHit m
@@ -189,7 +175,7 @@ hitLookupBlob :: MonadHit m
               -> ReaderT HitRepo m (Blob HitRepo (ReaderT HitRepo m))
 hitLookupBlob oid = do
     g <- hitGit <$> getRepository
-    mobj <- liftIO $ DG.getObject g (oidToRef oid) True
+    mobj <- liftIO $ DG.getObject g (untag oid) True
     maybe (throwM BlobLookupFailed) -- TODO: must we handle ObjDeltaOfs, ObjDeltaRef?
           (\(DGO.ObjBlob b) -> return $ Blob oid $ BlobStringLazy $ DGT.blobGetContent b)
           mobj
@@ -201,7 +187,7 @@ hitHashContents b = do
     bs <- blobContentsToLazyByteString b
     let sz = fromIntegral $ BL.length bs
     let ref = DGO.objectHash DGO.TypeBlob sz bs
-    return $ refToOid ref
+    return $ Tagged ref
 
 hitCreateBlob :: MonadHit m
               => BlobContents (ReaderT HitRepo m)
@@ -211,30 +197,29 @@ hitCreateBlob b = do
     bs <- blobContentsToLazyByteString b
     let obj = DGO.ObjBlob (DG.Blob bs)
     ref <- liftIO $ DG.setObject g obj
-    return $ refToOid ref
+    return $ Tagged ref
 
-hitExistsObject :: MonadHit m => SHA -> ReaderT HitRepo m Bool
-hitExistsObject sha = do
+hitExistsObject :: MonadHit m => Oid HitRepo -> ReaderT HitRepo m Bool
+hitExistsObject ref = do
     g <- hitGit <$> getRepository
-    let ref = DGF.fromBinary $ getSHA sha
     mobj <- liftIO $ DGS.getObjectRaw g ref True
     return $ isJust mobj
 
 cliReadTree :: MonadHit m
             => Tree HitRepo -> ReaderT HitRepo m (Pure.EntryHashMap HitRepo)
-cliReadTree (CmdLineTree (renderObjOid -> sha)) = do
-    contents <- runGit ["ls-tree", "-z", fromStrict sha]
+cliReadTree (HitTree (renderObjOid -> sha)) = do
+    contents <- runGit ["ls-tree", "-z", sha]
     -- Even though the tree entries are separated by \NUL, for whatever
     -- reason @git ls-tree@ also outputs a newline at the end.
     HashMap.fromList
-        <$> mapM cliParseLsTree (L.init (TL.splitOn "\NUL" contents))
+        <$> mapM cliParseLsTree (L.init (T.splitOn "\NUL" contents))
 
 cliParseLsTree :: MonadHit m
-               => TL.Text -> ReaderT HitRepo m (TreeFilePath, TreeEntry HitRepo)
+               => T.Text -> ReaderT HitRepo m (TreeFilePath, TreeEntry HitRepo)
 cliParseLsTree line =
-    let [prefix,path] = TL.splitOn "\t" line
-        [mode,kind,sha] = TL.words prefix
-    in liftM2 (,) (return (T.encodeUtf8 . toStrict $ path)) $ case kind of
+    let [prefix,path] = T.splitOn "\t" line
+        [mode,kind,sha] = T.words prefix
+    in liftM2 (,) (return (T.encodeUtf8 $ path)) $ case kind of
         "blob"   -> do
             oid <- mkOid sha
             BlobEntry oid <$> case mode of
@@ -253,28 +238,28 @@ cliWriteTree entMap = do
     rendered <- mapM renderLine (HashMap.toList entMap)
     when (null rendered) $ throwM TreeEmptyCreateFailed
     oid      <- doRunGit run [ "mktree", "-z", "--missing" ]
-                $ setStdin $ TL.append (TL.intercalate "\NUL" rendered) "\NUL"
-    mkOid (TL.init oid)
+                $ setStdin $ T.append (T.intercalate "\NUL" rendered) "\NUL"
+    mkOid (T.init oid)
   where
-    renderLine (fromStrict . T.decodeUtf8 -> path,
+    renderLine (T.decodeUtf8 -> path,
                 BlobEntry (renderObjOid -> sha) kind) =
-        return $ TL.concat
+        return $ T.concat
             [ case kind of
                    PlainBlob      -> "100644"
                    ExecutableBlob -> "100755"
                    SymlinkBlob    -> "120000"
-            , " blob ", fromStrict sha, "\t", path
+            , " blob ", sha, "\t", path
             ]
-    renderLine (fromStrict . T.decodeUtf8 -> path, CommitEntry coid) =
-        return $ TL.concat
+    renderLine (T.decodeUtf8 -> path, CommitEntry coid) =
+        return $ T.concat
             [ "160000 commit "
-            , fromStrict (renderObjOid coid), "\t"
+            , renderObjOid coid, "\t"
             , path
             ]
-    renderLine (fromStrict . T.decodeUtf8 -> path, TreeEntry toid) =
-        return $ TL.concat
+    renderLine (T.decodeUtf8 -> path, TreeEntry toid) =
+        return $ T.concat
             [ "040000 tree "
-            , fromStrict (renderObjOid toid), "\t"
+            , renderObjOid toid, "\t"
             , path
             ]
 
@@ -282,14 +267,14 @@ hitLookupTree :: MonadHit m
               => TreeOid HitRepo -> ReaderT HitRepo m (Tree HitRepo)
 hitLookupTree oid = do
     g <- hitGit <$> getRepository
-    let hex = oidToHex oid
+    let hex = T.pack $ DGF.toHexString $ untag oid
     if hex == emptyTreeId
-      then return $ CmdLineTree oid
+      then return $ HitTree oid
       else do
-        let ref = oidToRef oid
+        let ref = untag oid
         mtr <- liftIO $ DGR.getTreeMaybe g ref
         maybe (throwM $ ObjectLookupFailed hex 40)
-              (\_ -> return $ CmdLineTree oid)
+              (\_ -> return $ HitTree oid)
               mtr
 
 blobKindFor :: DG.ModePerm -> BlobKind
@@ -298,8 +283,8 @@ blobKindFor (DG.ModePerm bits) =
     if bits .&. 1 == 1 then ExecutableBlob else PlainBlob
 
 convertTreeEnt :: DGT.TreeEnt -> TreeEntry HitRepo
-convertTreeEnt (DG.ModePerm 0o40000, _, ref) = TreeEntry $ refToOid ref
-convertTreeEnt (mode, _, ref) = BlobEntry (refToOid ref) (blobKindFor mode)
+convertTreeEnt (DG.ModePerm 0o40000, _, ref) = TreeEntry $ Tagged ref
+convertTreeEnt (mode, _, ref) = BlobEntry (Tagged ref) (blobKindFor mode)
 
 hasName :: B.ByteString -> DGT.TreeEnt -> Bool
 hasName n (_,name,_) = name == n
@@ -338,7 +323,7 @@ hitTreeEntry :: MonadHit m
 hitTreeEntry tree fp = do
     HitRepo _ g <- getRepository
     toid <- treeOid tree
-    let ref = oidToRef toid
+    let ref = untag toid
     liftIO $ do
         trace $ "LOOK " ++ DGF.toHexString ref ++ " " ++ BC.unpack fp
         findInTreeRef (BC.split '/' fp) ref g
@@ -350,9 +335,9 @@ cliSourceTreeEntries tree = do
     contents <- lift $ do
         toid <- treeOid tree
         runGit [ "ls-tree", "-t", "-r", "-z"
-               , fromStrict (renderObjOid toid)
+               , renderObjOid toid
                ]
-    forM_ (L.init (TL.splitOn "\NUL" contents)) $
+    forM_ (L.init (T.splitOn "\NUL" contents)) $
         yield <=< lift . cliParseLsTree
 
 convertPerson :: DG.Person -> Signature
@@ -381,8 +366,8 @@ sigToPerson s = DG.Person
 convertCommit :: CommitOid HitRepo -> DG.Commit -> Commit HitRepo
 convertCommit oid c = Commit
   { commitOid       = oid
-  , commitParents   = map refToOid $ DG.commitParents c
-  , commitTree      = refToOid $ DG.commitTreeish c
+  , commitParents   = map Tagged $ DG.commitParents c
+  , commitTree      = Tagged $ DG.commitTreeish c
   , commitAuthor    = convertPerson $ DG.commitAuthor c
   , commitCommitter = convertPerson $ DG.commitCommitter c
   , commitLog       = T.decodeUtf8 $ DG.commitMessage c
@@ -391,7 +376,7 @@ convertCommit oid c = Commit
 
 hitLookupCommit :: MonadHit m
                 => CommitOid HitRepo -> ReaderT HitRepo m (Commit HitRepo)
-hitLookupCommit oid@(oidToRef -> ref) = do
+hitLookupCommit oid@(untag -> ref) = do
     g <- hitGit <$> getRepository
     c <- liftIO $ DG.getCommit g ref
     return $ convertCommit oid c
@@ -407,8 +392,8 @@ hitCreateCommit :: MonadHit m
 hitCreateCommit parentOids treeOid author committer message ref = do
     g <- hitGit <$> getRepository
     let c = DG.Commit
-          { DG.commitTreeish = oidToRef treeOid
-          , DG.commitParents = map oidToRef parentOids
+          { DG.commitTreeish = untag treeOid
+          , DG.commitParents = map untag parentOids
           , DG.commitAuthor = sigToPerson author
           , DG.commitCommitter = sigToPerson committer
           , DG.commitEncoding = Nothing
@@ -416,7 +401,7 @@ hitCreateCommit parentOids treeOid author committer message ref = do
           , DG.commitMessage = T.encodeUtf8 message
           }
     h <- liftIO $ DGS.setObject g $ DGO.ObjCommit c
-    let oid = refToOid h
+    let oid = Tagged h
     let k = Commit
           { commitOid       = oid
           , commitAuthor    = author
@@ -435,13 +420,13 @@ tryReadRef path spec = (Just <$> DGN.readRefFile path spec)
 
 refContentToTarget :: Text -> DGN.RefContentTy -> IO (RefTarget HitRepo)
 refContentToTarget name rc = case rc of
-  DGN.RefDirect ref -> return $ RefObj $ refToSHA ref
-  DGN.RefLink spec -> return $ RefSymbolic $ TL.pack $ fromRefTy spec
+  DGN.RefDirect ref -> return $ RefObj ref
+  DGN.RefLink spec -> return $ RefSymbolic $ T.pack $ fromRefTy spec
   DGN.RefContentUnknown _ -> throwM $ ReferenceLookupFailed name
 
 hitLookupRef :: MonadHit m
              => Text -> ReaderT HitRepo m (Maybe (RefTarget HitRepo))
-hitLookupRef refName@(TL.unpack -> name) = do
+hitLookupRef refName@(T.unpack -> name) = do
     path <- DGS.gitRepoPath <$> hitGit <$> getRepository
     liftIO $ do
         mrc <- tryReadRef path $ toRefTy name
@@ -450,19 +435,19 @@ hitLookupRef refName@(TL.unpack -> name) = do
             Just rc -> Just <$> refContentToTarget refName rc
 
 targetContent :: RefTarget HitRepo -> DGN.RefContentTy
-targetContent (RefObj (getSHA -> sha)) = DGN.RefDirect $ DGF.fromBinary sha
-targetContent (RefSymbolic name) = DGN.RefLink $ toRefTy $ TL.unpack name
+targetContent (RefObj ref) = DGN.RefDirect ref
+targetContent (RefSymbolic name) = DGN.RefLink $ toRefTy $ T.unpack name
 
 pathAction :: MonadHit m => (FilePath -> IO a) -> ReaderT HitRepo m a
 pathAction act = DGS.gitRepoPath <$> hitGit <$> getRepository >>= liftIO . act
 
 hitUpdateRef :: MonadHit m => Text -> RefTarget HitRepo -> ReaderT HitRepo m ()
-hitUpdateRef (TL.unpack -> name) target = pathAction upd
+hitUpdateRef (T.unpack -> name) target = pathAction upd
   where upd path =
           DGN.writeRefFile path (toRefTy name) $ targetContent target
 
 hitDeleteRef :: MonadHit m => Text -> ReaderT HitRepo m ()
-hitDeleteRef (TL.unpack -> name) = pathAction del
+hitDeleteRef (T.unpack -> name) = pathAction del
   where del path =
           removeFile $ encodeString $ toPath path $ toRefTy name
 
@@ -474,7 +459,7 @@ hitSourceRefs = do
         bb <- Set.map DGN.RefBranch <$> DG.branchList g
         tt <- Set.map DGN.RefTag <$> DG.tagList g
         return $ Set.union bb tt
-    yieldMany $ Set.map (TL.pack . fromRefTy) refs
+    yieldMany $ Set.map (T.pack . fromRefTy) refs
 
 hitCreateTag :: MonadHit m
              => CommitOid HitRepo -> Signature -> Text -> Text
@@ -482,7 +467,7 @@ hitCreateTag :: MonadHit m
 hitCreateTag oid tagger msg name = do
     g <- hitGit <$> getRepository
     let tag = DG.Tag 
-          { DG.tagRef = oidToRef oid
+          { DG.tagRef = untag oid
           , DG.tagObjectType = DGT.TypeCommit
           , DG.tagName = sigToPerson tagger
           , DG.tagBlob = T.encodeUtf8 name
@@ -490,7 +475,7 @@ hitCreateTag oid tagger msg name = do
           }
     ref <- liftIO $ DGS.setObject g $ DGO.ObjTag tag
     return $ Tag
-        { tagOid = refToOid ref
+        { tagOid = Tagged ref
         , tagCommit = oid
         }
 
