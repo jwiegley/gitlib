@@ -15,6 +15,7 @@
 
 module Git.Hit
        ( hitFactory
+       , convertTime
        ) where
 
 import           Prelude hiding (FilePath)
@@ -146,10 +147,10 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     lookupCommit      = hitLookupCommit
     lookupTree        = hitLookupTree
     lookupBlob        = hitLookupBlob
-    lookupTag         = error "Not defined cliLookupTag"
-    lookupObject      = error "Not defined cliLookupObject"
+    lookupTag         = undefined
+    lookupObject      = undefined
     existsObject      = hitExistsObject
-    sourceObjects     = cliSourceObjects
+    sourceObjects     = undefined
     newTreeBuilder    = Pure.newPureTreeBuilder cliReadTree cliWriteTree
     treeOid (CmdLineTree toid) = return toid
     treeEntry         = hitTreeEntry
@@ -157,11 +158,10 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     hashContents      = hitHashContents
     createBlob        = hitCreateBlob
     createCommit      = cliCreateCommit
-    createTag         = cliCreateTag
-    readIndex         = error "Not defined readIndex"
-    writeIndex        = error "Not defined writeIndex"
-
-    diffContentsWithTree = error "Not defined cliDiffContentsWithTree"
+    createTag         = hitCreateTag
+    readIndex         = undefined
+    writeIndex        = undefined
+    diffContentsWithTree = undefined
 
 type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
 
@@ -222,31 +222,6 @@ hitExistsObject sha = do
     mobj <- liftIO $ DGS.getObjectRaw g ref True
     return $ isJust mobj
 
-cliSourceObjects :: MonadHit m
-                 => Maybe (CommitOid HitRepo) -> CommitOid HitRepo -> Bool
-                 -> Producer (ReaderT HitRepo m) (ObjectOid HitRepo)
-cliSourceObjects mhave need alsoTrees = do
-    shas <- lift $ doRunGit run
-            ([ "--no-pager", "log", "--format=%H %T" ]
-             <> (case mhave of
-                      Nothing   -> [ fromStrict (renderObjOid need) ]
-                      Just have ->
-                          [ fromStrict (renderObjOid have)
-                          , TL.append "^"
-                            (fromStrict (renderObjOid need)) ]))
-            $ return ()
-    mapM_ (go . T.words . toStrict) (TL.lines shas)
-  where
-    go [csha,tsha] = do
-        coid <- lift $ parseObjOid csha
-        yield $ CommitObjOid coid
-        when alsoTrees $ do
-            toid <- lift $ parseObjOid tsha
-            yield $ TreeObjOid toid
-
-    go x = throwM (BackendError $
-                    "Unexpected output from git-log: " <> T.pack (show x))
-
 cliReadTree :: MonadHit m
             => Tree HitRepo -> ReaderT HitRepo m (Pure.EntryHashMap HitRepo)
 cliReadTree (CmdLineTree (renderObjOid -> sha)) = do
@@ -389,6 +364,22 @@ convertPerson p = Signature
   , signatureWhen = DGT.toZonedTime $ DG.personTime p
   }
 
+stripPlus :: String -> String
+stripPlus ('+':xs) = xs
+stripPlus xs = xs
+
+convertTime :: ZonedTime -> DGT.GitTime
+convertTime zt = DGT.GitTime sec tz
+  where sec = read $ formatTime defaultTimeLocale "%s" zt
+        tz = read $ stripPlus $ timeZoneOffsetString $ zonedTimeZone zt
+
+sigToPerson :: Signature -> DG.Person
+sigToPerson s = DG.Person
+  { DG.personName = T.encodeUtf8 $ signatureName s
+  , DG.personEmail = T.encodeUtf8 $ signatureEmail s
+  , DG.personTime = convertTime $ signatureWhen s
+  }
+
 convertCommit :: CommitOid HitRepo -> DG.Commit -> Commit HitRepo
 convertCommit oid c = Commit
   { commitOid       = oid
@@ -496,21 +487,23 @@ hitSourceRefs = do
         return $ Set.union bb tt
     yieldMany $ Set.map (TL.pack . fromRefTy) refs
 
-cliCreateTag :: MonadHit m
+hitCreateTag :: MonadHit m
              => CommitOid HitRepo -> Signature -> Text -> Text
              -> ReaderT HitRepo m (Tag HitRepo)
-cliCreateTag oid@(renderObjOid -> sha) tagger msg name = do
-    tsha <- doRunGit run ["mktag"] $ setStdin $ TL.unlines $
-        [ "object " <> fromStrict sha
-        , "type commit"
-        , "tag " <> fromStrict name
-        , "tagger " <> fromStrict (signatureName tagger)
-          <> " <" <> fromStrict (signatureEmail tagger) <> "> "
-          <> TL.pack (formatTime defaultTimeLocale "%s %z"
-                      (signatureWhen tagger))
-        , ""] <> TL.lines (fromStrict msg)
-    Tag <$> mkOid (TL.init tsha) <*> pure oid
-
+hitCreateTag oid tagger msg name = do
+    g <- hitGit <$> getRepository
+    let tag = DG.Tag 
+          { DG.tagRef = oidToRef oid
+          , DG.tagObjectType = DGT.TypeCommit
+          , DG.tagName = sigToPerson tagger
+          , DG.tagBlob = T.encodeUtf8 name
+          , DG.tagS = T.encodeUtf8 $ T.snoc msg '\n'
+          }
+    ref <- liftIO $ DGS.setObject g $ DGO.ObjTag tag
+    return $ Tag
+        { tagOid = refToOid ref
+        , tagCommit = oid
+        }
 
 hitFactory :: MonadHit m => RepositoryFactory (ReaderT HitRepo m) m HitRepo
 hitFactory = RepositoryFactory
