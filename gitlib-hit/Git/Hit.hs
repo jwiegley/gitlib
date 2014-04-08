@@ -75,10 +75,9 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     getRepository    = ask
     closeRepository  = getRepository >>= liftIO . DGS.closeRepo . hitGit
     deleteRepository = getRepository >>= liftIO . rm
-      where rm = Dir.removeDirectoryRecursive . encodeString . 
+      where rm = Dir.removeDirectoryRecursive . encodeString .
                  DGS.gitRepoPath . hitGit
 
-    lookupTag             = error "undefined: lookupTag"
     lookupObject          = error "undefined: lookupObject"
     sourceObjects         = error "undefined: sourceObjects"
     readIndex             = error "undefined: readIndex"
@@ -95,6 +94,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     lookupBlob            = hitLookupBlob
     lookupCommit          = hitLookupCommit
     lookupReference       = hitLookupRef
+    lookupTag             = hitLookupTag
     lookupTree            = hitLookupTree
     newTreeBuilder        = Pure.newPureTreeBuilder hitReadTree hitWriteTree
     sourceReferences      = hitSourceRefs
@@ -242,7 +242,7 @@ hitCreateCommit parentOids treeOid author committer message ref = do
         }
 
 
-hitUpdateRef :: MonadHit m => Text -> RefTarget HitRepo 
+hitUpdateRef :: MonadHit m => Text -> RefTarget HitRepo
              -> ReaderT HitRepo m ()
 hitUpdateRef (T.unpack -> name) target = withPath upd
   where
@@ -317,6 +317,16 @@ hitLookupRef refName = withPath look
       case mrc of
         Nothing -> return Nothing
         Just rc -> Just <$> gitRefTarget refName rc
+
+
+hitLookupTag :: MonadHit m
+             => TagOid HitRepo -> ReaderT HitRepo m (Tag HitRepo)
+hitLookupTag oid = do
+    g <- hitGit <$> getRepository
+    mobj <- liftIO $ DG.getObject g (untag oid) True
+    maybe (throwM $ TagLookupFailed "")
+          (\(DGO.ObjTag t) -> return $ Tag oid $ Tagged $ DGT.tagRef t)
+          mobj
 
 
 hitLookupTree :: MonadHit m
@@ -415,7 +425,7 @@ searchTree (n:ns) (DG.Tree ents) g =
           [] -> return $ Just $ gitTreeEnt ent
           _ -> searchTreeRef ns ref g
 
-searchTreeRef :: [TreeFilePath] -> DG.Ref -> DGR.Git 
+searchTreeRef :: [TreeFilePath] -> DG.Ref -> DGR.Git
               -> IO (Maybe (TreeEntry HitRepo))
 searchTreeRef ns ref g = do
     mtr <- getTreeMaybe g ref
