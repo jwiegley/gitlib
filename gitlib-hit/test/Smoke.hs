@@ -17,10 +17,10 @@ import           System.Locale (defaultTimeLocale)
 fmt :: UTCTime -> String
 fmt = formatTime defaultTimeLocale "%x %X"
 
-testConvertTime :: IO ()
-testConvertTime = do
+testHitTime :: IO ()
+testHitTime = do
     now <- getZonedTime
-    let gt = Hit.convertTime now
+    let gt = Hit.hitTime now
     let u1 = fmt $ zonedTimeToUTC now
     let u2 = fmt $ toUTCTime gt
     putStrLn $ intercalate "\n" [show now, show gt, u1]
@@ -28,7 +28,7 @@ testConvertTime = do
 
 main :: IO ()
 main = do
-    testConvertTime
+    testHitTime
     hspec $ GS.smokeTestSpec Hit.hitFactory Hit.hitFactory
 
 -- Smoke.hs ends here
