@@ -5,8 +5,7 @@ module Main where
 
 import qualified Git.Hit as Hit
 import qualified Git.Smoke as GS
-import           Test.Hspec.HUnit ()
-import           Test.Hspec.Runner
+import           Test.Hspec.Runner (hspec)
 import           Test.HUnit.Base (assertEqual)
 import           Data.Git.Types (toUTCTime)
 import           Data.List (intercalate)

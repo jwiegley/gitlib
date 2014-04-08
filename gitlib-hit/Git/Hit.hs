@@ -19,17 +19,15 @@ module Git.Hit
        , convertTime
        ) where
 
-import           Prelude hiding (FilePath)
 import           Conduit
-import           Control.Applicative hiding (many)
+import           Control.Applicative (Applicative, (<$>))
 import qualified Control.Exception as X
-import           Control.Monad
-import           Control.Monad.Reader.Class
-import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
+import           Control.Monad (when)
+import           Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 import           Data.Bits ((.&.))
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8 as BC
+import qualified Data.ByteString.Lazy as BL
 import           Data.Foldable (for_)
 import qualified Data.Git as DG
 import qualified Data.Git.Named as DGN
@@ -41,20 +39,21 @@ import qualified Data.Git.Storage.Object as DGO
 import qualified Data.Git.Types as DGT
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
-import           Data.Maybe
+import           Data.Maybe (isJust)
 import qualified Data.Set as Set
 import           Data.String (fromString)
-import           Data.Tagged
+import           Data.Tagged (Tagged(..), untag)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
+import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Time
 import           Filesystem.Path.CurrentOS (FilePath, (</>), encodeString)
 import           Git
 import qualified Git.Tree.Builder.Pure as Pure
-import           System.Directory
-import           System.Locale (defaultTimeLocale)
+import           Prelude hiding (FilePath)
+import qualified System.Directory as Dir
 import           System.IO (withFile, hPutStrLn, IOMode(WriteMode))
+import           System.Locale (defaultTimeLocale)
 
 
 data HitRepo = HitRepo
@@ -62,7 +61,7 @@ data HitRepo = HitRepo
     , hitGit     :: DGS.Git
     }
 
-hitRepoPath :: HitRepo -> T.Text
+hitRepoPath :: HitRepo -> Text
 hitRepoPath = T.pack . repoPath . hitOptions
 
 --- Following two are duplicates of unexported functions in Data.Git.Named
@@ -117,7 +116,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     getRepository    = ask
     closeRepository  = getRepository >>= liftIO . DGS.closeRepo . hitGit
     deleteRepository = getRepository >>=
-        liftIO . removeDirectoryRecursive . T.unpack . hitRepoPath
+        liftIO . Dir.removeDirectoryRecursive . T.unpack . hitRepoPath
 
     parseOid = return . DGF.fromHexString . T.unpack
 
@@ -310,8 +309,8 @@ hitSourceTreeEntries (HitTree toid) = do
 
 convertPerson :: DG.Person -> Signature
 convertPerson p = Signature
-  { signatureName = T.decodeUtf8 $ DG.personName p
-  , signatureEmail = T.decodeUtf8 $ DG.personEmail p
+  { signatureName = decodeUtf8 $ DG.personName p
+  , signatureEmail = decodeUtf8 $ DG.personEmail p
   , signatureWhen = DGT.toZonedTime $ DG.personTime p
   }
 
@@ -326,8 +325,8 @@ convertTime zt = DGT.GitTime sec tz
 
 sigToPerson :: Signature -> DG.Person
 sigToPerson s = DG.Person
-  { DG.personName = T.encodeUtf8 $ signatureName s
-  , DG.personEmail = T.encodeUtf8 $ signatureEmail s
+  { DG.personName = encodeUtf8 $ signatureName s
+  , DG.personEmail = encodeUtf8 $ signatureEmail s
   , DG.personTime = convertTime $ signatureWhen s
   }
 
@@ -338,8 +337,8 @@ convertCommit oid c = Commit
   , commitTree      = Tagged $ DG.commitTreeish c
   , commitAuthor    = convertPerson $ DG.commitAuthor c
   , commitCommitter = convertPerson $ DG.commitCommitter c
-  , commitLog       = T.decodeUtf8 $ DG.commitMessage c
-  , commitEncoding  = maybe "" T.decodeUtf8 $ DG.commitEncoding c
+  , commitLog       = decodeUtf8 $ DG.commitMessage c
+  , commitEncoding  = maybe "" decodeUtf8 $ DG.commitEncoding c
   }
 
 hitLookupCommit :: MonadHit m
@@ -366,7 +365,7 @@ hitCreateCommit parentOids treeOid author committer message ref = do
           , DG.commitCommitter = sigToPerson committer
           , DG.commitEncoding = Nothing
           , DG.commitExtras = []
-          , DG.commitMessage = T.encodeUtf8 message
+          , DG.commitMessage = encodeUtf8 message
           }
     h <- liftIO $ DGS.setObject g $ DGO.ObjCommit c
     let oid = Tagged h
@@ -417,7 +416,7 @@ hitUpdateRef (T.unpack -> name) target = pathAction upd
 hitDeleteRef :: MonadHit m => Text -> ReaderT HitRepo m ()
 hitDeleteRef (T.unpack -> name) = pathAction del
   where del path =
-          removeFile $ encodeString $ toPath path $ toRefTy name
+          Dir.removeFile $ encodeString $ toPath path $ toRefTy name
 
 hitSourceRefs :: MonadHit m => Producer (ReaderT HitRepo m) Text
 hitSourceRefs = do
@@ -438,8 +437,8 @@ hitCreateTag oid tagger msg name = do
           { DG.tagRef = untag oid
           , DG.tagObjectType = DGT.TypeCommit
           , DG.tagName = sigToPerson tagger
-          , DG.tagBlob = T.encodeUtf8 name
-          , DG.tagS = T.encodeUtf8 $ T.snoc msg '\n'
+          , DG.tagBlob = encodeUtf8 name
+          , DG.tagS = encodeUtf8 $ T.snoc msg '\n'
           }
     ref <- liftIO $ DGS.setObject g $ DGO.ObjTag tag
     return $ Tag
@@ -462,7 +461,7 @@ openHitRepository opts = liftIO $ do
         let head = encodeString $ path </> "HEAD"
         withFile head WriteMode $ flip hPutStrLn "ref: refs/heads/master"
         let pack = encodeString $ path </> "objects" </> "pack"
-        createDirectory pack
+        Dir.createDirectory pack
     g <- DGS.openRepo path
     return $ HitRepo opts g
 
