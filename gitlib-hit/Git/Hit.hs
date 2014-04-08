@@ -42,7 +42,6 @@ import qualified Data.Git.Types as DGT
 import qualified Data.HashMap.Strict as HashMap
 import           Data.List as L
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Set as Set
 import           Data.String (fromString)
 import           Data.Tagged
@@ -53,7 +52,6 @@ import           Data.Time
 import           Filesystem.Path.CurrentOS (FilePath, (</>), encodeString)
 import           Git
 import qualified Git.Tree.Builder.Pure as Pure
-import           Shelly hiding (FilePath, trace, (</>))
 import           System.Directory
 import           System.Locale (defaultTimeLocale)
 import           System.IO (withFile, hPutStrLn, IOMode(WriteMode))
@@ -66,9 +64,6 @@ data HitRepo = HitRepo
 
 hitRepoPath :: HitRepo -> T.Text
 hitRepoPath = T.pack . repoPath . hitOptions
-
-hitWorkingDir :: HitRepo -> Maybe T.Text
-hitWorkingDir = fmap T.pack . repoWorkingDir . hitOptions
 
 --- Following two are duplicates of unexported functions in Data.Git.Named
 toRefTy :: String -> DGN.RefSpecTy
@@ -134,41 +129,23 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     lookupCommit      = hitLookupCommit
     lookupTree        = hitLookupTree
     lookupBlob        = hitLookupBlob
-    lookupTag         = undefined
-    lookupObject      = undefined
+    lookupTag         = error "undefined: lookupTag"
+    lookupObject      = error "undefined: lookupObject"
     existsObject      = hitExistsObject
-    sourceObjects     = undefined
-    newTreeBuilder    = Pure.newPureTreeBuilder hitReadTree cliWriteTree
+    sourceObjects     = error "undefined: sourceObjects"
+    newTreeBuilder    = Pure.newPureTreeBuilder hitReadTree hitWriteTree
     treeOid (HitTree toid) = return toid
     treeEntry         = hitTreeEntry
-    sourceTreeEntries = cliSourceTreeEntries
+    sourceTreeEntries = hitSourceTreeEntries
     hashContents      = hitHashContents
     createBlob        = hitCreateBlob
     createCommit      = hitCreateCommit
     createTag         = hitCreateTag
-    readIndex         = undefined
-    writeIndex        = undefined
-    diffContentsWithTree = undefined
+    readIndex         = error "undefined: readIndex"
+    writeIndex        = error "undefined: writeIndex"
+    diffContentsWithTree = error "undefined: diffContentsWithTree"
 
 type MonadHit m = (Applicative m, MonadThrow m, MonadIO m)
-
-mkOid :: MonadHit m => forall o. T.Text -> ReaderT HitRepo m (Tagged o (Oid HitRepo))
-mkOid = fmap Tagged <$> parseOid
-
-gitStdOpts :: HitRepo -> [T.Text]
-gitStdOpts repo = [ "--git-dir", hitRepoPath repo ]
-    ++ maybe [] (\w -> [ "--work-tree", w ]) (hitWorkingDir repo)
-
-doRunGit :: MonadHit m
-         => (FilePath -> [T.Text] -> Sh a) -> [T.Text] -> Sh ()
-         -> ReaderT HitRepo m a
-doRunGit f args act = do
-    repo <- getRepository
-    shelly $ silently $
-        act >> f "git" (gitStdOpts repo <> args)
-
-runGit :: MonadHit m => [T.Text] -> ReaderT HitRepo m T.Text
-runGit = flip (doRunGit run) (return ())
 
 hitLookupBlob :: MonadHit m
               => BlobOid HitRepo
@@ -205,62 +182,32 @@ hitExistsObject ref = do
     mobj <- liftIO $ DGS.getObjectRaw g ref True
     return $ isJust mobj
 
+getTreeHandleEmpty :: TreeOid HitRepo -> DGR.Git -> IO DGT.Tree
+getTreeHandleEmpty (Tagged oid) g = do
+    if emptyTreeId == (T.pack (DGF.toHexString oid))
+      then return $ DGT.Tree []
+      else DGR.getTree g oid
+
 hitReadTree :: MonadHit m
             => Tree HitRepo -> ReaderT HitRepo m (Pure.EntryHashMap HitRepo)
-hitReadTree (HitTree ref) = do
+hitReadTree (HitTree oid) = do
     g <- hitGit <$> getRepository
-    DGT.Tree ents <- liftIO $ DGR.getTree g $ untag ref
+    DGT.Tree ents <- liftIO $ getTreeHandleEmpty oid g
     let f e@(_, name, _) = (name, convertTreeEnt e)
     return $ HashMap.fromList $ map f ents
 
-cliParseLsTree :: MonadHit m
-               => T.Text -> ReaderT HitRepo m (TreeFilePath, TreeEntry HitRepo)
-cliParseLsTree line =
-    let [prefix,path] = T.splitOn "\t" line
-        [mode,kind,sha] = T.words prefix
-    in liftM2 (,) (return (T.encodeUtf8 $ path)) $ case kind of
-        "blob"   -> do
-            oid <- mkOid sha
-            BlobEntry oid <$> case mode of
-                "100644" -> return PlainBlob
-                "100755" -> return ExecutableBlob
-                "120000" -> return SymlinkBlob
-                _        -> throwM $ BackendError $
-                    "Unknown blob mode: " <> T.pack (show mode)
-        "commit" -> CommitEntry <$> mkOid sha
-        "tree"   -> TreeEntry <$> mkOid sha
-        _ -> throwM $ BackendError "This cannot happen"
+type TreePathEntry = (TreeFilePath, TreeEntry HitRepo)
 
-cliWriteTree :: MonadHit m
+treeOrd :: DGT.TreeEnt -> DGT.TreeEnt -> Ordering
+treeOrd (_, name1, _) (_, name2, _) = compare name1 name2
+
+hitWriteTree :: MonadHit m
              => Pure.EntryHashMap HitRepo -> ReaderT HitRepo m (TreeOid HitRepo)
-cliWriteTree entMap = do
-    rendered <- mapM renderLine (HashMap.toList entMap)
-    when (null rendered) $ throwM TreeEmptyCreateFailed
-    oid      <- doRunGit run [ "mktree", "-z", "--missing" ]
-                $ setStdin $ T.append (T.intercalate "\NUL" rendered) "\NUL"
-    mkOid (T.init oid)
-  where
-    renderLine (T.decodeUtf8 -> path,
-                BlobEntry (renderObjOid -> sha) kind) =
-        return $ T.concat
-            [ case kind of
-                   PlainBlob      -> "100644"
-                   ExecutableBlob -> "100755"
-                   SymlinkBlob    -> "120000"
-            , " blob ", sha, "\t", path
-            ]
-    renderLine (T.decodeUtf8 -> path, CommitEntry coid) =
-        return $ T.concat
-            [ "160000 commit "
-            , renderObjOid coid, "\t"
-            , path
-            ]
-    renderLine (T.decodeUtf8 -> path, TreeEntry toid) =
-        return $ T.concat
-            [ "040000 tree "
-            , renderObjOid toid, "\t"
-            , path
-            ]
+hitWriteTree entMap = do
+    g <- hitGit <$> getRepository
+    let ents = sortBy treeOrd $ map unconvertTreeEnt $ HashMap.toList entMap
+    ref <- liftIO $ DGS.setObject g $ DGO.ObjTree $ DGT.Tree ents
+    return $ Tagged ref
 
 hitLookupTree :: MonadHit m
               => TreeOid HitRepo -> ReaderT HitRepo m (Tree HitRepo)
@@ -284,6 +231,18 @@ blobKindFor (DG.ModePerm bits) =
 convertTreeEnt :: DGT.TreeEnt -> TreeEntry HitRepo
 convertTreeEnt (DG.ModePerm 0o40000, _, ref) = TreeEntry $ Tagged ref
 convertTreeEnt (mode, _, ref) = BlobEntry (Tagged ref) (blobKindFor mode)
+-- TODO could be commit entry?
+
+convertTreeEntWithPath :: TreeFilePath -> DGT.TreeEnt -> (TreeFilePath, TreeEntry HitRepo)
+convertTreeEntWithPath dir e@(_, p, _) = (BC.append dir p, convertTreeEnt e)
+
+unconvertTreeEnt :: (TreeFilePath, TreeEntry HitRepo) -> DGT.TreeEnt
+unconvertTreeEnt (path, e) = case e of
+    BlobEntry oid PlainBlob      -> (DG.ModePerm 0o100644, path, untag oid)
+    BlobEntry oid ExecutableBlob -> (DG.ModePerm 0o100755, path, untag oid)
+    BlobEntry oid SymlinkBlob    -> (DG.ModePerm 0o120000, path, untag oid)
+    TreeEntry oid                -> (DG.ModePerm 0o040000, path, untag oid)
+    CommitEntry oid              -> (DG.ModePerm 0o160000, path, untag oid)
 
 hasName :: B.ByteString -> DGT.TreeEnt -> Bool
 hasName n (_,name,_) = name == n
@@ -320,24 +279,34 @@ hitTreeEntry :: MonadHit m
              => Tree HitRepo -> TreeFilePath
              -> ReaderT HitRepo m (Maybe (TreeEntry HitRepo))
 hitTreeEntry tree fp = do
-    HitRepo _ g <- getRepository
+    g <- hitGit <$> getRepository
     toid <- treeOid tree
     let ref = untag toid
     liftIO $ do
         trace $ "LOOK " ++ DGF.toHexString ref ++ " " ++ BC.unpack fp
         findInTreeRef (BC.split '/' fp) ref g
 
-cliSourceTreeEntries :: MonadHit m
+hitReadTreeRec :: TreeFilePath
+               -> TreeOid HitRepo
+               -> DGR.Git
+               -> IO [TreePathEntry]
+hitReadTreeRec dir oid g = do
+    DGT.Tree ents <- getTreeHandleEmpty oid g
+    fmap concat $ mapM f $ map (convertTreeEntWithPath dir) ents
+  where
+    f :: TreePathEntry -> IO [TreePathEntry]
+    f e@(p, TreeEntry oid) = do
+        es <- hitReadTreeRec (BC.append p "/") oid g
+        return (e:es)
+    f e = return [e]
+
+hitSourceTreeEntries :: MonadHit m
                      => Tree HitRepo
-                     -> Producer (ReaderT HitRepo m) (TreeFilePath, TreeEntry HitRepo)
-cliSourceTreeEntries tree = do
-    contents <- lift $ do
-        toid <- treeOid tree
-        runGit [ "ls-tree", "-t", "-r", "-z"
-               , renderObjOid toid
-               ]
-    forM_ (L.init (T.splitOn "\NUL" contents)) $
-        yield <=< lift . cliParseLsTree
+                     -> Producer (ReaderT HitRepo m) TreePathEntry
+hitSourceTreeEntries (HitTree toid) = do
+    g <- lift $ hitGit <$> getRepository
+    ents <- liftIO $ hitReadTreeRec "" toid g
+    yieldMany ents
 
 convertPerson :: DG.Person -> Signature
 convertPerson p = Signature
@@ -465,7 +434,7 @@ hitCreateTag :: MonadHit m
              -> ReaderT HitRepo m (Tag HitRepo)
 hitCreateTag oid tagger msg name = do
     g <- hitGit <$> getRepository
-    let tag = DG.Tag 
+    let tag = DG.Tag
           { DG.tagRef = untag oid
           , DG.tagObjectType = DGT.TypeCommit
           , DG.tagName = sigToPerson tagger
