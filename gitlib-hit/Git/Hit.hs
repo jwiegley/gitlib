@@ -33,7 +33,6 @@ import qualified Data.Git as DG
 import qualified Data.Git.Named as DGN
 import qualified Data.Git.Ref as DGF
 import qualified Data.Git.Repository as DGR
-import qualified Data.Git.Revision as DGV
 import qualified Data.Git.Storage as DGS
 import qualified Data.Git.Storage.Object as DGO
 import qualified Data.Git.Types as DGT
@@ -49,6 +48,7 @@ import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Time
 import           Filesystem.Path.CurrentOS (FilePath, (</>), encodeString)
 import           Git
+import           Git.Hit.Internal
 import qualified Git.Tree.Builder.Pure as Pure
 import           Prelude hiding (FilePath)
 import qualified System.Directory as Dir
@@ -63,41 +63,6 @@ data HitRepo = HitRepo
 
 hitRepoPath :: HitRepo -> Text
 hitRepoPath = T.pack . repoPath . hitOptions
-
---- Following two are duplicates of unexported functions in Data.Git.Named
-toRefTy :: String -> DGN.RefSpecTy
-toRefTy s
-    | "refs/tags/" `isPrefixOf` s    = DGN.RefTag $ DGN.RefName $ drop 10 s
-    | "refs/heads/" `isPrefixOf` s   = DGN.RefBranch $ DGN.RefName $ drop 11 s
-    | "refs/remotes/" `isPrefixOf` s = DGN.RefRemote $ DGN.RefName $ drop 13 s
-    | "refs/patches/" `isPrefixOf` s = DGN.RefPatches $ drop 13 s
-    | "refs/stash" == s              = DGN.RefStash
-    | "HEAD" == s                    = DGN.RefHead
-    | "ORIG_HEAD" == s               = DGN.RefOrigHead
-    | "FETCH_HEAD" == s              = DGN.RefFetchHead
-    | otherwise                      = DGN.RefOther $ s
-
-fromRefTy :: DGN.RefSpecTy -> String
-fromRefTy (DGN.RefBranch h)  = "refs/heads/" ++ DGN.refNameRaw h
-fromRefTy (DGN.RefTag h)     = "refs/tags/" ++ DGN.refNameRaw h
-fromRefTy (DGN.RefRemote h)  = "refs/remotes/" ++ DGN.refNameRaw h
-fromRefTy (DGN.RefPatches h) = "refs/patches/" ++ h
-fromRefTy DGN.RefStash       = "refs/stash"
-fromRefTy DGN.RefHead        = "HEAD"
-fromRefTy DGN.RefOrigHead    = "ORIG_HEAD"
-fromRefTy DGN.RefFetchHead   = "FETCH_HEAD"
-fromRefTy (DGN.RefOther h)   = h
-
-toPath :: FilePath -> DGN.RefSpecTy -> FilePath
-toPath gitRepo (DGN.RefBranch h)  = gitRepo </> "refs" </> "heads" </> DGV.fromString (DGN.refNameRaw h)
-toPath gitRepo (DGN.RefTag h)     = gitRepo </> "refs" </> "tags" </> DGV.fromString (DGN.refNameRaw h)
-toPath gitRepo (DGN.RefRemote h)  = gitRepo </> "refs" </> "remotes" </> DGV.fromString (DGN.refNameRaw h)
-toPath gitRepo (DGN.RefPatches h) = gitRepo </> "refs" </> "patches" </> DGV.fromString h
-toPath gitRepo DGN.RefStash       = gitRepo </> "refs" </> "stash"
-toPath gitRepo DGN.RefHead        = gitRepo </> "HEAD"
-toPath gitRepo DGN.RefOrigHead    = gitRepo </> "ORIG_HEAD"
-toPath gitRepo DGN.RefFetchHead   = gitRepo </> "FETCH_HEAD"
-toPath gitRepo (DGN.RefOther h)   = gitRepo </> DGV.fromString h
 
 -- END duplicates
 

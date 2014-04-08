@@ -36,6 +36,7 @@ Library
     , unordered-containers >= 0.2.3.0
   exposed-modules:
     Git.Hit
+    Git.Hit.Internal
 
 Test-suite smoke
   default-language: Haskell98
