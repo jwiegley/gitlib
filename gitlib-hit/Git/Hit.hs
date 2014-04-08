@@ -78,7 +78,6 @@ instance (Applicative m, MonadThrow m, MonadIO m)
       where rm = Dir.removeDirectoryRecursive . encodeString .
                  DGS.gitRepoPath . hitGit
 
-    lookupObject          = error "undefined: lookupObject"
     sourceObjects         = error "undefined: sourceObjects"
     readIndex             = error "undefined: readIndex"
     writeIndex            = error "undefined: writeIndex"
@@ -93,6 +92,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     hashContents          = hitHashContents
     lookupBlob            = hitLookupBlob
     lookupCommit          = hitLookupCommit
+    lookupObject          = hitLookupObject
     lookupReference       = hitLookupRef
     lookupTag             = hitLookupTag
     lookupTree            = hitLookupTree
@@ -179,6 +179,16 @@ gitTreePathEnt dir e@(_,p,_) = (BC.append dir p, gitTreeEnt e)
 
 gitTreeNameEnt :: DGT.TreeEnt -> TreePathEntry
 gitTreeNameEnt e@(_,name,_) = (name, gitTreeEnt e)
+
+gitObject :: MonadHit m => Oid HitRepo -> DGO.Object
+          -> Object HitRepo (ReaderT HitRepo m)
+gitObject ref obj = case obj of
+  DGO.ObjCommit c -> CommitObj $ gitCommit (Tagged ref) c
+  DGO.ObjTag t    -> TagObj $ Tag (Tagged ref) $ Tagged (DGT.tagRef t)
+  DGO.ObjBlob b   -> BlobObj $ Blob (Tagged ref) $ BlobStringLazy $
+                     DGT.blobGetContent b
+  DGO.ObjTree _   -> TreeObj $ HitTree $ Tagged ref
+  -- TODO: handle ObjDeltaOfs, ObjDeltaRef?
 
 
 {---- The git operations ----}
@@ -306,6 +316,17 @@ hitLookupCommit :: MonadHit m
 hitLookupCommit oid = do
     g <- hitGit <$> getRepository
     fmap (gitCommit oid) $ liftIO $ DG.getCommit g $ untag oid
+
+
+hitLookupObject :: MonadHit m
+                => Oid HitRepo
+                -> ReaderT HitRepo m (Object HitRepo (ReaderT HitRepo m))
+hitLookupObject oid = do
+    g <- hitGit <$> getRepository
+    mobj <- liftIO $ DG.getObject g oid True
+    maybe (throwM $ ObjectLookupFailed (renderOid oid) 0)
+          (return . gitObject oid)
+          mobj
 
 
 hitLookupRef :: MonadHit m
