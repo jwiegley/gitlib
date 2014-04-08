@@ -144,10 +144,14 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
             , signatureEmail = "johnw@fpcomplete.com"
             , signatureWhen  = fakeTime 1348980883 }
 
-      c <- sampleCommit tr sig
-      t <- createTag (commitOid c) sig "good" "name"
-      let x = renderObjOid $ tagOid t
+      c <- commitOid <$> sampleCommit tr sig
+      t <- tagOid <$> createTag c sig "good" "name"
+      let x = renderObjOid t
       liftIO $ x @?= "f2e15fe8138a30f663007005c59ab40e55857e24"
+
+      Tag ti ci <- lookupTag t
+      liftIO $ ti @?= t
+      liftIO $ ci @?= c
 
   it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"

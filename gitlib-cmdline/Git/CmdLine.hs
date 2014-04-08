@@ -22,6 +22,7 @@ import           Control.Monad
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as BC
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.HashMap.Strict as HashMap
@@ -108,7 +109,7 @@ instance (Applicative m, MonadThrow m, MonadIO m)
     lookupCommit      = cliLookupCommit
     lookupTree        = cliLookupTree
     lookupBlob        = cliLookupBlob
-    lookupTag         = error "Not defined cliLookupTag"
+    lookupTag         = cliLookupTag
     lookupObject      = error "Not defined cliLookupObject"
     existsObject      = cliExistsObject
     sourceObjects     = cliSourceObjects
@@ -652,9 +653,26 @@ cliResolveRef refName = do
         then Just <$> textToSha (toStrict (TL.init rev))
         else return Nothing
 
--- cliLookupTag :: MonadCli m
---              => TagOid CliRepo -> ReaderT CliRepo m (Tag CliRepo)
--- cliLookupTag oid = undefined
+cliLookupTag :: MonadCli m
+             => TagOid CliRepo -> ReaderT CliRepo m (Tag CliRepo)
+cliLookupTag tag@(renderObjOid -> sha) = do
+    repo <- getRepository
+    (r,out,_) <-
+        liftIO $ readProcessWithExitCode  "git"
+            (map TL.unpack (gitStdOpts repo)
+                ++ ["cat-file", "tag", TL.unpack (fromStrict sha)])
+            B.empty
+    if r == ExitSuccess
+        then do
+            p <- runParserT parseOutput () "" (BC.unpack out)
+            case p of
+                Left e -> throwM $ TagLookupFailed $ T.pack $ show e
+                Right oid -> return $ Tag tag oid
+        else throwM $ TagLookupFailed ""
+  where
+    parseOutput = do
+        oid <- (string "object " *> manyTill alphaNum newline)
+        lift $ mkOid $ TL.pack oid
 
 cliCreateTag :: MonadCli m
              => CommitOid CliRepo -> Signature -> Text -> Text

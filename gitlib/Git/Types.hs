@@ -416,6 +416,7 @@ data GitException
     | IndexCreateFailed Text
     | PathEncodingError Text
     | PushNotFastForward Text
+    | TagLookupFailed Text
     | TranslationException Text
     | TreeCreateFailed Text
     | TreeBuilderCreateFailed
