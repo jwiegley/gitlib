@@ -1,0 +1,58 @@
+Name:                gitlib-hit
+Version:             3.0.1
+Synopsis:            Gitlib repository backend that uses the pure-Haskell Hit library.
+Description:         Gitlib repository backend that uses the pure-Haskell Hit library.
+License-file:        LICENSE
+License:             MIT
+Author:              John Wiegley
+Maintainer:          johnw@newartisans.com
+Build-Type:          Simple
+Cabal-Version:       >=1.10
+Category:            Git
+
+Source-repository head
+  type: git
+  location: git://github.com/jwiegley/gitlib.git
+
+Library
+  hs-source-dirs: .
+  default-language: Haskell98
+  ghc-options: -Wall
+  build-depends:
+      base >= 3 && < 5
+    , gitlib               >= 3.0.0
+    , bytestring           >= 0.9.2.1
+    , conduit              >= 1.1.0
+    , conduit-combinators  >= 0.2.4
+    , containers           >= 0.4.2.1
+    , directory            >= 1.1.0.2
+    , hit                  >= 0.5.5
+    , old-locale           >= 1.0.0.4
+    , system-filepath      >= 0.4.7
+    , tagged               >= 0.4.4
+    , text                 >= 0.11.2
+    , time                 >= 1.4
+    , transformers         >= 0.2.2
+    , unordered-containers >= 0.2.3.0
+  exposed-modules:
+    Git.Hit
+    Git.Hit.Internal
+
+Test-suite smoke
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  main-is: Smoke.hs
+  ghc-options: -Wall
+  hs-source-dirs: test
+  build-depends:
+      base >=3
+    , bytestring         >= 0.9.2.1
+    , gitlib             >= 3.0.0
+    , gitlib-hit         >= 3.0.0
+    , gitlib-test        >= 3.0.0
+    , hit                >= 0.5.5
+    , hspec              >= 1.4.4
+    , HUnit              >= 1.2.5.2
+    , old-locale         >= 1.0.0.4
+    , system-filepath    >= 0.4.7
+    , time               >= 1.4.0.1

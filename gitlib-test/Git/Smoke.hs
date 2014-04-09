@@ -41,11 +41,22 @@ smokeTestSpec :: (MonadGit r m, MonadIO m, MonadBaseControl IO m, MonadThrow m,
               -> RepositoryFactory n m s
               -> Spec
 smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
+  it "hash without persisting" $ withNewRepository pr "hashObject.git" $ do
+      r <- hashContents $ BlobString "flim-flam"
+      liftIO $ renderObjOid r @?= "5cc144cc0c3c101342b3f0c546c014d1e0e66da9"
+
   it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
       createBlobUtf8 "Hello, world!\n"
 
-      x <- catBlob =<< parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+      oid <- parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+      x <- catBlob oid
       liftIO $ x @?= "Hello, world!\n"
+
+      e1 <- existsObject $ untag oid
+      liftIO $ e1 @? "Expected object doesn't exist."
+
+      e2 <- existsObject =<< parseOid "efefefefefefefefefefefefefefefefefefefef"
+      liftIO $ not e2 @? "Unexpected object exists."
 
       -- jww (2013-02-01): Restore when S3 support prefix lookups
       -- x <- catBlob "af5626b"
@@ -116,6 +127,31 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       c <- lookupCommit (Tagged coid)
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
+
+  it "tag a single commit" $ withNewRepository pr "tagCommit.git" $ do
+      hello <- createBlobUtf8 "Hello, world!\n"
+      tr <- createTree $ putBlob "hello/world.txt" hello
+
+      goodbye <- createBlobUtf8 "Goodbye, world!\n"
+      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
+      let x = renderObjOid tr
+      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+
+      -- The Oid has been cleared in tr, so this tests that it gets
+      -- written as needed.
+      let sig  = Signature {
+              signatureName  = "John Wiegley"
+            , signatureEmail = "johnw@fpcomplete.com"
+            , signatureWhen  = fakeTime 1348980883 }
+
+      c <- commitOid <$> sampleCommit tr sig
+      t <- tagOid <$> createTag c sig "good" "name"
+      let x = renderObjOid t
+      liftIO $ x @?= "f2e15fe8138a30f663007005c59ab40e55857e24"
+
+      Tag ti ci <- lookupTag t
+      liftIO $ ti @?= t
+      liftIO $ ci @?= c
 
   it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
@@ -193,6 +229,9 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
 
       refs <- listReferences
       liftIO $ show refs @?= "[\"refs/heads/master\"]"
+
+      deleteReference "refs/heads/master"
+      deleteReference "HEAD"
 
       -- jww (2013-01-27): Restore
       -- ehist <- commitHistoryFirstParent c2
