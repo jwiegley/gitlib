@@ -14,7 +14,6 @@ import           Conduit
 import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.Catch
 import qualified Data.ByteString.Lazy as BL
 import           Data.List (sort)
 import           Data.Monoid
@@ -29,7 +28,6 @@ import           Test.HUnit
 import           Test.Hspec (Spec, Example, describe, it)
 import           Test.Hspec.Expectations
 import           Test.Hspec.HUnit ()
-import Control.Concurrent
 
 sampleCommit :: MonadGit r m => TreeOid r -> Signature -> m (Commit r)
 sampleCommit tr sig =
@@ -45,22 +43,22 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       r <- hashContents $ BlobString "flim-flam"
       liftIO $ renderObjOid r @?= "5cc144cc0c3c101342b3f0c546c014d1e0e66da9"
 
-  it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
-      createBlobUtf8 "Hello, world!\n"
+  -- it "create a single blob" $ withNewRepository pr "singleBlob.git" $ do
+  --     createBlobUtf8 "Hello, world!\n"
 
-      oid <- parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
-      x <- catBlob oid
-      liftIO $ x @?= "Hello, world!\n"
+  --     oid <- parseObjOid "af5626b4a114abcb82d63db7c8082c3c4756e51b"
+  --     x <- catBlob oid
+  --     liftIO $ x @?= "Hello, world!\n"
 
-      e1 <- existsObject $ untag oid
-      liftIO $ e1 @? "Expected object doesn't exist."
+  --     e1 <- existsObject $ untag oid
+  --     liftIO $ e1 @? "Expected object doesn't exist."
 
-      e2 <- existsObject =<< parseOid "efefefefefefefefefefefefefefefefefefefef"
-      liftIO $ not e2 @? "Unexpected object exists."
+  --     e2 <- existsObject =<< parseOid "efefefefefefefefefefefefefefefefefefefef"
+  --     liftIO $ not e2 @? "Unexpected object exists."
 
-      -- jww (2013-02-01): Restore when S3 support prefix lookups
-      -- x <- catBlob "af5626b"
-      -- liftIO $ x @?= "Hello, world!\n"
+  --     -- jww (2013-02-01): Restore when S3 support prefix lookups
+  --     -- x <- catBlob "af5626b"
+  --     -- liftIO $ x @?= "Hello, world!\n"
 
   it "create a single tree" $ withNewRepository pr "singleTree.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
@@ -128,30 +126,30 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       let x = renderObjOid (commitOid c)
       liftIO $ x @?= "4e0529eb30f53e65c1e13836e73023c9d23c25ae"
 
-  it "tag a single commit" $ withNewRepository pr "tagCommit.git" $ do
-      hello <- createBlobUtf8 "Hello, world!\n"
-      tr <- createTree $ putBlob "hello/world.txt" hello
+  -- it "tag a single commit" $ withNewRepository pr "tagCommit.git" $ do
+  --     hello <- createBlobUtf8 "Hello, world!\n"
+  --     tr <- createTree $ putBlob "hello/world.txt" hello
 
-      goodbye <- createBlobUtf8 "Goodbye, world!\n"
-      tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
-      let x = renderObjOid tr
-      liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
+  --     goodbye <- createBlobUtf8 "Goodbye, world!\n"
+  --     tr <- mutateTreeOid tr $ putBlob "goodbye/files/world.txt" goodbye
+  --     let x = renderObjOid tr
+  --     liftIO $ x @?= "98c3f387f63c08e1ea1019121d623366ff04de7a"
 
-      -- The Oid has been cleared in tr, so this tests that it gets
-      -- written as needed.
-      let sig  = Signature {
-              signatureName  = "John Wiegley"
-            , signatureEmail = "johnw@fpcomplete.com"
-            , signatureWhen  = fakeTime 1348980883 }
+  --     -- The Oid has been cleared in tr, so this tests that it gets
+  --     -- written as needed.
+  --     let sig  = Signature {
+  --             signatureName  = "John Wiegley"
+  --           , signatureEmail = "johnw@fpcomplete.com"
+  --           , signatureWhen  = fakeTime 1348980883 }
 
-      c <- commitOid <$> sampleCommit tr sig
-      t <- tagOid <$> createTag c sig "good" "name"
-      let x = renderObjOid t
-      liftIO $ x @?= "f2e15fe8138a30f663007005c59ab40e55857e24"
+  --     c <- commitOid <$> sampleCommit tr sig
+  --     t <- tagOid <$> createTag c sig "good" "name"
+  --     let x = renderObjOid t
+  --     liftIO $ x @?= "f2e15fe8138a30f663007005c59ab40e55857e24"
 
-      Tag ti ci <- lookupTag t
-      liftIO $ ti @?= t
-      liftIO $ ci @?= c
+  --     Tag ti ci <- lookupTag t
+  --     liftIO $ ti @?= t
+  --     liftIO $ ci @?= c
 
   it "modify a commit" $ withNewRepository pr "modifyCommit.git" $ do
       hello <- createBlobUtf8 "Hello, world!\n"
