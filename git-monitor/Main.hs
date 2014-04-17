@@ -10,8 +10,6 @@
 module Main where
 
 import           Control.Concurrent (threadDelay)
-import           Control.Concurrent.Async.Lifted
-import           Control.Exception
 import           Control.Logging
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
@@ -19,7 +17,6 @@ import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
 import qualified Data.ByteString.Char8 as B8
-import           Data.Foldable (foldl')
 import           Data.Function (fix)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
@@ -29,7 +26,6 @@ import           Data.Text (pack)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time
-import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
 import           Git.Tree.Working
 import           Git.Libgit2 (MonadLg, LgRepo, lgFactoryLogger)
@@ -39,7 +35,6 @@ import           Shelly (silently, shelly, run)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.Locale (defaultTimeLocale)
-import           System.Posix.Files
 
 data Options = Options
     { optQuiet      :: Bool
