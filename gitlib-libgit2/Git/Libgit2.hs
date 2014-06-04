@@ -676,7 +676,7 @@ lgExistsObject oid = do
                     ptr <- peek pptr
                     r1 <- c'git_odb_exists ptr coid 0
                     c'git_odb_free ptr
-                    return (Just (r1 == 0))
+                    return (Just (r1 == -1))
     maybe (throwM Git.RepositoryInvalid) return result
 
 lgForEachObject :: Ptr C'git_odb
