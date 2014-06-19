@@ -5,7 +5,7 @@
 
 cabal.mkDerivation (self: {
   pname = "git-monitor";
-  version = "3.1.1";
+  version = "3.1.1.1";
   src = ./.;
   isLibrary = false;
   isExecutable = true;
