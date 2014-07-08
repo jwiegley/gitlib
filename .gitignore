@@ -5,3 +5,4 @@ fpbuild/
 /gitlib-s3/s3cache/
 /vendor/
 result
+tags
