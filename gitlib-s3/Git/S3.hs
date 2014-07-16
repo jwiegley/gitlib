@@ -139,8 +139,8 @@ data QuotaStatus = QuotaCheckSuccess
                    }
                   deriving (Eq, Show, Generic)
 
-type MonadS3 m = (MonadThrow m, MonadCatch m,
-                  MonadIO m, MonadBaseControl IO m, MonadLogger m)
+type MonadS3 m = (MonadExcept m, MonadIO m, MonadBaseControl IO m,
+                  MonadLogger m)
 
 data BackendCallbacks = BackendCallbacks
     { checkQuota :: ObjectLength -> IO (Maybe QuotaStatus)
@@ -385,33 +385,6 @@ wrapLookupObject f name =
     wrap ("lookupObject: " ++ show (shaToText name))
         (liftIO $ f name)
         (return Nothing)
-
-instance MonadCatch m => MonadCatch (LoggingT m) where
-  catch (LoggingT m) c =
-      LoggingT $ \r -> m r `catch` \e -> runLoggingT (c e) r
-  mask a = LoggingT $ \e -> mask $ \u -> runLoggingT (a $ q u) e
-    where q u (LoggingT b) = LoggingT (u . b)
-  uninterruptibleMask a =
-    LoggingT $ \e -> uninterruptibleMask $ \u -> runLoggingT (a $ q u) e
-      where q u (LoggingT b) = LoggingT (u . b)
-
-instance MonadCatch m => MonadCatch (NoLoggingT m) where
-    catch (NoLoggingT m) c =
-        NoLoggingT $ m `catch` \e -> runNoLoggingT (c e)
-    mask a = NoLoggingT $ mask $ \u -> runNoLoggingT (a $ q u)
-      where q u (NoLoggingT b) = NoLoggingT $ u b
-    uninterruptibleMask a =
-        NoLoggingT $ uninterruptibleMask $ \u -> runNoLoggingT (a $ q u)
-      where q u (NoLoggingT b) = NoLoggingT $ u b
-
-instance MonadCatch m => MonadCatch (ResourceT m) where
-  catch (ResourceT m) c =
-      ResourceT $ \r -> m r `catch` \e -> runInternalState (c e) r
-  mask a = ResourceT $ \e -> mask $ \u -> runInternalState (a $ q u) e
-    where q u (ResourceT b) = ResourceT (u . b)
-  uninterruptibleMask a =
-    ResourceT $ \e -> uninterruptibleMask $ \u -> runInternalState (a $ q u) e
-      where q u (ResourceT b) = ResourceT (u . b)
 
 wrapGetBucket :: MonadS3 m
               => (Text -> Text -> ResourceT m (Maybe [Text]))

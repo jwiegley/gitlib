@@ -1,5 +1,5 @@
 { cabal, gitlib, gitlibCmdline, gitlibLibgit2, gitlibTest, hspec
-, hspecExpectations, HUnit
+, hspecExpectations, HUnit, git
 }:
 
 cabal.mkDerivation (self: {
@@ -8,7 +8,7 @@ cabal.mkDerivation (self: {
   src = ./.;
   testDepends = [
     gitlib gitlibCmdline gitlibLibgit2 gitlibTest hspec
-    hspecExpectations HUnit
+    hspecExpectations HUnit git
   ];
   meta = {
     description = "Run tests between repositories";

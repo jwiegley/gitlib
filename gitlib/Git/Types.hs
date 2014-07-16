@@ -1,3 +1,8 @@
+{-# LANGUAGE CPP #-}
+#if __GLASGOW_HASKELL__ > 707
+{-# LANGUAGE AllowAmbiguousTypes #-}
+#endif
+
 module Git.Types where
 
 import           Conduit

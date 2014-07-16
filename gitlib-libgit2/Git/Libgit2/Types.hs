@@ -52,7 +52,9 @@ type RefTarget   = Git.RefTarget LgRepo
 type TreeBuilder = Git.TreeBuilder LgRepo
 type Options     = Git.Options LgRepo
 
-type MonadLg m = (Applicative m, MonadThrow m, MonadCatch m,
+type MonadExcept m = (MonadThrow m, MonadCatch m, MonadMask m)
+
+type MonadLg m = (Applicative m, MonadExcept m,
                   MonadIO m, MonadBaseControl IO m, MonadLogger m)
 
 -- Types.hs

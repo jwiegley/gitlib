@@ -177,7 +177,7 @@ instance Ord OidPtr where
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
-instance (Applicative m, MonadThrow m, MonadCatch m,
+instance (Applicative m, MonadExcept m,
           MonadBaseControl IO m, MonadIO m, MonadLogger m)
          => Git.MonadGit LgRepo (ReaderT LgRepo m) where
     type Oid LgRepo = OidPtr
@@ -342,7 +342,7 @@ lgTreeOid (LgTree (Just tree)) = liftIO $ do
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
-gatherFrom' :: (MonadIO m, MonadBaseControl IO m, MonadThrow m)
+gatherFrom' :: (MonadIO m, MonadBaseControl IO m, MonadExcept m)
            => Int                -- ^ Size of the queue to create
            -> (TBQueue o -> m ()) -- ^ Action that generates output values
            -> Producer m o
@@ -992,7 +992,7 @@ lgSourceRefs =
 
 --compareRef = c'git_reference_cmp
 
-lgThrow :: (MonadIO m, MonadThrow m, Exception e) => (Text -> e) -> m a
+lgThrow :: (MonadIO m, MonadExcept m, Exception e) => (Text -> e) -> m a
 lgThrow f = do
     errStr <- liftIO $ do
         errPtr <- c'giterr_last
@@ -1103,7 +1103,7 @@ lgDiffContentsWithTree contents tree = do
                 "Received a Left value when a Right ByteString was expected"
         handleContent path (Right content) = return (path, content)
 
-        -- diffBlob :: MonadThrow m
+        -- diffBlob :: MonadExcept m
         --          => Git.TreeFilePath
         --          -> Maybe (Either Git.SHA ByteString)
         --          -> Maybe (ForeignPtr C'git_oid)
@@ -1218,7 +1218,7 @@ lgDiffContentsWithTree contents tree = do
                         B.cons (fromIntegral lineOrigin) bs
                 return 0
 
-checkResult :: (Eq a, Num a, MonadThrow m) => a -> Text -> m ()
+checkResult :: (Eq a, Num a, MonadExcept m) => a -> Text -> m ()
 checkResult r why = when (r /= 0) $ throwM (Git.BackendError why)
 
 lgBuildPackFile :: MonadLg m
@@ -1388,7 +1388,7 @@ lgCopyPackFile packFile = do
 
 lgLoadPackFileInMemory
     :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-        MonadThrow m, MonadCatch m)
+        MonadExcept m)
     => FilePath
     -> Ptr (Ptr C'git_odb_backend)
     -> Ptr (Ptr C'git_odb)
@@ -1420,7 +1420,7 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
     return odbPtr
 
 lgOpenPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   MonadThrow m, MonadCatch m)
+                   MonadExcept m)
                => FilePath -> m (Ptr C'git_odb)
 lgOpenPackFile idxPath = control $ \run ->
     alloca $ \odbPtrPtr ->
@@ -1428,17 +1428,17 @@ lgOpenPackFile idxPath = control $ \run ->
         lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
 lgClosePackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                    MonadThrow m, MonadCatch m)
+                    MonadExcept m)
                => Ptr C'git_odb -> m ()
 lgClosePackFile = liftIO . c'git_odb_free
 
 lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   MonadThrow m, MonadCatch m)
+                   MonadExcept m)
                => FilePath -> (Ptr C'git_odb -> m a) -> m a
 lgWithPackFile idxPath = bracket (lgOpenPackFile idxPath) lgClosePackFile
 
 lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   MonadThrow m, MonadCatch m)
+                   MonadExcept m)
                => Ptr C'git_odb -> Git.SHA -> Bool
                -> m (Maybe (C'git_otype, CSize, ByteString))
 lgReadFromPack odbPtr sha metadataOnly = liftIO $ do

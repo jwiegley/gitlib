@@ -17,9 +17,9 @@ import           Network.HTTP.Conduit
 
 default (Text)
 
-bucket = "fpco-john-development"
-access = "AKIAJT6ZIAY5FKAGVTOA"
-secret = "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"
+bucket = "XXX"
+access = "YYY"
+secret = "ZZZ"
 creds  = Credentials { accessKeyID     = E.encodeUtf8 access
                      , secretAccessKey = E.encodeUtf8 secret }
 config = Configuration Timestamp creds $ defaultLog Debug

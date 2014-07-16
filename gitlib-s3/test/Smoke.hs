@@ -29,7 +29,8 @@ import           System.FilePath.Posix
 import           Test.Hspec.HUnit ()
 import           Test.Hspec.Runner
 
-s3Factory :: (MonadThrow m, MonadIO m, MonadBaseControl IO m)
+s3Factory :: (MonadThrow m, MonadCatch m, MonadMask m,
+              MonadIO m, MonadBaseControl IO m)
           => Git.RepositoryFactory (ReaderT Lg.LgRepo (NoLoggingT m)) m Lg.LgRepo
 s3Factory = Lg.lgFactory
     { Git.runRepository = \ctxt m ->

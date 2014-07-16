@@ -1,7 +1,7 @@
 { cabal, conduit, conduitCombinators, exceptions, gitlib
 , gitlibTest, hspec, hspecExpectations, monadControl, mtl, parsec
 , processExtras, shelly, systemFilepath, tagged, text, time
-, transformers, transformersBase, unorderedContainers
+, transformers, transformersBase, unorderedContainers, git
 }:
 
 cabal.mkDerivation (self: {
@@ -15,7 +15,7 @@ cabal.mkDerivation (self: {
   ];
   testDepends = [
     gitlib gitlibTest hspec hspecExpectations systemFilepath tagged
-    text transformers
+    text transformers git
   ];
   meta = {
     description = "Gitlib repository backend that uses the git command-line tool";
