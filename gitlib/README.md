@@ -58,10 +58,10 @@ Now, let's make a commit.
 We want to add a new file to the repo (`README`), and then commit our
 changes.  To make a commit, we'll need the following things:
 
-    1. A list of parents (e.g., more than one for a merge)
-    2. The updated tree
-    3. The author and committor [Signatures], i.e. name/email/time
-    4. The commit message
+1. A list of parents (e.g., more than one for a merge)
+2. The updated tree
+3. The author and committor [Signatures], i.e. name/email/time
+4. The commit message
 
 For the first one, we'll use `HEAD`. For the author/committor
 signatures, we can easily invent one; for the commit message, again,
