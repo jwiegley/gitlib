@@ -8,6 +8,7 @@ Maintainer:          johnw@newartisans.com
 Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
+Homepage:            https://github.com/jwiegley/gitlib/tree/master/gitlib
 Description:
   @gitlib@ is a high-level, lazy and conduit-aware set of abstractions for
   programming with Git types.  Several different backends are available,
