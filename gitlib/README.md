@@ -37,7 +37,7 @@ keep track of things.)
     main = do
         let repoOpts = RepositoryOptions { repoPath = "."
                                          , repoWorkingDir = Nothnig
-                                         , reoIsPare = False
+                                         , repoIsBare = False
                                          , repoAutoCreate = False
                                          }
         repo <- openRepository repoOpts False
