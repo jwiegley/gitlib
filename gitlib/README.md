@@ -19,28 +19,28 @@ approach. Nevertheless, a tutorial is instructive.
 
 First things first&nbsp;&mdash; import the library
 
-    ```haskell
-    {-# Language OverloadedStrings #-}
+```haskell
+{-# Language OverloadedStrings #-}
 
-    import Git
-    import Data.ByteString (ByteString)
-    import Data.Maybe
-    import Data.Text.Encoding (encodeUtf8)
-    import qualified Data.Text as T
-    ```
+import Git
+import Data.ByteString (ByteString)
+import Data.Maybe
+import Data.Text.Encoding (encodeUtf8)
+import qualified Data.Text as T
+```
 
 Now, we need to grab a reference to the repository itself. (This is
 not a Git ref, but a plain old memory reference, which `libgit2` uses to
 keep track of things.)
 
 ```haskell
-    main = do
-        let repoOpts = RepositoryOptions { repoPath = "."
-                                         , repoWorkingDir = Nothnig
-                                         , reoIsPare = False
-                                         , repoAutoCreate = False
-                                         }
-        repo <- openRepository repoOpts False
+main = do
+    let repoOpts = RepositoryOptions { repoPath = "."
+                                     , repoWorkingDir = Nothnig
+                                     , reoIsPare = False
+                                     , repoAutoCreate = False
+                                     }
+    repo <- openRepository repoOpts False
 ```
 
 You can see above that `openRepository` is a versatile action, which
@@ -79,68 +79,68 @@ in-memory `blob`, to keep things simple.
 [blob]: https://github.com/jwiegley/gitlib/tree/master/gitlib/Git/Types.hs#L168
 [Signatures]: https://github.com/jwiegley/gitlib/tree/master/gitlib/Git/Types.hs#L253
 
-    ```haskell
-        let contents :: T.Text
-            contents = "Welcome to my shiney new project"
+```haskell
+let contents :: T.Text
+    contents = "Welcome to my shiney new project"
 
-            bytes :: ByteString
-            bytes = encodeUtf8 contents
+    bytes :: ByteString
+    bytes = encodeUtf8 contents
 
-            buffer :: BlobContents
-            buffer = BlobString bytes
-    ```
+    buffer :: BlobContents
+    buffer = BlobString bytes
+```
 
-    Notice the layers here. First, we start off with a `Text` string,
-    an abstract object which is not tied to any particular encoding.
-    (The fact that it maintains an internal encoding is irrelevant: as
-    long as it can re-encode its contents faithfully, it doesn't matter).
+Notice the layers here. First, we start off with a `Text` string,
+an abstract object which is not tied to any particular encoding.
+(The fact that it maintains an internal encoding is irrelevant: as
+long as it can re-encode its contents faithfully, it doesn't matter).
 
-    Then, we have a `ByteString`, holding the raw bitstream of the
-    would-be file. For this, we use the only [sane] [encoding] in the
-    known universe: `UTF-8`. Finally, we wrap up our `ByteString` in a
-    `BlobContents`, which has several constructors with various
-    perfomance characteristics.
+Then, we have a `ByteString`, holding the raw bitstream of the
+would-be file. For this, we use the only [sane] [encoding] in the
+known universe: `UTF-8`. Finally, we wrap up our `ByteString` in a
+`BlobContents`, which has several constructors with various
+perfomance characteristics.
 
 [sane]: http://utf8everywhere.org
 [encoding]: http://htmlpurifier.org/docs/enduser-utf8.html#whyutf8
 
-    Now, we register our new blob in the repository, and add in into the
-    new `tree`:
+Now, we register our new blob in the repository, and add in into the
+new `tree`:
 
-    ```haskell
-        blobID <- createBlob buffer
-        putEntry "README" BlobEntry { blobEntryOid = blobID
-                                    , blobEntryKind = PlainBlob
-                                    }
-    ```
-
-    Since this is the only file we're changing in the `tree`, we go
-    ahead and write it out (i.e. regisiter it in the repository)
-
-    ```haskell
-        (_, tree) <- writeTrueeBuilder =<< getBuilder
-    ```
-
-    Finally, we're ready to make our awesome commit! We'll go ahead and
-    Here it goes:
-
-    ```haskell
-        now <- getCurrentTime
-        let sig = Signature { signatureName = "Nobody"
-                            , signatureEmail = "nobody@example.com"
-                            , signatureWhen = now
+```haskell
+blobID <- createBlob buffer
+putEntry "README" BlobEntry { blobEntryOid = blobID
+                            , blobEntryKind = PlainBlob
                             }
-            commitMessage :: T.Text
-            commitMessage = "Added new README\n\nIt's about time!"
+```
 
-        mRef <- lookupReference "HEAD"
-        let ref = fromMaybe (error "Invalid ref: HEAD") mRef
+Since this is the only file we're changing in the `tree`, we go
+ahead and write it out (i.e. regisiter it in the repository)
 
-        mCid <- referenceToOid ref
-        let head = fromMaybe (error "Something bad happened") mCid
+```haskell
+(_, tree) <- writeTrueeBuilder =<< getBuilder
+```
 
-        commit <- createCommit [head] tree sig sig commitMessage
-    ```
+Finally, we're ready to make our awesome commit! We'll go ahead and
+Here it goes:
+
+```haskell
+now <- getCurrentTime
+let sig = Signature { signatureName = "Nobody"
+                    , signatureEmail = "nobody@example.com"
+                    , signatureWhen = now
+                    }
+    commitMessage :: T.Text
+    commitMessage = "Added new README\n\nIt's about time!"
+
+mRef <- lookupReference "HEAD"
+let ref = fromMaybe (error "Invalid ref: HEAD") mRef
+
+mCid <- referenceToOid ref
+let head = fromMaybe (error "Something bad happened") mCid
+
+commit <- createCommit [head] tree sig sig commitMessage
+```
 
 MonadGit
 --------
