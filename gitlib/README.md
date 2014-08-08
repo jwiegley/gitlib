@@ -36,8 +36,8 @@ keep track of things.)
 ```haskell
     main = do
         let repoOpts = RepositoryOptions { repoPath = "."
-                                         , repoWorkingDir = Nothnig
-                                         , reoIsPare = False
+                                         , repoWorkingDir = Nothing
+                                         , repoIsBare = False
                                          , repoAutoCreate = False
                                          }
         repo <- openRepository repoOpts False
