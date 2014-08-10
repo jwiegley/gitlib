@@ -233,4 +233,4 @@ Library
     include-dirs:
       libgit2/src/unix
     extra-libraries:
-      ssl, crypto
+      ssl, crypto, pthread
