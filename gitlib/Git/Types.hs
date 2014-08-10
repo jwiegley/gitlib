@@ -202,7 +202,7 @@ data TreeEntry r = BlobEntry   { blobEntryOid   :: !(BlobOid r)
 --     show (TreeEntry oid)   = "<TreeEntry " ++ show oid ++ ">"
 --     show (CommitEntry oid) = "<CommitEntry " ++ show oid ++ ">"
 
-treeEntryToOid :: MonadGit r m => TreeEntry r -> Oid r
+treeEntryToOid :: TreeEntry r -> Oid r
 treeEntryToOid (BlobEntry boid _) = untag boid
 treeEntryToOid (TreeEntry toid)   = untag toid
 treeEntryToOid (CommitEntry coid) = untag coid
