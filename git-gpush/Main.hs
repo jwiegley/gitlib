@@ -69,7 +69,7 @@ options = Options
     <$> switch (short 'v' <> long "verbose" <> help "Display info")
     <*> switch (short 'n' <> long "dry-run" <> help "Dry run")
     <*> argument (Just . Just) (value Nothing)
-    <*> arguments Just hidden
+    <*> many (argument Just hidden)
 
 volume :: Options -> Sh a -> Sh a
 volume opts = if verbose opts then verbosely else silently
@@ -88,7 +88,7 @@ main = execParser opts >>= pushToGitHub
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
-    hdr  = "git-gpush 1.0.0 - push to GitHub with smarter behavior"
+    hdr  = "git-gpush 3.1.0.1 - push to GitHub with smarter behavior"
     desc = "\nDescription goes here."
 
 pushToGitHub :: Options -> IO ()

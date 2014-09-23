@@ -56,7 +56,7 @@ options = Options
          <> help "Git repository to store snapshots in (def: \".git\")")
     <*> strOption (short 'd' <> long "work-dir" <> value ""
                    <> help "The working tree to snapshot (def: \".\")")
-    <*> option (short 'i' <> long "interval" <> value 60
+    <*> option auto (short 'i' <> long "interval" <> value 60
                 <> help "Snapshot each N seconds")
     <*> switch (short 'r' <> long "resume"
                 <> help "Resumes using last set of snapshots")
@@ -66,7 +66,7 @@ main = execParser opts >>= withStdoutLogging . doMain
   where
     opts = info (helper <*> options)
                 (fullDesc <> progDesc desc <> header hdr)
-    hdr  = "git-monitor 3.1.0 - quickly snapshot working tree changes"
+    hdr  = "git-monitor 3.1.1.2 - quickly snapshot working tree changes"
     desc = "\nPassively snapshot working tree changes efficiently.\n\nThe intended usage is to run \"git monitor &\" in your project\ndirectory before you begin a hacking session.\n\nSnapshots are kept in refs/snapshots/refs/heads/$BRANCH"
 
 doMain :: Options -> IO ()
