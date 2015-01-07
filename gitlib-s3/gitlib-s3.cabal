@@ -67,7 +67,7 @@ Library
     , http-conduit         >= 2.0
     , lens                 >= 3.8
     , lifted-base          >= 0.2.0.2
-    , monad-control
+    , monad-control        <  1.0
     , monad-logger         >= 0.3.6.1
     , resourcet            >= 1.1.2.2
     , retry                >= 0.2.0.0
