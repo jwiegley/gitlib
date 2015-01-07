@@ -32,7 +32,7 @@ Library
     , github               >= 0.5.0
     , hex                  >= 0.1.2
     , http-conduit         >= 1.8.5.1
-    , monad-control        >= 0.3.2
+    , monad-control        <  1.0
     , network              >= 2.4.0.1
     , old-locale           >= 1.0.0.4
     , rest-client          >= 0.1.0.0
