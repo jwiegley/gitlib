@@ -59,7 +59,7 @@ lookupObject'
   -> m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- Git.getRepository
-    result <- control $ \run -> alloca $ \ptr -> do
+    result <- liftBaseWith $ \run -> alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
             withForeignPtr oid $ \oidPtr ->
                 if len == 40
@@ -71,10 +71,10 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
               let args = ["Could not lookup ", T.pack oidStr]
               err <- c'giterr_last
               if err == nullPtr
-                  then run $ return $ Left $ T.concat args
+                  then return $ Left $ T.concat args
                   else do
                       errmsg <- peekCString . c'git_error'message =<< peek err
-                      run $ return $ Left $
+                      return $ Left $
                           T.concat $ args ++ [": ", T.pack errmsg]
             else do
               ptr'     <- peek ptr
@@ -84,8 +84,8 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
 
               let p = castPtr ptr'
               fptr <- FC.newForeignPtr p (c'git_object_free p)
-              run $ Right <$> createFn coidCopy (castForeignPtr fptr) ptr'
-    either (throwM . Git.BackendError) return result
+              Right <$> run (createFn coidCopy (castForeignPtr fptr) ptr')
+    either (throwM . Git.BackendError) restoreM result
 
 -- lgLookupObject :: Text -> LgRepository Dynamic
 -- lgLookupObject str

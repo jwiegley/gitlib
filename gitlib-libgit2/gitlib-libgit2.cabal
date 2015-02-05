@@ -1,5 +1,5 @@
 Name:                gitlib-libgit2
-Version:             3.1.0.2
+Version:             3.1.0.3
 Synopsis:            Libgit2 backend for gitlib
 License-file:        LICENSE
 License:             MIT
@@ -53,7 +53,7 @@ Library
         , lifted-base          >= 0.2.0.2
         , missing-foreign      >= 0.1.1
         , mmorph               >= 1.0.0
-        , monad-control        <  1.0
+        , monad-control        >= 1.0
         , monad-logger         >= 0.3.4.1
         , monad-loops          >= 0.3.3.0
         , mtl                  >= 2.1.2
