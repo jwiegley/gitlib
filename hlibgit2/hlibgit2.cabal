@@ -1,5 +1,5 @@
 Name:                hlibgit2
-Version:             0.18.0.13
+Version:             0.18.0.14
 Synopsis:            Low-level bindings to libgit2
 Description:         Bindings to libgit2 v0.18.0.
 License-file:        LICENSE
@@ -29,6 +29,8 @@ Test-suite smoke
   default-language: Haskell98
   type: exitcode-stdio-1.0
   ghc-options: -Wall
+  if os(linux)
+    ghc-options: -optl-pthread
   main-is: Main.hs
   hs-source-dirs: test
   build-depends:
