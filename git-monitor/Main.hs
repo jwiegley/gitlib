@@ -96,12 +96,13 @@ doMain opts = do
 
     -- Make sure we're in a known branch, and if so, let it begin
     forever $ withRepository lgFactoryLogger gd $ do
-        log' $ pack $ "Saving snapshots under " ++ gd
         log' $ pack $ "Working tree: " ++ wd
         ref <- lookupReference "HEAD"
         case ref of
             Just (RefSymbolic name) -> do
                 log' $ "Tracking branch " <> name
+                log' $ "Saving snapshots under " <> T.pack gd
+                log' $ "Snapshot ref is refs/snapshots/" <> name
                 void $ start wd userName userEmail name
             _ -> do
                 log' "Cannot use git-monitor if no branch is checked out"
