@@ -29,7 +29,6 @@ import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.Fix
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.State
 import qualified Data.ByteString as B
@@ -84,9 +83,6 @@ instance MonadTrans (TreeT r) where
 
 instance (MonadIO m) => MonadIO (TreeT r m) where
     liftIO = lift . liftIO
-
-instance (MonadLogger m) => MonadLogger (TreeT r m) where
-    monadLoggerLog a b c d = lift $ monadLoggerLog a b c d
 
 getBuilder :: Monad m => TreeT r m (TreeBuilder r m)
 getBuilder = TreeT get

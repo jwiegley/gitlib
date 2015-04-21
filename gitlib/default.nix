@@ -1,5 +1,5 @@
 { cabal, base16Bytestring, conduit, failure, filepath, hashable
-, liftedBase, monadControl, monadLogger, mtl, resourcet, semigroups
+, liftedBase, monadControl, mtl, resourcet, semigroups
 , tagged, text, time, transformers, unorderedContainers
 , liftedAsync, conduitCombinators, systemFilepath
 }:
@@ -10,7 +10,7 @@ cabal.mkDerivation (self: {
   src = ./.;
   buildDepends = [
     base16Bytestring conduit failure filepath hashable liftedBase
-    monadControl monadLogger mtl resourcet semigroups tagged text time
+    monadControl mtl resourcet semigroups tagged text time
     transformers unorderedContainers
     liftedAsync conduitCombinators systemFilepath
   ];
