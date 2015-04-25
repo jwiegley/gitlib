@@ -1,4 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -94,7 +95,9 @@ import           Foreign.ForeignPtr
 import qualified Foreign.ForeignPtr.Unsafe as FU
 import           Foreign.Marshal.Alloc
 import           Foreign.Marshal.Array
+#ifdef missing_calloc
 import           Foreign.Marshal.MissingAlloc
+#endif
 import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
