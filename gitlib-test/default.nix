@@ -1,18 +1,16 @@
-{ cabal, conduit, failure, gitlib, hspec, hspecExpectations, HUnit
-, monadControl, tagged, text, time, transformers
+{ mkDerivation, base, bytestring, conduit, conduit-combinators
+, exceptions, gitlib, hspec, hspec-expectations, HUnit
+, monad-control, stdenv, tagged, text, time, transformers
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-test";
-  version = "3.0.1";
+  version = "3.1.0.2";
   src = ./.;
   buildDepends = [
-    conduit failure gitlib hspec hspecExpectations HUnit monadControl
-    tagged text time transformers
+    base bytestring conduit conduit-combinators exceptions gitlib hspec
+    hspec-expectations HUnit monad-control tagged text time
+    transformers
   ];
-  meta = {
-    description = "Test library for confirming gitlib backend compliance";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "Test library for confirming gitlib backend compliance";
+  license = stdenv.lib.licenses.mit;
+}

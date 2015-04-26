@@ -1,25 +1,23 @@
-{ cabal, conduit, conduitCombinators, exceptions, gitlib
-, gitlibTest, hspec, hspecExpectations, monadControl, mtl, parsec
-, processExtras, shelly, systemFilepath, tagged, text, time
-, transformers, transformersBase, unorderedContainers, git
+{ mkDerivation, base, bytestring, conduit, conduit-combinators
+, containers, directory, exceptions, gitlib, gitlib-test, hspec
+, hspec-expectations, monad-control, mtl, old-locale, parsec
+, process-extras, shelly, stdenv, system-filepath, tagged, text
+, time, transformers, transformers-base, unordered-containers
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-cmdline";
-  version = "3.1.0";
+  version = "3.1.0.1";
   src = ./.;
   buildDepends = [
-    conduit conduitCombinators exceptions gitlib monadControl mtl
-    parsec processExtras shelly systemFilepath tagged text time
-    transformers transformersBase unorderedContainers
+    base bytestring conduit conduit-combinators containers directory
+    exceptions gitlib monad-control mtl old-locale parsec
+    process-extras shelly system-filepath tagged text time transformers
+    transformers-base unordered-containers
   ];
   testDepends = [
-    gitlib gitlibTest hspec hspecExpectations systemFilepath tagged
-    text transformers git
+    base gitlib gitlib-test hspec hspec-expectations system-filepath
+    tagged text transformers
   ];
-  meta = {
-    description = "Gitlib repository backend that uses the git command-line tool";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "Gitlib repository backend that uses the git command-line tool";
+  license = stdenv.lib.licenses.mit;
+}

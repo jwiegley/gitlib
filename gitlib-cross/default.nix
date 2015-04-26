@@ -1,18 +1,15 @@
-{ cabal, gitlib, gitlibCmdline, gitlibLibgit2, gitlibTest, hspec
-, hspecExpectations, HUnit, git
+{ mkDerivation, base, gitlib, gitlib-cmdline, gitlib-libgit2
+, gitlib-test, hspec, hspec-expectations, HUnit, stdenv
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-cross";
   version = "3.1.0";
   src = ./.;
+  buildDepends = [ base ];
   testDepends = [
-    gitlib gitlibCmdline gitlibLibgit2 gitlibTest hspec
-    hspecExpectations HUnit git
+    base gitlib gitlib-cmdline gitlib-libgit2 gitlib-test hspec
+    hspec-expectations HUnit
   ];
-  meta = {
-    description = "Run tests between repositories";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "Run tests between repositories";
+  license = stdenv.lib.licenses.mit;
+}

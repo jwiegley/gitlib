@@ -1,29 +1,27 @@
-{ cabal, aeson, attempt, aws, bifunctors, binary, conduit
-, conduitCombinators, dataDefault, exceptions, filepath, gitlib
-, gitlibLibgit2, gitlibTest, hlibgit2, hspec, hspecExpectations
-, httpConduit, HUnit, lens, liftedBase, monadControl, monadLogger
-, resourcet, retry, split, stm, temporary, text, time, transformers
-, unorderedContainers
+{ mkDerivation, aeson, attempt, aws, base, bifunctors, binary
+, bytestring, conduit, conduit-combinators, data-default, directory
+, exceptions, filepath, ghc-prim, gitlib, gitlib-libgit2
+, gitlib-test, hlibgit2, hspec, hspec-expectations, http-conduit
+, HUnit, lens, lifted-base, monad-control, monad-logger, resourcet
+, retry, split, stdenv, stm, template-haskell, temporary, text
+, time, transformers, unordered-containers
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-s3";
-  version = "3.1.0";
+  version = "3.1.0.1";
   src = ./.;
   buildDepends = [
-    aeson attempt aws bifunctors binary conduit conduitCombinators
-    dataDefault exceptions filepath gitlib gitlibLibgit2 hlibgit2
-    httpConduit lens liftedBase monadControl monadLogger resourcet
-    retry split stm text time transformers unorderedContainers
+    aeson attempt aws base bifunctors binary bytestring conduit
+    conduit-combinators data-default directory exceptions filepath
+    ghc-prim gitlib gitlib-libgit2 hlibgit2 http-conduit lens
+    lifted-base monad-control monad-logger resourcet retry split stm
+    template-haskell text time transformers unordered-containers
   ];
   testDepends = [
-    aws dataDefault exceptions filepath gitlib gitlibLibgit2 gitlibTest
-    hlibgit2 hspec hspecExpectations HUnit monadLogger resourcet
-    temporary text transformers
+    aws base data-default directory exceptions filepath gitlib
+    gitlib-libgit2 gitlib-test hlibgit2 hspec hspec-expectations HUnit
+    monad-logger resourcet temporary text transformers
   ];
-  meta = {
-    description = "Gitlib repository backend for storing Git objects in Amazon S3";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "Gitlib repository backend for storing Git objects in Amazon S3";
+  license = stdenv.lib.licenses.mit;
+}

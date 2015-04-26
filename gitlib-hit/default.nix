@@ -1,22 +1,21 @@
-{ cabal, conduit, conduitCombinators, gitlib, gitlibTest, hit
-, hspec, HUnit, systemFilepath, tagged, text, time, transformers
-, unorderedContainers
+{ mkDerivation, base, bytestring, conduit, conduit-combinators
+, containers, directory, gitlib, gitlib-test, hit, hspec, HUnit
+, old-locale, stdenv, system-filepath, tagged, text, time
+, transformers, unordered-containers
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-hit";
   version = "3.1.0";
   src = ./.;
   buildDepends = [
-    conduit conduitCombinators gitlib hit systemFilepath tagged text
-    time transformers unorderedContainers
+    base bytestring conduit conduit-combinators containers directory
+    gitlib hit old-locale system-filepath tagged text time transformers
+    unordered-containers
   ];
   testDepends = [
-    gitlib gitlibTest hit hspec HUnit systemFilepath time
+    base bytestring gitlib gitlib-test hit hspec HUnit old-locale
+    system-filepath time
   ];
-  meta = {
-    description = "Gitlib repository backend that uses the pure-Haskell Hit library";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "Gitlib repository backend that uses the pure-Haskell Hit library";
+  license = stdenv.lib.licenses.mit;
+}

@@ -1,24 +1,26 @@
-{ cabal, conduit, failure, fastLogger, filepath, gitlib, gitlibTest
-, hlibgit2, hspec, hspecExpectations, HUnit, liftedAsync
-, liftedBase, missingForeign, mmorph, monadControl, monadLogger
-, monadLoops, mtl, resourcet, stm, stmConduit, tagged, text
-, textIcu, time, transformers, transformersBase
+{ mkDerivation, base, bytestring, conduit, conduit-combinators
+, containers, directory, exceptions, fast-logger, filepath, gitlib
+, gitlib-test, hlibgit2, hspec, hspec-expectations, HUnit
+, lifted-async, lifted-base, missing-foreign, mmorph, monad-control
+, monad-logger, monad-loops, mtl, resourcet, stdenv, stm
+, stm-conduit, tagged, template-haskell, text, text-icu, time
+, transformers, transformers-base
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-libgit2";
-  version = "3.0.1";
+  version = "3.1.0.3";
   src = ./.;
   buildDepends = [
-    conduit failure fastLogger filepath gitlib hlibgit2 liftedAsync
-    liftedBase missingForeign mmorph monadControl monadLogger
-    monadLoops mtl resourcet stm stmConduit tagged text textIcu time
-    transformers transformersBase
+    base bytestring conduit conduit-combinators containers directory
+    exceptions fast-logger filepath gitlib hlibgit2 lifted-async
+    lifted-base missing-foreign mmorph monad-control monad-logger
+    monad-loops mtl resourcet stm stm-conduit tagged template-haskell
+    text text-icu time transformers transformers-base
   ];
-  testDepends = [ gitlib gitlibTest hspec hspecExpectations HUnit ];
-  meta = {
-    description = "Libgit2 backend for gitlib";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  testDepends = [
+    base exceptions gitlib gitlib-test hspec hspec-expectations HUnit
+    monad-logger transformers
+  ];
+  description = "Libgit2 backend for gitlib";
+  license = stdenv.lib.licenses.mit;
+}

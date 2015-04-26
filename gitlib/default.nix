@@ -1,22 +1,20 @@
-{ cabal, base16Bytestring, conduit, failure, filepath, hashable
-, liftedBase, monadControl, mtl, resourcet, semigroups
-, tagged, text, time, transformers, unorderedContainers
-, liftedAsync, conduitCombinators, systemFilepath
+{ mkDerivation, base, base16-bytestring, bytestring, conduit
+, conduit-combinators, containers, directory, exceptions, filepath
+, hashable, lifted-async, lifted-base, monad-control, monad-logger
+, mtl, resourcet, semigroups, stdenv, system-filepath, tagged, text
+, time, transformers, unix, unordered-containers
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib";
-  version = "3.0.2";
+  version = "3.1.0.1";
   src = ./.;
   buildDepends = [
-    base16Bytestring conduit failure filepath hashable liftedBase
-    monadControl mtl resourcet semigroups tagged text time
-    transformers unorderedContainers
-    liftedAsync conduitCombinators systemFilepath
+    base base16-bytestring bytestring conduit conduit-combinators
+    containers directory exceptions filepath hashable lifted-async
+    lifted-base monad-control monad-logger mtl resourcet semigroups
+    system-filepath tagged text time transformers unix
+    unordered-containers
   ];
-  meta = {
-    description = "API library for working with Git repositories";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "API library for working with Git repositories";
+  license = stdenv.lib.licenses.mit;
+}

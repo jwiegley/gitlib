@@ -1,19 +1,20 @@
-{ cabal, gitlib, gitlibLibgit2, hspec, hspecExpectations, HUnit
-, lens, tagged, text, time, transformers, unorderedContainers
+{ mkDerivation, base, bytestring, containers, gitlib
+, gitlib-libgit2, hspec, hspec-expectations, HUnit, lens, stdenv
+, tagged, template-haskell, text, time, transformers
+, unordered-containers
 }:
-
-cabal.mkDerivation (self: {
+mkDerivation {
   pname = "gitlib-lens";
   version = "3.1.0";
   src = ./.;
-  buildDepends = [ gitlib lens tagged text unorderedContainers ];
+  buildDepends = [
+    base bytestring containers gitlib lens tagged template-haskell text
+    unordered-containers
+  ];
   testDepends = [
-    gitlib gitlibLibgit2 hspec hspecExpectations HUnit lens time
+    base gitlib gitlib-libgit2 hspec hspec-expectations HUnit lens time
     transformers
   ];
-  meta = {
-    description = "Lenses for working with gitlib more conveniently";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  description = "Lenses for working with gitlib more conveniently";
+  license = stdenv.lib.licenses.mit;
+}
