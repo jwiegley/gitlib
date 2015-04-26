@@ -51,7 +51,6 @@ Library
         , filepath             >= 1.3.0
         , lifted-async         >= 0.1.0
         , lifted-base          >= 0.2.0.2
-        , missing-foreign      >= 0.1.1
         , mmorph               >= 1.0.0
         , monad-control        >= 1.0
         , monad-logger         >= 0.3.4.1
@@ -73,3 +72,6 @@ Library
         Git.Libgit2.Internal
         Git.Libgit2.Trace
         Git.Libgit2.Types
+    if impl (ghc < 7.10)
+        build-depends: missing-foreign >= 0.1.1
+        cpp-options: -Dmissing_calloc

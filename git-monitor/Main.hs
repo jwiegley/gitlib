@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -34,7 +35,9 @@ import           Prelude hiding (log)
 import           Shelly (silently, shelly, run)
 import           System.Directory
 import           System.FilePath.Posix
+#if !MIN_VERSION_time (1,5,0)
 import           System.Locale (defaultTimeLocale)
+#endif
 
 data Options = Options
     { optQuiet      :: Bool
