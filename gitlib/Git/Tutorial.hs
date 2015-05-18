@@ -39,8 +39,6 @@ module Git.Tutorial
 > repo <- openOrCreateRepository path False -- False here means "not bare"
 > ... make use of the repository ...
 
-   Note that the 'path' variable here is of type 'Filesystem.Path.FilePath',
-   since @gitlib@ almost never uses the 'String' type.
 -}
 
 {- $references
