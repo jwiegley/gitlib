@@ -1,13 +1,10 @@
-{ cabal, exceptions, gitlib, mtl, transformers }:
-
-cabal.mkDerivation (self: {
+{ mkDerivation, base, exceptions, gitlib, mtl, stdenv, transformers
+}:
+mkDerivation {
   pname = "gitlib-sample";
   version = "3.1.0";
   src = ./.;
-  buildDepends = [ exceptions gitlib mtl transformers ];
-  meta = {
-    description = "Sample backend for gitlib showing the basic structure for any backend";
-    license = self.stdenv.lib.licenses.mit;
-    platforms = self.ghc.meta.platforms;
-  };
-})
+  buildDepends = [ base exceptions gitlib mtl transformers ];
+  description = "Sample backend for gitlib showing the basic structure for any backend";
+  license = stdenv.lib.licenses.mit;
+}
