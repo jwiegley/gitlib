@@ -1,13 +1,13 @@
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ConstraintKinds          #-}
+{-# LANGUAGE FlexibleContexts         #-}
+{-# LANGUAGE FlexibleInstances        #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses    #-}
+{-# LANGUAGE OverloadedStrings        #-}
+{-# LANGUAGE QuasiQuotes              #-}
+{-# LANGUAGE TypeFamilies             #-}
+{-# LANGUAGE UndecidableInstances     #-}
+{-# LANGUAGE ViewPatterns             #-}
 {-# OPTIONS_GHC -Wall #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -24,35 +24,34 @@ import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader
-import           Data.Aeson hiding (Success)
+import           Data.Aeson                  hiding (Success)
 import           Data.Attempt
-import           Data.ByteString as B hiding (pack, putStrLn, map, null)
-import qualified Data.ByteString.Base64 as B64
-import           Data.Default ( Default(..) )
-import           Data.Foldable (for_)
+import           Data.ByteString             as B hiding (map, null, pack,
+                                                   putStrLn)
+import qualified Data.ByteString.Base64      as B64
+import           Data.Default                (Default (..))
+import           Data.Foldable               (for_)
 import           Data.Function
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
+import           Data.HashMap.Strict         (HashMap)
+import qualified Data.HashMap.Strict         as HashMap
 import           Data.Hex
 import           Data.IORef
-import           Data.List as L
+import           Data.List                   as L
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Tagged
-import           Data.Text as T hiding (drop, map, null)
-import qualified Data.Text.Encoding as T
+import           Data.Text                   as T hiding (drop, map, null)
+import qualified Data.Text.Encoding          as T
 import           Data.Time
-import           Filesystem.Path.CurrentOS (FilePath)
-import qualified Filesystem.Path.CurrentOS as F
 import qualified Git
-import qualified Github.Repos as Github
-import           Network.HTTP.Conduit hiding (Proxy, Response)
+import qualified Github.Repos                as Github
+import           Network.HTTP.Conduit        hiding (Proxy, Response)
 import           Network.REST.Client
-import           Prelude hiding (FilePath)
+import           System.FilePath             as F
 import           System.IO.Unsafe
-import           System.Locale (defaultTimeLocale)
-import           Text.Shakespeare.Text (st)
-
+import           System.Locale               (defaultTimeLocale)
+import           Text.Shakespeare.Text       (st)
+
 type BlobOid m   = Git.BlobOid (GitHubRepository m)
 type TreeOid m   = Git.TreeOid (GitHubRepository m)
 type CommitOid m = Git.CommitOid (GitHubRepository m)
@@ -175,7 +174,7 @@ ghLookupBlob oid = do
         enc -> failure (Git.BlobEncodingUnknown enc)
 
   where dec = B64.decode . B.concat . B.split 10
-
+
 data Content = Content { contentContent  :: ByteString
                        , contentEncoding :: Text } deriving Show
 
@@ -225,7 +224,7 @@ ghCreateBlob (Git.BlobString content) =
         <$> ghRestful "POST" "git/blobs"
                       (Content (B64.encode content) "base64")
 ghCreateBlob _ = error "NYI"    -- jww (2013-02-06): NYI
-
+
 data GitHubTreeProxy m = GitHubTreeProxy
     { ghpTreeOid      :: Maybe Text
     , ghpTreeContents :: [GitHubTreeEntryProxy m]
@@ -478,12 +477,6 @@ ghModifyTree t path createIfNotExist f =
     Git.fromModifyTreeResult <$>
         doModifyTree t (splitPath path) createIfNotExist f
 
-splitPath :: FilePath -> [Text]
-splitPath path = T.splitOn "/" text
-  where text = case F.toText path of
-                 Left x  -> error $ "Invalid path: " ++ T.unpack x
-                 Right y -> y
-
 ghWriteTree :: Git.MonadGit m => Tree m -> GitHubRepository m (TreeOid m)
 ghWriteTree tree = do
     contents <- liftIO $ readIORef (ghTreeContents (Git.getTreeData tree))
@@ -508,7 +501,7 @@ ghTraverseEntries tree f = do
     mapM (\entry -> f (F.fromText (ghpTreeEntryPath entry))
                         =<< proxyToTreeEntry entry)
          (ghpTreeContents treeProxy)
-
+
 -- data GitHubSignature = GitHubSignature
 --     { ghSignatureDate  :: Text
 --     , ghSignatureName  :: Text
@@ -624,7 +617,7 @@ ghCreateCommit parents tree author committer message ref = do
             Git.RefObj (Git.ByOid (Git.commitOid commit))
 
     return commit
-
+
 data GitHubObjectRef = GitHubObjectRef
     { objectRefType :: Text
     , objectRefSha  :: Text } deriving Show
@@ -713,7 +706,7 @@ ghUpdateRef _ (Git.RefSymbolic _) =
 
 ghDeleteRef :: Git.MonadGit m => Text -> GitHubRepository m ()
 ghDeleteRef ref = ghRestful "DELETE" ("git/" <> ref) ref
-
+
 data GitHubOwner = GitHubUser Text
                  | GitHubOrganization Text
                  deriving (Show, Eq)
@@ -782,7 +775,7 @@ instance (MonadIO m, MonadBaseControl IO m)
 
 ghGet :: Git.MonadGit m => GitHubRepository m Repository
 ghGet = GitHubRepository ask
-
+
 ghDeleteRepository :: Git.MonadGit m => GitHubRepository m ()
 ghDeleteRepository = do
     repo <- ghGet
@@ -886,7 +879,7 @@ ghFactory :: Git.MonadGit m
 ghFactory owner token = Git.RepositoryFactory
     { Git.openRepository  = \opts ->
        openGhRepository opts owner
-           (either id id (F.toText (F.basename (Git.repoPath opts)))) token
+           (either id id (F.toText (F.takeBaseName (Git.repoPath opts)))) token
     , Git.runRepository   = runGhRepository
     , Git.closeRepository = closeGhRepository
     , Git.getRepository   = ghGet
