@@ -10,7 +10,6 @@ import qualified Data.HashSet as HashSet
 import           Data.Tagged
 import           Data.Text as T
 import           Data.Text.Encoding as T
-import           Filesystem.Path.CurrentOS
 import           Git.Types
 
 createBlobUtf8 :: MonadGit r m => Text -> m (BlobOid r)
@@ -48,11 +47,11 @@ blobToLazyByteString :: MonadGit r m => Blob r m -> m BL.ByteString
 blobToLazyByteString (Blob _ contents) = blobContentsToLazyByteString contents
 
 writeBlob :: (MonadGit r m, MonadIO m, MonadResource m)
-          => Prelude.FilePath -> BlobContents m -> m ()
+          => FilePath -> BlobContents m -> m ()
 writeBlob path (BlobString bs)         = liftIO $ B.writeFile path bs
-writeBlob path (BlobStringLazy bs)     = sourceLazy bs $$ sinkFile (decodeString path)
-writeBlob path (BlobStream str)        = str $$ sinkFile (decodeString path)
-writeBlob path (BlobSizedStream str _) = str $$ sinkFile (decodeString path)
+writeBlob path (BlobStringLazy bs)     = sourceLazy bs $$ sinkFile path
+writeBlob path (BlobStream str)        = str $$ sinkFile path
+writeBlob path (BlobSizedStream str _) = str $$ sinkFile path
 
 treeBlobEntries :: MonadGit r m
                 => Tree r -> m [(TreeFilePath, BlobOid r, BlobKind)]

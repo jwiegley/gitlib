@@ -41,12 +41,12 @@ import qualified Data.Text.Lazy as TL
 #endif
 import           Data.Time
 import qualified Filesystem.Path.CurrentOS as F
+import           Data.Time.Locale.Compat (defaultTimeLocale)
 import           Git
 import qualified Git.Tree.Builder.Pure as Pure
 import           Shelly hiding (FilePath, trace)
 import           System.Directory
 import           System.Exit
-import           System.Locale (defaultTimeLocale)
 import           System.Process.ByteString
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator

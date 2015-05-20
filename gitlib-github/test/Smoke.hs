@@ -11,7 +11,6 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Text as T
-import           Filesystem.Path.CurrentOS
 import qualified Git
 import qualified Git.GitHub as Gh
 import qualified Git.Smoke as Git

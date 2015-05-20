@@ -2,7 +2,8 @@
 , containers, directory, exceptions, gitlib, gitlib-test, hspec
 , hspec-expectations, monad-control, mtl, old-locale, parsec
 , process-extras, shelly, stdenv, system-filepath, tagged, text
-, time, transformers, transformers-base, unordered-containers
+, time, time-locale-compat, transformers, transformers-base
+, unordered-containers
 }:
 mkDerivation {
   pname = "gitlib-cmdline";
@@ -11,8 +12,9 @@ mkDerivation {
   buildDepends = [
     base bytestring conduit conduit-combinators containers directory
     exceptions gitlib monad-control mtl old-locale parsec
-    process-extras shelly system-filepath tagged text time transformers
-    transformers-base unordered-containers
+    process-extras shelly system-filepath tagged text time
+    time-locale-compat transformers transformers-base
+    unordered-containers
   ];
   testDepends = [
     base gitlib gitlib-test hspec hspec-expectations system-filepath
