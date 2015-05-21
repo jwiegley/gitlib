@@ -6,7 +6,7 @@
 }:
 mkDerivation {
   pname = "gitlib";
-  version = "3.1.0.1";
+  version = "3.1.0.2";
   src = ./.;
   buildDepends = [
     base base16-bytestring bytestring conduit conduit-combinators

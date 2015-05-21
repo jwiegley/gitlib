@@ -8,7 +8,7 @@
 }:
 mkDerivation {
   pname = "gitlib-libgit2";
-  version = "3.1.0.3";
+  version = "3.1.0.5";
   src = ./.;
   buildDepends = [
     base bytestring conduit conduit-combinators containers directory

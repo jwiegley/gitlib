@@ -4,7 +4,7 @@
 }:
 mkDerivation {
   pname = "gitlib-test";
-  version = "3.1.0.2";
+  version = "3.1.0.3";
   src = ./.;
   buildDepends = [
     base bytestring conduit conduit-combinators exceptions gitlib hspec
