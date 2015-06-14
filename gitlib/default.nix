@@ -3,7 +3,7 @@
 , hashable, lifted-async, lifted-base, monad-control
 , mtl, semigroups, stdenv, tagged, text, time, free
 , transformers, unix, unordered-containers, pipes-safe
-, transformers-base, template-haskell
+, transformers-base, template-haskell, pipes-bytestring
 }:
 mkDerivation {
   pname = "gitlib";
@@ -14,7 +14,7 @@ mkDerivation {
     containers directory exceptions filepath hashable lifted-async
     lifted-base monad-control mtl semigroups free pipes-safe
     tagged text time transformers unix unordered-containers
-    transformers-base template-haskell
+    transformers-base template-haskell pipes-bytestring
   ];
   description = "API library for working with Git repositories";
   license = stdenv.lib.licenses.mit;

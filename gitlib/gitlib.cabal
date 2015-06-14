@@ -45,6 +45,7 @@ Library
         , pipes                >= 4.1.5
         , pipes-group          >= 1.0.2
         , pipes-safe           >= 2.2.2
+        , pipes-bytestring     >= 2.1.1
         , containers           >= 0.4.2.1
         , free                 >= 4.12
         , directory            >= 1.1.0.2
@@ -67,9 +68,9 @@ Library
         build-depends:
           unix                 >= 2.5.1.1
     exposed-modules:
-        Git.DSL
         Git
-        -- Git.Blob
+        Git.Blob
+        Git.DSL
         -- Git.Commit
         -- Git.Commit.Push
         -- Git.Object

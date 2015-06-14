@@ -1,83 +1,96 @@
 module Git.Blob where
 
-import           Conduit
-import           Control.Applicative
 import           Control.Monad
 import           Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import           Data.Tagged
 import           Data.Text as T
 import           Data.Text.Encoding as T
+import           Git.DSL
 import           Git.Types
+import           Pipes
+import qualified Pipes.ByteString as PB
+import qualified Pipes.Prelude as P
+import           Pipes.Safe
+import           System.IO
 
-createBlobUtf8 :: MonadGit r m => Text -> m (BlobOid r)
+createBlobUtf8 :: Text -> GitT r m (Oid r)
 createBlobUtf8 = createBlob . BlobString . T.encodeUtf8
 
-catBlob :: MonadGit r m => BlobOid r -> m ByteString
+catBlob :: Monad m => Oid r -> GitT r m ByteString
 catBlob = lookupBlob >=> blobToByteString
 
-catBlobLazy :: MonadGit r m => BlobOid r -> m BL.ByteString
+catBlobLazy :: Monad m => Oid r -> GitT r m BL.ByteString
 catBlobLazy = lookupBlob >=> blobToLazyByteString
 
-catBlobUtf8 :: MonadGit r m => BlobOid r -> m Text
+catBlobUtf8 :: Monad m => Oid r -> GitT r m Text
 catBlobUtf8 = catBlob >=> return . T.decodeUtf8
 
-blobContentsToByteString :: MonadGit r m => BlobContents m -> m ByteString
+blobContentsToByteString :: Monad m => BlobContents m -> GitT r m ByteString
 blobContentsToByteString (BlobString bs) = return bs
 blobContentsToByteString (BlobStringLazy bs) =
-    return $ B.concat (BL.toChunks bs)
+    return $ B.concat $ BL.toChunks bs
 blobContentsToByteString (BlobStream bs) =
-    B.concat . BL.toChunks <$> (bs $$ sinkLazy)
+    B.concat <$> P.toListM (hoist lift bs)
 blobContentsToByteString (BlobSizedStream bs _) =
-    B.concat . BL.toChunks <$> (bs $$ sinkLazy)
+    B.concat <$> P.toListM (hoist lift bs)
 
-blobToByteString :: MonadGit r m => Blob r m -> m ByteString
+blobToByteString :: Monad m => Blob r m -> GitT r m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
 
-blobContentsToLazyByteString :: MonadGit r m
-                             => BlobContents m -> m BL.ByteString
+blobContentsToLazyByteString :: Monad m
+                             => BlobContents m -> GitT r m BL.ByteString
 blobContentsToLazyByteString (BlobString bs) = return $ BL.fromChunks [bs]
 blobContentsToLazyByteString (BlobStringLazy bs) = return bs
-blobContentsToLazyByteString (BlobStream bs) = bs $$ sinkLazy
-blobContentsToLazyByteString (BlobSizedStream bs _) = bs $$ sinkLazy
+blobContentsToLazyByteString (BlobStream bs) =
+    BL.fromChunks <$> P.toListM (hoist lift bs)
+blobContentsToLazyByteString (BlobSizedStream bs _) =
+    BL.fromChunks <$> P.toListM (hoist lift bs)
 
-blobToLazyByteString :: MonadGit r m => Blob r m -> m BL.ByteString
+blobToLazyByteString :: Monad m => Blob r m -> GitT r m BL.ByteString
 blobToLazyByteString (Blob _ contents) = blobContentsToLazyByteString contents
 
-writeBlob :: (MonadGit r m, MonadIO m, MonadResource m)
-          => FilePath -> BlobContents m -> m ()
+getBlobContents :: MonadSafe m
+                => BlobContents m -> Producer ByteString (GitT r m) ()
+getBlobContents (BlobString bs)        = yield bs
+getBlobContents (BlobStringLazy bs)    = each (BL.toChunks bs)
+getBlobContents (BlobStream bs)        = hoist lift bs
+getBlobContents (BlobSizedStream bs _) = hoist lift bs
+
+writeBlob :: (MonadIO m, MonadSafe m)
+          => FilePath -> BlobContents m -> GitT r m ()
 writeBlob path (BlobString bs)         = liftIO $ B.writeFile path bs
-writeBlob path (BlobStringLazy bs)     = sourceLazy bs $$ sinkFile path
-writeBlob path (BlobStream str)        = str $$ sinkFile path
-writeBlob path (BlobSizedStream str _) = str $$ sinkFile path
+writeBlob path (BlobStringLazy bs)     = liftIO $ BL.writeFile path bs
+writeBlob path (BlobStream str)        =
+    lift $ bracket (liftIO $ openFile path WriteMode) (liftIO . hClose) $ \h ->
+        runEffect $ str >-> PB.toHandle h
+writeBlob path (BlobSizedStream str _) = writeBlob path (BlobStream str)
 
-treeBlobEntries :: MonadGit r m
-                => Tree r -> m [(TreeFilePath, BlobOid r, BlobKind)]
-treeBlobEntries tree = sourceTreeBlobEntries tree $$ sinkList
+treeBlobEntries :: MonadSafe m
+                => Tree r -> GitT r m [(TreeFilePath, Oid r, BlobKind)]
+treeBlobEntries tree = P.toListM (allTreeBlobEntries tree)
 
-sourceTreeBlobEntries
-    :: MonadGit r m
-    => Tree r -> Producer m (TreeFilePath, BlobOid r, BlobKind)
-sourceTreeBlobEntries tree =
-    sourceTreeEntries tree =$= awaitForever go
+allTreeBlobEntries :: MonadSafe m
+                   => Tree r
+                   -> Producer (TreeFilePath, Oid r, BlobKind) (GitT r m) ()
+allTreeBlobEntries tree = for (allTreeEntries tree) go
   where
     go (fp ,BlobEntry oid k) = yield (fp, oid, k)
     go _ = return ()
 
-copyBlob :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
-         => BlobOid r -> HashSet Text -> t m (BlobOid s, HashSet Text)
-copyBlob blobr needed = do
-    let oid = untag blobr
-        sha = renderOid oid
-    oid2 <- parseOid (renderOid oid)
+copyBlob :: MonadSafe m
+         => (Repository r, Repository s)
+         => Oid r -> HashSet String -> GitT s (GitT r m) (Oid s, HashSet String)
+copyBlob oid needed = do
+    let sha = show oid
+    oid2 <- parseOid (show oid)
     if HashSet.member sha needed
-        then do
-        bs <- lift $ blobToByteString =<< lookupBlob (Tagged oid)
+      then do
+        bs   <- lift $ blobToByteString =<< lookupBlob oid
         boid <- createBlob (BlobString bs)
 
         let x = HashSet.delete sha needed
         return $ boid `seq` x `seq` (boid, x)
 
-        else return (Tagged oid2, needed)
+      else return (oid2, needed)

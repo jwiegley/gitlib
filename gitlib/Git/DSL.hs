@@ -115,34 +115,17 @@ gitT_ f = GitT $ F $ \p k -> k $ f (p ())
 parseOid :: String -> GitT r m (Oid r)
 parseOid str = gitT $ ParseOid str
 
--- oid :: String -> GitT r m (Oid r)
--- oid = parseOid
-
-lookupCommit :: Oid r -> GitT r m (Commit r)
-lookupCommit o = gitT $ LookupCommit o
-
-lookupTree :: Oid r -> GitT r m (Tree r)
-lookupTree o = gitT $ LookupTree o
-
-treeOid :: Tree r -> GitT r m (Oid r)
-treeOid t = gitT $ TreeOid t
-
--- commit :: Getter (GitT r m (Oid r)) (GitT r m (Commit r))
--- commit k o = o <$ k (lookupCommit =<< o)
-
--- tree :: Getter (GitT r m (Commit r)) (GitT r m (Tree r))
--- tree k c = c <$ k (lookupTree . commitTree =<< c)
-
--- foo :: GitT r m (Tree r)
--- foo = oid "test" ^. commit.tree
--- foo = parseOid "test" ^. commit.tree.entry "foo"
-
 -- References
-
 createReference :: RefName -> RefTarget r -> GitT r m ()
 createReference name target = gitT_ $ CreateReference name target
 
-allReferences' :: GitT r m (Producer RefName m ())
+existsReference :: RefName -> GitT r m (Maybe (RefTarget r))
+existsReference name = gitT $ ExistsReference name
+
+deleteReference :: RefName -> GitT r m ()
+deleteReference name = gitT_ $ DeleteReference name
+
+allReferences' :: MonadSafe m => GitT r m (Producer RefName m ())
 allReferences' = gitT AllReferences
 
 allReferences :: MonadSafe m => Producer RefName (GitT r m) ()
@@ -151,6 +134,86 @@ allReferences = hoist lift =<< lift allReferences'
 printReferences :: (MonadSafe m, MonadIO m) => Effect (GitT r m) ()
 printReferences = for allReferences $ liftIO . print
 
+-- -- Object lookup
+lookupObject :: Oid r -> GitT r m (Object r m)
+lookupObject o = gitT $ LookupObject o
+
+existsObject :: Oid r -> GitT r m (Maybe (ObjectOid r))
+existsObject o = gitT $ ExistsObject o
+
+allObjects' :: MonadSafe m
+            => Maybe (Oid r) -> Oid r -> Bool
+            -> GitT r m (Producer (ObjectOid r) m ())
+allObjects' mhave need trees = gitT $ AllObjects mhave need trees
+
+allObjects :: MonadSafe m
+           => Maybe (Oid r) -> Oid r -> Bool
+           -> Producer (ObjectOid r) (GitT r m) ()
+allObjects mhave need trees = hoist lift =<< lift (allObjects' mhave need trees)
+
+lookupCommit :: Oid r -> GitT r m (Commit r)
+lookupCommit o = gitT $ LookupCommit o
+
+lookupTree :: Oid r -> GitT r m (Tree r)
+lookupTree o = gitT $ LookupTree o
+
+lookupBlob :: Oid r -> GitT r m (Blob r m)
+lookupBlob o = gitT $ LookupBlob o
+
+lookupTag :: Oid r -> GitT r m (Tag r)
+lookupTag o = gitT $ LookupTag o
+
+readIndex :: GitT r m (TreeT r m ())
+readIndex = gitT ReadIndex
+
+writeIndex :: TreeT r m () -> GitT r m ()
+writeIndex t = gitT_ $ WriteIndex t
+
+newTreeBuilder :: Maybe (Tree r) -> GitT r m (TreeBuilder r m)
+newTreeBuilder mt = gitT $ NewTreeBuilder mt
+
+treeOid :: Tree r -> GitT r m (Oid r)
+treeOid t = gitT $ TreeOid t
+
+existsTreeEntry :: Tree r -> TreeFilePath -> GitT r m (Maybe (TreeEntry r))
+existsTreeEntry t path = gitT $ ExistsTreeEntry t path
+
+allTreeEntries' :: MonadSafe m
+                => Tree r
+                -> GitT r m (Producer (TreeFilePath, TreeEntry r) m ())
+allTreeEntries' t = gitT $ AllTreeEntries t
+
+allTreeEntries :: MonadSafe m
+               => Tree r
+               -> Producer (TreeFilePath, TreeEntry r) (GitT r m) ()
+allTreeEntries t = hoist lift =<< lift (allTreeEntries' t)
+
+diffContentsWithTree' :: MonadSafe m
+                      => Producer (Either TreeFilePath ByteString) m ()
+                      -> Tree r
+                      -> GitT r m (Producer ByteString m ())
+diffContentsWithTree' contents t = gitT $ DiffContentsWithTree contents t
+
+diffContentsWithTree :: MonadSafe m
+                     => Producer (Either TreeFilePath ByteString) m ()
+                     -> Tree r
+                     -> Producer ByteString (GitT r m) ()
+diffContentsWithTree contents t =
+    hoist lift =<< lift (diffContentsWithTree' contents t)
+
+hashContents :: BlobContents m -> GitT r m (Oid r)
+hashContents contents = gitT $ HashContents contents
+
+createBlob :: BlobContents m -> GitT r m (Oid r)
+createBlob contents = gitT $ CreateBlob contents
+
+createCommit :: Commit r -> Maybe RefName -> GitT r m (Oid r)
+createCommit c mname = gitT $ CreateCommit c mname
+
+createTag :: Tag r -> RefName -> GitT r m (Oid r)
+createTag t name = gitT $ CreateTag t name
+
+-- Utility functions; jww (2015-06-14): these belong elsewhere
 copyOid :: Repository r => Oid r -> GitT s m (Oid s)
 copyOid = parseOid . show
 

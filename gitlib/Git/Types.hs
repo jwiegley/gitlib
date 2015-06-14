@@ -37,7 +37,7 @@ type CommitMessage = Text
 type TreeFilePath  = RawFilePath
 
 class Show (Oid r) => Repository r where
-    type Oid r :: *
+    data Oid r :: *      -- jww (2015-06-14): should be injective type family
     data Tree r :: *
 
 type BlobOid r   = Tagged r (Oid r)
@@ -166,7 +166,7 @@ data Object r m = BlobObj   !(Blob r m)
 data RefTarget (r :: *) = RefObj !(Oid r) | RefSymbolic !RefName
 
 instance Repository r => Show (RefTarget r) where
-    show (RefObj oid) = "RefObj#" ++ show oid
+    show (RefObj oid)       = "RefObj#" ++ show oid
     show (RefSymbolic name) = "RefSymbolic#" ++ T.unpack name
 
 commitRefTarget :: Commit r -> RefTarget r
