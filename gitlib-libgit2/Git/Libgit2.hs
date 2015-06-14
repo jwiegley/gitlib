@@ -128,7 +128,7 @@ runGit :: forall m a. MonadLgBase m
 runGit action = runReaderT (go action) undefined
   where
     go :: forall a. Git.GitT LgRepo (ReaderT LgRepo m) a -> ReaderT LgRepo m a
-    go g = runF (Git.getGitT g) return $(Git.gitDispatcher 0 'go "lg")
+    go g = runF (Git.getGitT g) return $(Git.gitDispatcher 'go "lg")
 
 lgCreateReference :: MonadLg m => RefName -> RefTarget -> m ()
 lgCreateReference = undefined

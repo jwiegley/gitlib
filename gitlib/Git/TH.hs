@@ -13,24 +13,19 @@ runcons [] = error "runcons called on empty list"
 runcons [x] = ([], x)
 runcons (x:xs) = let (ys, y) = runcons xs in (x:ys, y)
 
-gitDispatcher :: Int -> Name -> String -> ExpQ
-gitDispatcher levels runF prefix = do
+gitDispatcher :: Name -> String -> ExpQ
+gitDispatcher runF prefix = do
     Just ty <- lookupTypeName "Git.GitExprF"
     TyConI (DataD _ _ _vars ctors _) <- reify ty
-    mlift_f <- lookupValueName "Control.Monad.Trans.Class.lift"
-    case mlift_f of
-        Nothing     -> error "Please import Control.Monad.Trans.Class.lift"
-        Just lift_f -> [| \x -> $(caseE [|x|] (map (branch lift_f) ctors)) |]
+    [| \x -> $(caseE [|x|] (map branch ctors)) |]
   where
-    branch lift_f (NormalC name@(nameBase -> "M") _) = do
+    branch (NormalC name@(nameBase -> "M") _) = do
         m <- newName "m"
         Just join_f <- lookupValueName "Control.Monad.join"
-        let body  = foldl' (\acc _ -> AppE (VarE lift_f) acc) (VarE m)
-                           [1..levels]
-            body' = AppE (VarE join_f) body
-        return $ Match (ConP name [VarP m]) (NormalB body') []
+        let body = AppE (VarE join_f) (VarE m)
+        return $ Match (ConP name [VarP m]) (NormalB body) []
 
-    branch _ (ForallC _ _ (NormalC name@(nameBase -> "Catch") _)) = do
+    branch (ForallC _ _ (NormalC name@(nameBase -> "Catch") _)) = do
         a <- newName "a"
         h <- newName "h"
         mcatch <- lookupValueName "Control.Monad.Catch.catch"
@@ -40,21 +35,19 @@ gitDispatcher levels runF prefix = do
                 let body = NormalB $ AppE (AppE (VarE catch) (VarE a)) (VarE h)
                 return $ Match (ConP name [VarP a, VarP h]) body []
 
-    branch lift_f (NormalC name@(nameBase -> "Lifted") _) = do
+    branch (NormalC name@(nameBase -> "Lifted") _) = do
         m <- newName "m"
         Just join_f <- lookupValueName "Control.Monad.join"
-        let body  = foldl' (\acc _ -> AppE (VarE lift_f) acc)
-                           (AppE (VarE m) (VarE runF)) [1..levels]
-            body' = AppE (VarE join_f) body
-        return $ Match (ConP name [VarP m]) (NormalB body') []
+        let body = AppE (VarE join_f) (AppE (VarE m) (VarE runF))
+        return $ Match (ConP name [VarP m]) (NormalB body) []
 
-    branch _ (NormalC name (runcons -> (tys, ret))) =
+    branch (NormalC name (runcons -> (tys, ret))) =
         createBranches name (map snd tys) (snd ret)
-    branch _ (RecC name (runcons -> (tys, ret))) =
+    branch (RecC name (runcons -> (tys, ret))) =
         createBranches name (map thrd tys) (thrd ret)
       where thrd (_, _, c) = c
 
-    branch _ x = error $ "Unsupported data constructor in GitExprF: " ++ show x
+    branch x = error $ "Unsupported data constructor in GitExprF: " ++ show x
 
     createBranches :: Name -> [Type] -> Type -> MatchQ
     createBranches name tys ret = do
