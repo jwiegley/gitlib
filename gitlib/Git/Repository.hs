@@ -1,4 +1,4 @@
-module Git.Repository where
+emodule Git.Repository where
 
 import Control.Exception.Lifted
 import Control.Monad
@@ -7,7 +7,11 @@ import Control.Monad.Trans.Control
 import Git.Types
 import System.Directory
 
-withNewRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
+    -- locateGitDir :: FilePath -> IO FilePath
+    -- locateWorkingDir :: FilePath -> IO FilePath
+    -- isBareRepository :: FilePath -> IO Bool
+
+ithNewRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
                   => RepositoryFactory n m r
                   -> FilePath -> n a -> m a
 withNewRepository factory path action = do

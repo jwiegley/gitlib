@@ -82,5 +82,3 @@ odbBackendAdd repo backend priority =
         if r2 < 0
           then return (Left "Cannot add backend to repository ODB")
           else return (Right repo)
-
--- Backend.hs

@@ -7,10 +7,10 @@
 module Git.Libgit2.Internal (module Git.Libgit2.Internal, oidToStr) where
 
 import           Bindings.Libgit2
-import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.Trans.Control
+import           Control.Monad.Reader.Class
 import           Data.ByteString
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
@@ -51,14 +51,14 @@ coidPtrToOid coidptr = do
     return fptr
 
 lookupObject'
-  :: (Git.MonadGit LgRepo m, MonadBaseControl IO m)
+  :: MonadLg m
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CSize -> IO CInt)
   -> (ForeignPtr C'git_oid -> ForeignPtr a -> Ptr a -> m b)
   -> m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
-    repo <- Git.getRepository
+    repo <- ask
     result <- liftBaseWith $ \run -> alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
             withForeignPtr oid $ \oidPtr ->
