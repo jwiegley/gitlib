@@ -1,5 +1,6 @@
 module Git.Blob where
 
+import           Control.Applicative
 import           Control.Monad
 import           Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -10,9 +11,9 @@ import           Data.Text.Encoding as T
 import           Git.DSL
 import           Git.Types
 import           Pipes
+import           Pipes.Safe
 import qualified Pipes.ByteString as PB
 import qualified Pipes.Prelude as P
-import           Pipes.Safe
 import           System.IO
 
 createBlobUtf8 :: Text -> GitT r m (Oid r)
@@ -51,14 +52,14 @@ blobContentsToLazyByteString (BlobSizedStream bs _) =
 blobToLazyByteString :: Monad m => Blob r m -> GitT r m BL.ByteString
 blobToLazyByteString (Blob _ contents) = blobContentsToLazyByteString contents
 
-getBlobContents :: MonadSafe m
+getBlobContents :: Monad m
                 => BlobContents m -> Producer ByteString (GitT r m) ()
 getBlobContents (BlobString bs)        = yield bs
 getBlobContents (BlobStringLazy bs)    = each (BL.toChunks bs)
 getBlobContents (BlobStream bs)        = hoist lift bs
 getBlobContents (BlobSizedStream bs _) = hoist lift bs
 
-writeBlob :: (MonadIO m, MonadSafe m)
+writeBlob :: (MonadSafe m, MonadIO m)
           => FilePath -> BlobContents m -> GitT r m ()
 writeBlob path (BlobString bs)         = liftIO $ B.writeFile path bs
 writeBlob path (BlobStringLazy bs)     = liftIO $ BL.writeFile path bs
@@ -67,11 +68,11 @@ writeBlob path (BlobStream str)        =
         runEffect $ str >-> PB.toHandle h
 writeBlob path (BlobSizedStream str _) = writeBlob path (BlobStream str)
 
-treeBlobEntries :: MonadSafe m
+treeBlobEntries :: Monad m
                 => Tree r -> GitT r m [(TreeFilePath, Oid r, BlobKind)]
-treeBlobEntries tree = P.toListM (allTreeBlobEntries tree)
+treeBlobEntries = P.toListM . allTreeBlobEntries
 
-allTreeBlobEntries :: MonadSafe m
+allTreeBlobEntries :: Monad m
                    => Tree r
                    -> Producer (TreeFilePath, Oid r, BlobKind) (GitT r m) ()
 allTreeBlobEntries tree = for (allTreeEntries tree) go
@@ -79,8 +80,7 @@ allTreeBlobEntries tree = for (allTreeEntries tree) go
     go (fp ,BlobEntry oid k) = yield (fp, oid, k)
     go _ = return ()
 
-copyBlob :: MonadSafe m
-         => (Repository r, Repository s)
+copyBlob :: (Monad m, Repository r, Repository s)
          => Oid r -> HashSet String -> GitT s (GitT r m) (Oid s, HashSet String)
 copyBlob oid needed = do
     let sha = show oid

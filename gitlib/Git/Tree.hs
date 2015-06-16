@@ -1,41 +1,44 @@
 module Git.Tree where
 
-import           Conduit
 import           Control.Monad
+import           Control.Monad.Catch
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Monoid
-import           Data.Tagged
-import           Data.Text (Text)
+import           Data.Text (pack)
 import           Git.Blob
+import           Git.DSL
 import           Git.Tree.Builder
 import           Git.Types
+import           Pipes
+import qualified Pipes.Prelude as P
 
-listTreeEntries :: MonadGit r m => Tree r -> m [(TreeFilePath, TreeEntry r)]
-listTreeEntries tree = sourceTreeEntries tree $$ sinkList
+listTreeEntries :: Monad m => Tree r -> GitT r m [(TreeFilePath, TreeEntry r)]
+listTreeEntries = P.toListM . allTreeEntries
 
-copyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
-              => TreeEntry r -> HashSet Text -> t m (TreeEntry s, HashSet Text)
+copyTreeEntry :: (MonadThrow m, Repository r, Repository s)
+              => TreeEntry s -> HashSet String
+              -> GitT r (GitT s m) (TreeEntry r, HashSet String)
 copyTreeEntry (BlobEntry oid kind) needed = do
     (b,needed') <- copyBlob oid needed
-    unless (renderObjOid oid == renderObjOid b) $
+    unless (show oid == show b) $
         throwM $ BackendError $ "Error copying blob: "
-            <> renderObjOid oid <> " /= " <> renderObjOid b
+            <> pack (show oid) <> " /= " <> pack (show b)
     return (BlobEntry b kind, needed')
 copyTreeEntry (CommitEntry oid) needed = do
-    coid <- parseOid (renderObjOid oid)
-    return (CommitEntry (Tagged coid), needed)
+    coid <- parseOid (show oid)
+    return (CommitEntry coid, needed)
 copyTreeEntry (TreeEntry _) _ = error "This should never be called"
 
-copyTree :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
-         => TreeOid r -> HashSet Text -> t m (TreeOid s, HashSet Text)
-copyTree tr needed = do
-    let oid = untag tr
-        sha = renderOid oid
-    oid2 <- parseOid (renderOid oid)
+copyTree :: (MonadThrow m, Repository r, Repository s)
+         => TreeOid s -> HashSet String
+         -> GitT r (GitT s m) (TreeOid r, HashSet String)
+copyTree oid needed = do
+    let sha = show oid
+    oid2 <- parseOid (show oid)
     if HashSet.member sha needed
         then do
-        tree    <- lift $ lookupTree tr
+        tree    <- lift $ lookupTree oid
         entries <- lift $ listTreeEntries tree
         (needed', tref) <-
             withNewTree $ foldM doCopyTreeEntry needed entries
@@ -43,14 +46,14 @@ copyTree tr needed = do
         let x = HashSet.delete sha needed'
         return $ tref `seq` x `seq` (tref, x)
 
-        else return (Tagged oid2, needed)
+        else return (oid2, needed)
   where
-    doCopyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
-                    => HashSet Text
+    doCopyTreeEntry :: (MonadThrow m, Repository r, Repository s)
+                    => HashSet String
                     -> (TreeFilePath, TreeEntry r)
-                    -> TreeT s (t m) (HashSet Text)
+                    -> TreeT s (GitT r m) (HashSet String)
     doCopyTreeEntry set (_, TreeEntry {}) = return set
     doCopyTreeEntry set (fp, ent) = do
-        (ent2,set') <- lift $ copyTreeEntry ent set
+        (ent2,set') <- liftGitT $ copyTreeEntry ent set
         putEntry fp ent2
         return set'

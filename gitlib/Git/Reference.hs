@@ -1,16 +1,17 @@
 module Git.Reference where
 
-import Conduit
-import Git.Types
+import           Git.DSL
+import           Git.Types
+import qualified Pipes.Prelude as P
 
-listReferences :: MonadGit r m => m [RefName]
-listReferences = sourceReferences $$ sinkList
+listReferences :: Monad m => GitT r m [RefName]
+listReferences = P.toListM allReferences
 
-resolveReference :: MonadGit r m => RefName -> m (Maybe (Oid r))
+resolveReference :: Monad m => RefName -> GitT r m (Maybe (Oid r))
 resolveReference name = do
     mref <- lookupReference name
     maybe (return Nothing) referenceToOid mref
 
-referenceToOid :: MonadGit r m => RefTarget r -> m (Maybe (Oid r))
+referenceToOid :: Monad m => RefTarget r -> GitT r m (Maybe (Oid r))
 referenceToOid (RefObj oid)       = return $ Just oid
 referenceToOid (RefSymbolic name) = resolveReference name

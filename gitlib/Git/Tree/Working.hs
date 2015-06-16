@@ -12,10 +12,9 @@ import           Data.Foldable (foldl')
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import           Data.Maybe
-import           Data.Tagged
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import           Git hiding (Options)
+import           Git
 import           Prelude hiding (log)
 import           System.FilePath.Posix
 import           System.Posix.Files
@@ -29,22 +28,22 @@ data FileEntry m = FileEntry
 
 type FileTree m = HashMap TreeFilePath (FileEntry m)
 
-readFileTree :: (MonadBaseControl IO m, MonadIO m, MonadGit r m)
+readFileTree :: (MonadBaseControl IO m, MonadIO m)
              => RefName
              -> FilePath
              -> Bool
-             -> m (FileTree r)
+             -> GitT r m (FileTree r)
 readFileTree ref wdir getHash = do
     h <- resolveReference ref
     case h of
         Nothing -> pure Map.empty
         Just h' -> do
-            tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
+            tr <- lookupTree . commitTree =<< lookupCommit h'
             readFileTree' tr wdir getHash
 
-readFileTree' :: (MonadBaseControl IO m, MonadIO m, MonadGit r m)
+readFileTree' :: (MonadBaseControl IO m, MonadIO m)
               => Tree r -> FilePath -> Bool
-              -> m (FileTree r)
+              -> GitT r m (FileTree r)
 readFileTree' tr wdir getHash = do
     blobs <- treeBlobEntries tr
     stats <- mapConcurrently go blobs
@@ -55,13 +54,13 @@ readFileTree' tr wdir getHash = do
         fent <- readModTime wdir getHash (B8.unpack fp) oid kind
         fent `seq` return (fp,fent)
 
-readModTime :: (MonadIO m, MonadGit r m)
+readModTime :: MonadIO m
             => FilePath
             -> Bool
             -> FilePath
             -> BlobOid r
             -> BlobKind
-            -> m (Maybe (FileEntry r))
+            -> GitT r m (Maybe (FileEntry r))
 readModTime wdir getHash fp oid kind = do
     let path = wdir </> fp
     -- debug' $ pack $ "Checking file: " ++ path

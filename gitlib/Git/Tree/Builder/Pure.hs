@@ -17,11 +17,11 @@ type EntryHashMap r = HashMap TreeFilePath (TreeEntry r)
 --
 --   Since empty trees cannot exist in Git, attempting to write out an empty
 --   tree is a no-op.
-newPureTreeBuilder :: MonadGit r m
-                   => (Tree r -> m (EntryHashMap r))
-                   -> (EntryHashMap r -> m (TreeOid r))
+newPureTreeBuilder :: Monad m
+                   => (Tree r -> GitT r m (EntryHashMap r))
+                   -> (EntryHashMap r -> GitT r m (TreeOid r))
                    -> Maybe (Tree r)
-                   -> m (TreeBuilder r m)
+                   -> GitT r m (TreeBuilder r m)
 newPureTreeBuilder reader writer mtree = do
     entMap <- case mtree of
         Nothing   -> return HashMap.empty
@@ -34,12 +34,12 @@ newPureTreeBuilder reader writer mtree = do
         entMap
         writer
 
-makePureBuilder :: MonadGit r m
+makePureBuilder :: Monad m
                 => Maybe (TreeOid r)
                 -> HashMap TreeFilePath (TreeBuilder r m)
-                -> (Maybe (Tree r) -> m (TreeBuilder r m))
+                -> (Maybe (Tree r) -> GitT r m (TreeBuilder r m))
                 -> EntryHashMap r
-                -> (EntryHashMap r -> m (TreeOid r))
+                -> (EntryHashMap r -> GitT r m (TreeOid r))
                 -> TreeBuilder r m
 makePureBuilder baseTree upds newBuilder entMap writer = TreeBuilder
     { mtbBaseTreeOid    = baseTree

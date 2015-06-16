@@ -77,10 +77,10 @@ Library
         -- Git.Reference
         -- Git.Repository
         -- Git.Tree
-        -- Git.Tree.Builder
-        -- Git.Tree.Builder.Pure
-        -- Git.Tree.Working
-        -- Git.Tutorial
+        Git.Tree.Builder
+        Git.Tree.Builder.Pure
+        Git.Tree.Working
+        Git.Tutorial
         Git.TH
         Git.Types
         -- Git.Utils

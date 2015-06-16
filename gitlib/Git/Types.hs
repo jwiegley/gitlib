@@ -11,13 +11,9 @@
 module Git.Types where
 
 import qualified Control.Exception.Lifted as Exc
-import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as BL
-import           Data.HashMap.Strict (HashMap)
 import           Data.Map (Map)
-import           Data.Semigroup
-import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time
@@ -40,10 +36,15 @@ class Show (Oid r) => Repository r where
     data Oid r :: *      -- jww (2015-06-14): should be injective type family
     data Tree r :: *
 
-type BlobOid r   = Tagged r (Oid r)
-type TreeOid r   = Tagged (Tree r) (Oid r)
-type CommitOid r = Tagged (Commit r) (Oid r)
-type TagOid r    = Tagged (Tag r) (Oid r)
+-- type BlobOid r   = Tagged r (Oid r)
+-- type TreeOid r   = Tagged (Tree r) (Oid r)
+-- type CommitOid r = Tagged (Commit r) (Oid r)
+-- type TagOid r    = Tagged (Tag r) (Oid r)
+
+type BlobOid r   = Oid r
+type TreeOid r   = Oid r
+type CommitOid r = Oid r
+type TagOid r    = Oid r
 
 data ObjectOid r = BlobObjOid   !(BlobOid r)
                  | TreeObjOid   !(TreeOid r)
@@ -71,8 +72,6 @@ instance Eq (BlobContents m) where
   _ == _ = False
 
 {- $trees -}
-newtype TreeT r m a = TreeT { runTreeT :: StateT (TreeBuilder r m) m a }
-
 data TreeEntry r = BlobEntry   { blobEntryOid   :: !(Oid r)
                                , blobEntryKind  :: !BlobKind }
                  | TreeEntry   { treeEntryOid   :: !(Oid r) }
@@ -87,36 +86,6 @@ treeEntryToOid :: TreeEntry r -> Oid r
 treeEntryToOid (BlobEntry boid _) = boid
 treeEntryToOid (TreeEntry toid)   = toid
 treeEntryToOid (CommitEntry coid) = coid
-
-data TreeBuilder r m = TreeBuilder
-    { mtbBaseOid        :: Maybe (Oid r)
-    , mtbPendingUpdates :: HashMap TreeFilePath (TreeBuilder r m)
-    , mtbNewBuilder     :: Maybe (Tree r) -> m (TreeBuilder r m)
-    , mtbWriteContents  :: TreeBuilder r m -> m (ModifiedBuilder r m, Oid r)
-    , mtbLookupEntry    :: TreeFilePath -> m (Maybe (TreeEntry r))
-    , mtbEntryCount     :: m Int
-    , mtbPutEntry       :: TreeBuilder r m -> TreeFilePath -> TreeEntry r
-                        -> m (ModifiedBuilder r m)
-    , mtbDropEntry      :: TreeBuilder r m -> TreeFilePath
-                        -> m (ModifiedBuilder r m)
-    }
-
-data ModifiedBuilder r m = ModifiedBuilder (TreeBuilder r m)
-                         | BuilderUnchanged (TreeBuilder r m)
-
-instance Semigroup (ModifiedBuilder r m) where
-    BuilderUnchanged _  <> BuilderUnchanged b2 = BuilderUnchanged b2
-    ModifiedBuilder b1  <> BuilderUnchanged _  = ModifiedBuilder b1
-    BuilderUnchanged _  <> ModifiedBuilder b2  = ModifiedBuilder b2
-    ModifiedBuilder _   <> ModifiedBuilder b2  = ModifiedBuilder b2
-
-instance Monoid (ModifiedBuilder r m) where
-    mempty = BuilderUnchanged (error "ModifiedBuilder is a semigroup")
-    x `mappend` y = x <> y
-
-fromBuilderMod :: ModifiedBuilder r m -> TreeBuilder r m
-fromBuilderMod (BuilderUnchanged tb) = tb
-fromBuilderMod (ModifiedBuilder tb)  = tb
 
 {- $commits -}
 data Commit r = Commit
