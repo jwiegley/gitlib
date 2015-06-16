@@ -11,7 +11,7 @@ import System.Directory
     -- locateWorkingDir :: FilePath -> IO FilePath
     -- isBareRepository :: FilePath -> IO Bool
 
-ithNewRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
+withNewRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
                   => RepositoryFactory n m r
                   -> FilePath -> n a -> m a
 withNewRepository factory path action = do

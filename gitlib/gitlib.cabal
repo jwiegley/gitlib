@@ -73,10 +73,9 @@ Library
         Git.DSL
         -- Git.Commit
         -- Git.Commit.Push
-        -- Git.Object
-        -- Git.Reference
-        -- Git.Repository
-        -- Git.Tree
+        Git.Object
+        Git.Reference
+        Git.Tree
         Git.Tree.Builder
         Git.Tree.Builder.Pure
         Git.Tree.Working
