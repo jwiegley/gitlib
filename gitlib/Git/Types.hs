@@ -22,17 +22,13 @@ import           Pipes
 
 type RawFilePath = ByteString
 
-data RepositoryFacts = RepositoryFacts
-    { hasSymbolicReferences :: !Bool
-    } deriving Show
-
 type RefName       = Text
 type CommitAuthor  = Text
 type CommitEmail   = Text
 type CommitMessage = Text
 type TreeFilePath  = RawFilePath
 
-class Show (Oid r) => Repository r where
+class (Eq (Oid r), Ord (Oid r), Show (Oid r)) => Repository r where
     data Oid r :: *      -- jww (2015-06-14): should be injective type family
     data Tree r :: *
 
@@ -50,6 +46,12 @@ data ObjectOid r = BlobObjOid   !(BlobOid r)
                  | TreeObjOid   !(TreeOid r)
                  | CommitObjOid !(CommitOid r)
                  | TagObjOid    !(TagOid r)
+
+instance Repository r => Show (ObjectOid r) where
+    show (BlobObjOid   oid) = show oid
+    show (TreeObjOid   oid) = show oid
+    show (CommitObjOid oid) = show oid
+    show (TagObjOid    oid) = show oid
 
 {- $blobs -}
 data Blob r m = Blob

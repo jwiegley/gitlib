@@ -5,7 +5,7 @@ module Git
 
 import Git.Blob as X
 import Git.Commit as X
--- import Git.Commit.Push as X
+import Git.Commit.Push as X
 import Git.DSL as X
 import Git.Object as X
 import Git.Reference as X

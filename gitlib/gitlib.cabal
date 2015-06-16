@@ -72,7 +72,7 @@ Library
         Git.Blob
         Git.DSL
         Git.Commit
-        -- Git.Commit.Push
+        Git.Commit.Push
         Git.Object
         Git.Reference
         Git.Tree
@@ -82,7 +82,6 @@ Library
         Git.Tutorial
         Git.TH
         Git.Types
-        -- Git.Utils
         -- Git.Working
     default-extensions: 
         BangPatterns
