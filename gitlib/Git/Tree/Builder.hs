@@ -58,9 +58,6 @@ toModifyTreeResult f (Just x) = f x
 data BuilderAction = GetEntry | PutEntry | DropEntry
     deriving (Eq, Show)
 
-emptyTreeId :: String
-emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-
 -- | Perform a query action on a TreeBuilder using the supplied action kind
 --   and user function.
 --

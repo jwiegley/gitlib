@@ -15,21 +15,22 @@
 
 module Git.DSL where
 
-import Control.Applicative
-import Control.Monad
-import Control.Monad.Base
-import Control.Monad.Catch
-import Control.Monad.Fix
-import Control.Monad.Free.Church
-import Control.Monad.IO.Class
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.Control
-import Control.Monad.Trans.State
-import Data.ByteString (ByteString)
-import Data.HashMap.Strict (HashMap)
-import Data.Semigroup
-import Git.Types
-import Pipes
+import           Control.Applicative
+import           Control.Monad
+import           Control.Monad.Base
+import           Control.Monad.Catch
+import           Control.Monad.Fix
+import           Control.Monad.Free.Church
+import           Control.Monad.IO.Class
+import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Control
+import           Control.Monad.Trans.State
+import           Data.ByteString (ByteString)
+import           Data.HashMap.Strict (HashMap)
+import           Data.Semigroup
+import qualified Data.Text as T
+import           Git.Types
+import           Pipes
 
 newtype TreeT r m a = TreeT
     { runTreeT :: StateT (TreeBuilder r m) (GitT r m) a }
@@ -137,7 +138,7 @@ data GitExprF r m s
 
     | NewTreeBuilder (Maybe (Tree r)) (TreeBuilder r m -> s)
     | TreeOid (Tree r) (Oid r -> s)
-    | ExistsTreeEntry (Tree r) TreeFilePath (Maybe (TreeEntry r) -> s)
+    | GetTreeEntry (Tree r) TreeFilePath (Maybe (TreeEntry r) -> s)
     | AllTreeEntries (Tree r) (Producer (TreeFilePath, TreeEntry r) m () -> s)
 
     | DiffContentsWithTree
@@ -251,8 +252,8 @@ newTreeBuilder mt = gitT $ NewTreeBuilder mt
 treeOid :: Tree r -> GitT r m (Oid r)
 treeOid t = gitT $ TreeOid t
 
-existsTreeEntry :: Tree r -> TreeFilePath -> GitT r m (Maybe (TreeEntry r))
-existsTreeEntry t path = gitT $ ExistsTreeEntry t path
+getTreeEntry :: Tree r -> TreeFilePath -> GitT r m (Maybe (TreeEntry r))
+getTreeEntry t path = gitT $ GetTreeEntry t path
 
 allTreeEntries' :: Tree r
                 -> GitT r m (Producer (TreeFilePath, TreeEntry r) m ())
@@ -279,6 +280,25 @@ hashContents contents = gitT $ HashContents contents
 
 createBlob :: BlobContents m -> GitT r m (Oid r)
 createBlob contents = gitT $ CreateBlob contents
+
+emptyTreeId :: String
+emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+commitObj :: [Oid r]
+          -> Oid r
+          -> Signature
+          -> Signature
+          -> CommitMessage
+          -> T.Text
+          -> GitT r m (Commit r)
+commitObj a b c d e f  = Commit
+    <$> parseOid emptyTreeId
+    <*> pure a
+    <*> pure b
+    <*> pure c
+    <*> pure d
+    <*> pure e
+    <*> pure f
 
 createCommit :: Commit r -> Maybe RefName -> GitT r m (Oid r)
 createCommit c mname = gitT $ CreateCommit c mname

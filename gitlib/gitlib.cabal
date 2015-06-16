@@ -71,7 +71,7 @@ Library
         Git
         Git.Blob
         Git.DSL
-        -- Git.Commit
+        Git.Commit
         -- Git.Commit.Push
         Git.Object
         Git.Reference

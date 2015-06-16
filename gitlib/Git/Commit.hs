@@ -1,78 +1,75 @@
 module Git.Commit where
 
-import           Conduit
 import           Control.Monad
+import           Control.Monad.Catch
 import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Tagged
-import           Data.Text (Text)
+import           Data.Text (pack)
+import           Git.DSL
 import           Git.Tree
 import           Git.Types
+import           Pipes
+import qualified Pipes.Prelude as P
 import           Prelude hiding (FilePath)
 
-commitTreeEntry :: MonadGit r m
-                => Commit r -> TreeFilePath -> m (Maybe (TreeEntry r))
-commitTreeEntry c path = flip treeEntry path =<< lookupTree (commitTree c)
+commitTreeEntry :: Monad m
+                => Commit r -> TreeFilePath -> GitT r m (Maybe (TreeEntry r))
+commitTreeEntry c path = flip getTreeEntry path =<< lookupTree (commitTree c)
 
-copyCommitOid :: (IsOid (Oid r), MonadGit s n)
-              => CommitOid r -> n (CommitOid s)
-copyCommitOid = parseObjOid . renderObjOid
-
-copyCommit :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
-           => CommitOid r
+copyCommit :: (MonadThrow m, Repository r, Repository s)
+           => CommitOid s
            -> Maybe RefName
-           -> HashSet Text
-           -> t m (CommitOid s, HashSet Text)
-copyCommit cr mref needed = do
-    let oid = untag cr
-        sha = renderOid oid
-    commit <- lift $ lookupCommit cr
+           -> HashSet String
+           -> GitT r (GitT s m) (CommitOid r, HashSet String)
+copyCommit oid mref needed = do
+    let sha = show oid
+    commit <- lift $ lookupCommit oid
     oid2   <- parseOid sha
     if HashSet.member sha needed
         then do
         let parents = commitParents commit
         (parentRefs,needed') <- foldM copyParent ([],needed) parents
         (tr,needed'') <- copyTree (commitTree commit) needed'
-        unless (renderObjOid (commitTree commit) == renderObjOid tr) $
+        unless (show (commitTree commit) == show tr) $
             throwM $ BackendError $ "Error copying tree: "
-                <> renderObjOid (commitTree commit)
-                <> " /= " <> renderObjOid tr
+                <> pack (show (commitTree commit))
+                <> " /= " <> pack (show tr)
 
-        commit' <- createCommit (reverse parentRefs) tr
+        c <- commitObj (reverse parentRefs) tr
             (commitAuthor commit)
             (commitCommitter commit)
-            (commitLog commit)
-            mref
+            (commitLog commit) "UTF-8" -- jww (2015-06-16): ?
+        coid <- createCommit c mref
 
-        let coid = commitOid commit'
-            x    = HashSet.delete sha needed''
+        let x = HashSet.delete sha needed''
         return $ coid `seq` x `seq` (coid, x)
 
-        else return (Tagged oid2, needed)
+        else return (oid2, needed)
   where
     copyParent (prefs,needed') cref = do
         (cref2,needed'') <- copyCommit cref Nothing needed'
-        unless (renderObjOid cref == renderObjOid cref2) $
+        unless (show cref == show cref2) $
             throwM $ BackendError $ "Error copying commit: "
-                <> renderObjOid cref <> " /= " <> renderObjOid cref2
+                <> pack (show cref) <> " /= " <> pack (show cref2)
         let x = cref2 `seq` (cref2:prefs)
         return $ x `seq` needed'' `seq` (x,needed'')
 
-listCommits :: MonadGit r m
+listCommits :: Monad m
             => Maybe (CommitOid r) -- ^ A commit we may already have
             -> CommitOid r         -- ^ The commit we need
-            -> m [CommitOid r]     -- ^ All the objects in between
+            -> GitT r m [CommitOid r]     -- ^ All the objects in between
 listCommits mhave need =
-    sourceObjects mhave need False
-        $= mapMC (\(CommitObjOid c) -> return c)
-        $$ sinkList
+    P.toListM $ allObjects mhave need False
+            >-> P.mapM (\(CommitObjOid c) -> return c)
 
-traverseCommits :: MonadGit r m => (CommitOid r -> m a) -> CommitOid r -> m [a]
+traverseCommits :: Monad m
+                => (CommitOid r -> GitT r m a) -> CommitOid r -> GitT r m [a]
 traverseCommits f need = mapM f =<< listCommits Nothing need
 
-traverseCommits_ :: MonadGit r m => (CommitOid r -> m ()) -> CommitOid r -> m ()
+traverseCommits_ :: Monad m
+                 => (CommitOid r -> GitT r m ()) -> CommitOid r -> GitT r m ()
 traverseCommits_ = (void .) . traverseCommits
