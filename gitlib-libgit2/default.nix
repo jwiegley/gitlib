@@ -4,7 +4,7 @@
 , lifted-async, lifted-base, mmorph, monad-control, monad-logger
 , monad-loops, mtl, resourcet, stdenv, stm, stm-conduit, tagged
 , template-haskell, text, text-icu, time, transformers
-, transformers-base
+, transformers-base, missing-foreign
 }:
 mkDerivation {
   pname = "gitlib-libgit2";
@@ -15,7 +15,7 @@ mkDerivation {
     exceptions fast-logger filepath gitlib hlibgit2 lifted-async
     lifted-base mmorph monad-control monad-logger monad-loops mtl
     resourcet stm stm-conduit tagged template-haskell text text-icu
-    time transformers transformers-base
+    time transformers transformers-base missing-foreign
   ];
   testDepends = [
     base exceptions gitlib gitlib-test hspec hspec-expectations HUnit
