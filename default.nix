@@ -32,7 +32,7 @@ let
 
   haskellDeps = pkgs.recurseIntoAttrs {
     # #filepath = haskellPkgs.filepath_1_4_0_0;
-    # filepath = callPackage ./nix/filepath.nix {};
+    #filepath = callPackage ./nix/filepath.nix {};
     transformers  =
       if pkgs.stdenv.lib.versionOlder haskellPkgs.ghc.version "7.7"
       then haskellPkgs.transformers_0_3_0_0

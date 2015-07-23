@@ -3,7 +3,7 @@
 , hspec-expectations, monad-control, mtl, old-locale, parsec
 , process-extras, shelly, stdenv, system-filepath, tagged, text
 , time, time-locale-compat, transformers, transformers-base
-, unordered-containers
+, unordered-containers, git
 }:
 mkDerivation {
   pname = "gitlib-cmdline";
@@ -18,7 +18,7 @@ mkDerivation {
   ];
   testDepends = [
     base gitlib gitlib-test hspec hspec-expectations system-filepath
-    tagged text transformers
+    tagged text transformers git
   ];
   description = "Gitlib repository backend that uses the git command-line tool";
   license = stdenv.lib.licenses.mit;
