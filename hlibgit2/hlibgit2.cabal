@@ -6,7 +6,7 @@ License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
 Maintainer:          johnw@newartisans.com
-Build-Type:          Simple
+Build-Type:          Custom
 Cabal-Version:       >=1.10
 Category:            FFI
 
@@ -37,6 +37,8 @@ Test-suite smoke
       base >=3
     , hlibgit2
     , process
+  build-tools:
+    git
 
 Library
   hs-source-dirs: .
