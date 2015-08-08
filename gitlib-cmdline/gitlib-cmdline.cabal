@@ -6,7 +6,7 @@ License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley
 Maintainer:          johnw@newartisans.com
-Build-Type:          Simple
+Build-Type:          Custom
 Cabal-Version:       >=1.10
 Category:            Git
 
@@ -61,3 +61,5 @@ Test-suite smoke
     , tagged             >= 0.2.3.1
     , text               >= 0.11.2
     , transformers       >= 0.2.2
+  build-tools:
+    git
