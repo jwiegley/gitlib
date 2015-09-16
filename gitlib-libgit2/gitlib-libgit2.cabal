@@ -29,7 +29,6 @@ Test-suite smoke
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3
-        , monad-logger       >= 0.3.4.1
         , exceptions         >= 0.6
         , transformers       >= 0.3.0.0
 
@@ -53,7 +52,6 @@ Library
         , lifted-base          >= 0.2.0.2
         , mmorph               >= 1.0.0
         , monad-control        >= 1.0
-        , monad-logger         >= 0.3.4.1
         , monad-loops          >= 0.3.3.0
         , mtl                  >= 2.1.2
         , resourcet            >= 1.1.0

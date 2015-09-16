@@ -35,7 +35,6 @@ module Git.Libgit2
        , checkResult
        , lgBuildPackIndex
        , lgFactory
-       , lgFactoryLogger
        , lgForEachObject
        , lgExcTrap
        , lgBuildPackFile
@@ -64,7 +63,6 @@ import           Control.Concurrent.STM
 --import           Control.Exception.Lifted
 import           Control.Monad hiding (forM, forM_, mapM, mapM_, sequence)
 import           Control.Monad.Catch
-import           Control.Monad.Logger
 import           Control.Monad.Loops
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Control
@@ -113,14 +111,11 @@ import           System.IO (openBinaryTempFile, hClose)
 import qualified System.IO.Unsafe as SU
 import           Unsafe.Coerce
 
-defaultLoc :: Loc
-defaultLoc = Loc "<unknown>" "<unknown>" "<unknown>" (0,0) (0,0)
+lgDebug :: MonadIO m => String -> m ()
+lgDebug = liftIO . putStrLn . ("[DEBUG] " ++)
 
-lgDebug :: MonadLogger m => String -> m ()
-lgDebug = monadLoggerLog defaultLoc "Git" LevelDebug . pack
-
-lgWarn :: MonadLogger m => String -> m ()
-lgWarn = monadLoggerLog defaultLoc "Git" LevelWarn . pack
+lgWarn :: MonadIO m => String -> m ()
+lgWarn = liftIO . putStrLn . ("[WARN] " ++)
 
 withFilePath :: Git.RawFilePath -> (CString -> IO a) -> IO a
 withFilePath = B.useAsCString
@@ -181,7 +176,7 @@ instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
 
 instance (Applicative m, MonadExcept m,
-          MonadBaseControl IO m, MonadIO m, MonadLogger m)
+          MonadBaseControl IO m, MonadIO m)
          => Git.MonadGit LgRepo (ReaderT LgRepo m) where
     type Oid LgRepo = OidPtr
     data Tree LgRepo =
@@ -1278,7 +1273,7 @@ lgBuildPackFile dir oids = do
 lift_ :: (Monad m, Functor (t m), MonadTrans t) => m a -> t m ()
 lift_ = void . lift
 
-lgBuildPackIndex :: (MonadIO m, MonadBaseControl IO m, MonadLogger m)
+lgBuildPackIndex :: (MonadIO m, MonadBaseControl IO m)
                  => FilePath -> BL.ByteString -> m (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
@@ -1390,8 +1385,7 @@ lgCopyPackFile packFile = do
         checkResult r "c'git_odb_writepack'commit failed"
 
 lgLoadPackFileInMemory
-    :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-        MonadExcept m)
+    :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
     => FilePath
     -> Ptr (Ptr C'git_odb_backend)
     -> Ptr (Ptr C'git_odb)
@@ -1422,26 +1416,22 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 
     return odbPtr
 
-lgOpenPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   MonadExcept m)
+lgOpenPackFile :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
                => FilePath -> m (Ptr C'git_odb)
 lgOpenPackFile idxPath = control $ \run ->
     alloca $ \odbPtrPtr ->
     alloca $ \backendPtrPtr -> run $
         lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
-lgClosePackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                    MonadExcept m)
+lgClosePackFile :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
                => Ptr C'git_odb -> m ()
 lgClosePackFile = liftIO . c'git_odb_free
 
-lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   MonadExcept m)
+lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
                => FilePath -> (Ptr C'git_odb -> m a) -> m a
 lgWithPackFile idxPath = bracket (lgOpenPackFile idxPath) lgClosePackFile
 
-lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, MonadLogger m,
-                   MonadExcept m)
+lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
                => Ptr C'git_odb -> Git.SHA -> Bool
                -> m (Maybe (C'git_otype, CSize, ByteString))
 lgReadFromPack odbPtr sha metadataOnly = liftIO $ do
@@ -1503,19 +1493,10 @@ lgRemoteFetch uri fetchSpec = do
         checkResult r2 "c'git_remote_download failed"
 
 lgFactory :: MonadIO m
-          => Git.RepositoryFactory
-              (ReaderT LgRepo (NoLoggingT m)) m LgRepo
+          => Git.RepositoryFactory (ReaderT LgRepo m) m LgRepo
 lgFactory = Git.RepositoryFactory
-    { Git.openRepository   = runNoLoggingT . openLgRepository
-    , Git.runRepository    = \c m ->
-        runNoLoggingT $ runLgRepository c m
-    }
-
-lgFactoryLogger :: (MonadIO m, MonadLogger m)
-                => Git.RepositoryFactory (ReaderT LgRepo m) m LgRepo
-lgFactoryLogger = Git.RepositoryFactory
-    { Git.openRepository   = openLgRepository
-    , Git.runRepository    = runLgRepository
+    { Git.openRepository = openLgRepository
+    , Git.runRepository  = runLgRepository
     }
 
 runLgRepository :: LgRepo -> ReaderT LgRepo m a -> m a

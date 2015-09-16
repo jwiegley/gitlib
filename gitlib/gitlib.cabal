@@ -52,7 +52,6 @@ Library
         , lifted-async         >= 0.1.1
         , lifted-base          >= 0.2
         , monad-control        <  1.1
-        , monad-logger         >= 0.3.4.1
         , mtl                  >= 2.1.2
         , resourcet            >= 1.1.0
         , semigroups           >= 0.11

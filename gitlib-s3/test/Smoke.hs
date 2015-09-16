@@ -13,7 +13,6 @@ import           Aws
 import           Control.Applicative
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
-import           Control.Monad.Logger
 import           Control.Monad.Trans.Reader
 import           Control.Monad.Trans.Resource
 import           Data.Default (def)

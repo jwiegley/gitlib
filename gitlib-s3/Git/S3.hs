@@ -35,7 +35,6 @@ import           Control.Exception (assert)
 import           Control.Lens ((??), under, reversed, has, _Left)
 import           Control.Monad
 import           Control.Monad.Catch
-import           Control.Monad.Logger hiding (LogLevel)
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Maybe
 import           Control.Monad.Trans.Reader
@@ -139,8 +138,7 @@ data QuotaStatus = QuotaCheckSuccess
                    }
                   deriving (Eq, Show, Generic)
 
-type MonadS3 m = (MonadExcept m, MonadIO m, MonadBaseControl IO m,
-                  MonadLogger m)
+type MonadS3 m = (MonadExcept m, MonadIO m, MonadBaseControl IO m)
 
 data BackendCallbacks = BackendCallbacks
     { checkQuota :: ObjectLength -> IO (Maybe QuotaStatus)
@@ -1216,7 +1214,7 @@ freeCallback be = do
 
     shuttingDown (callbacks dets)
     packFiles <- atomically $ readTVar (knownPackFiles dets)
-    mapM_ (runNoLoggingT . lgClosePackFile . fst) (M.elems packFiles)
+    mapM_ (lgClosePackFile . fst) (M.elems packFiles)
 
     packFreeCallback (packWriter odbS3)
     freeStablePtr (details odbS3)
@@ -1497,31 +1495,8 @@ addS3Backend repo bucket prefix access secret
 
 s3Factory :: MonadS3 m
           => Maybe Text -> Text -> Text -> FilePath -> BackendCallbacks
-          -> Git.RepositoryFactory (ReaderT LgRepo (NoLoggingT m)) m LgRepo
+          -> Git.RepositoryFactory (ReaderT LgRepo m) m LgRepo
 s3Factory bucket accessKey secretKey dir callbacks = lgFactory
-    { Git.runRepository = \ctxt m ->
-       runNoLoggingT $ runLgRepository ctxt (s3back >> m) }
-  where
-    s3back = do
-        repo <- Git.getRepository
-        void $ addS3Backend
-            repo
-            (fromMaybe "test-bucket" bucket)
-            ""
-            accessKey
-            secretKey
-            Nothing
-            (if isNothing bucket
-             then Just "127.0.0.1"
-             else Nothing)
-            Aws.Error
-            dir
-            callbacks
-
-s3FactoryLogger :: MonadS3 m
-                => Maybe Text -> Text -> Text -> FilePath -> BackendCallbacks
-                -> Git.RepositoryFactory (ReaderT LgRepo m) m LgRepo
-s3FactoryLogger bucket accessKey secretKey dir callbacks = lgFactoryLogger
     { Git.runRepository = \ctxt -> runLgRepository ctxt . (s3back >>) }
   where
     s3back = do

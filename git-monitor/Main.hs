@@ -14,7 +14,6 @@ import           Control.Concurrent (threadDelay)
 import           Control.Logging
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
-import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
 import qualified Data.ByteString.Char8 as B8
@@ -29,7 +28,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Git hiding (Options)
 import           Git.Tree.Working
-import           Git.Libgit2 (MonadLg, LgRepo, lgFactoryLogger)
+import           Git.Libgit2 (MonadLg, LgRepo, lgFactory)
 import           Options.Applicative
 import           Prelude hiding (log)
 import           Shelly (silently, shelly, run)
@@ -98,7 +97,7 @@ doMain opts = do
         wd   = if null wDir then takeDirectory gd else wDir
 
     -- Make sure we're in a known branch, and if so, let it begin
-    forever $ withRepository lgFactoryLogger gd $ do
+    forever $ withRepository lgFactory gd $ do
         log' $ pack $ "Working tree: " ++ wd
         ref <- lookupReference "HEAD"
         case ref of
