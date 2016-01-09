@@ -63,6 +63,9 @@ Library
     if !os(mingw32)
         build-depends:
           unix                 >= 2.5.1.1
+    else
+        build-depends:
+          unix-compat          >= 0.4
     exposed-modules:
         Git
         Git.Blob
