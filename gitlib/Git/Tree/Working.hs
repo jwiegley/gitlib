@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Git.Tree.Working where
 
 import           Control.Applicative
@@ -18,7 +19,11 @@ import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
 import           Prelude hiding (log)
 import           System.FilePath.Posix
+#ifndef mingw32_HOST_OS
 import           System.Posix.Files
+#else
+import           System.PosixCompat.Files
+#endif
 
 data FileEntry m = FileEntry
     { fileModTime  :: UTCTime

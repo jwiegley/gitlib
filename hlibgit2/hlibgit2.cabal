@@ -229,6 +229,8 @@ Library
       libgit2/src/win32/utf-conv.c
     include-dirs:
       libgit2/src/win32
+    extra-libraries:
+      ws2_32, regex, winhttp, crypt32, rpcrt4, ssl, crypto
   else
     cc-options: -D_GNU_SOURCE -DOPENSSL_SHA1 -Wno-deprecated-declarations
     c-sources:
