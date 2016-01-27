@@ -40,17 +40,9 @@ import Bindings.Libgit2.Oid
 #field uid , CUInt
 #field gid , CUInt
 #field file_size , CLong
-#field oid , <git_oid>
+#field id , <git_oid>
 #field flags , CUShort
 #field flags_extended , CUShort
-#field path , CString
-#stoptype
-{- typedef struct git_index_reuc_entry {
-            unsigned int mode[3]; git_oid oid[3]; char * path;
-        } git_index_reuc_entry; -}
-#starttype git_index_reuc_entry
-#array_field mode , CUInt
-#array_field oid , <git_oid>
 #field path , CString
 #stoptype
 {- enum {
