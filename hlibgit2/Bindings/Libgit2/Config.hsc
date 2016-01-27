@@ -57,28 +57,28 @@ import Bindings.Libgit2.Types
     int (* refresh)(struct git_config_backend *);
     void (* free)(struct git_config_backend *);
 }; -}
-#callback git_config_backend_open_callback , Ptr <git_config_backend> -> CUInt -> IO CInt
-#callback git_config_backend_get_callback , Ptr <git_config_backend> -> CString -> Ptr (Ptr <git_config_entry>) -> IO CInt
-#callback git_config_backend_get_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
-#callback git_config_backend_set_callback , Ptr <git_config_backend> -> CString -> CString -> IO CInt
-#callback git_config_backend_set_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> CString -> IO CInt
-#callback git_config_backend_del_callback , Ptr <git_config_backend> -> CString -> IO CInt
-#callback git_config_backend_foreach_callback , Ptr <git_config_backend> -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
-#callback git_config_backend_refresh_callback , Ptr <git_config_backend> -> IO CInt
-#callback git_config_backend_free_callback , Ptr <git_config_backend> -> IO ()
-#starttype git_config_backend
-#field version , CUInt
-#field cfg , Ptr <git_config>
-#field open , <git_config_backend_open_callback>
-#field get , <git_config_backend_get_callback>
-#field get_multivar , <git_config_backend_get_multivar_callback>
-#field set , <git_config_backend_set_callback>
-#field set_multivar , <git_config_backend_set_multivar_callback>
-#field del , <git_config_backend_del_callback>
-#field foreach , <git_config_backend_foreach_callback>
-#field refresh , <git_config_backend_refresh_callback>
-#field free , <git_config_backend_free_callback>
-#stoptype
+-- #callback git_config_backend_open_callback , Ptr <git_config_backend> -> CUInt -> IO CInt
+-- #callback git_config_backend_get_callback , Ptr <git_config_backend> -> CString -> Ptr (Ptr <git_config_entry>) -> IO CInt
+-- #callback git_config_backend_get_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
+-- #callback git_config_backend_set_callback , Ptr <git_config_backend> -> CString -> CString -> IO CInt
+-- #callback git_config_backend_set_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> CString -> IO CInt
+-- #callback git_config_backend_del_callback , Ptr <git_config_backend> -> CString -> IO CInt
+-- #callback git_config_backend_foreach_callback , Ptr <git_config_backend> -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
+-- #callback git_config_backend_refresh_callback , Ptr <git_config_backend> -> IO CInt
+-- #callback git_config_backend_free_callback , Ptr <git_config_backend> -> IO ()
+-- #starttype git_config_backend
+-- #field version , CUInt
+-- #field cfg , Ptr <git_config>
+-- #field open , <git_config_backend_open_callback>
+-- #field get , <git_config_backend_get_callback>
+-- #field get_multivar , <git_config_backend_get_multivar_callback>
+-- #field set , <git_config_backend_set_callback>
+-- #field set_multivar , <git_config_backend_set_multivar_callback>
+-- #field del , <git_config_backend_del_callback>
+-- #field foreach , <git_config_backend_foreach_callback>
+-- #field refresh , <git_config_backend_refresh_callback>
+-- #field free , <git_config_backend_free_callback>
+-- #stoptype
 {- typedef enum {
             GIT_CVAR_FALSE = 0,
             GIT_CVAR_TRUE = 1,
