@@ -37,23 +37,33 @@ import Bindings.Libgit2.Refs
 #num GIT_DIFF_NORMAL
 #num GIT_DIFF_REVERSE
 #num GIT_DIFF_FORCE_TEXT
-#num GIT_DIFF_IGNORE_WHITESPACE
-#num GIT_DIFF_IGNORE_WHITESPACE_CHANGE
-#num GIT_DIFF_IGNORE_WHITESPACE_EOL
-#num GIT_DIFF_IGNORE_SUBMODULES
-#num GIT_DIFF_PATIENCE
 #num GIT_DIFF_INCLUDE_IGNORED
+#num GIT_DIFF_RECURSE_IGNORED_DIRS
 #num GIT_DIFF_INCLUDE_UNTRACKED
-#num GIT_DIFF_INCLUDE_UNMODIFIED
 #num GIT_DIFF_RECURSE_UNTRACKED_DIRS
-#num GIT_DIFF_DISABLE_PATHSPEC_MATCH
-#num GIT_DIFF_DELTAS_ARE_ICASE
-#num GIT_DIFF_INCLUDE_UNTRACKED_CONTENT
-#num GIT_DIFF_SKIP_BINARY_CHECK
+#num GIT_DIFF_INCLUDE_UNMODIFIED
 #num GIT_DIFF_INCLUDE_TYPECHANGE
 #num GIT_DIFF_INCLUDE_TYPECHANGE_TREES
 #num GIT_DIFF_IGNORE_FILEMODE
-#num GIT_DIFF_RECURSE_IGNORED_DIRS
+#num GIT_DIFF_IGNORE_SUBMODULES
+#num GIT_DIFF_IGNORE_CASE
+#num GIT_DIFF_INCLUDE_CASECHANGE
+#num GIT_DIFF_DISABLE_PATHSPEC_MATCH
+#num GIT_DIFF_SKIP_BINARY_CHECK
+#num GIT_DIFF_ENABLE_FAST_UNTRACKED_DIRS
+#num GIT_DIFF_UPDATE_INDEX
+#num GIT_DIFF_INCLUDE_UNREADABLE
+#num GIT_DIFF_INCLUDE_UNREADABLE_AS_UNTRACKED
+#num GIT_DIFF_FORCE_TEXT
+#num GIT_DIFF_FORCE_BINARY
+#num GIT_DIFF_IGNORE_WHITESPACE
+#num GIT_DIFF_IGNORE_WHITESPACE_CHANGE
+#num GIT_DIFF_IGNORE_WHITESPACE_EOL
+#num GIT_DIFF_SHOW_UNTRACKED_CONTENT
+#num GIT_DIFF_SHOW_UNMODIFIED
+#num GIT_DIFF_PATIENCE
+#num GIT_DIFF_MINIMAL
+#num GIT_DIFF_SHOW_BINARY
 {- typedef struct git_diff_list git_diff_list; -}
 #opaque_t git_diff_list
 {- typedef enum {
@@ -64,7 +74,8 @@ import Bindings.Libgit2.Refs
 #integral_t git_diff_flag_t
 #num GIT_DIFF_FLAG_BINARY
 #num GIT_DIFF_FLAG_NOT_BINARY
-#num GIT_DIFF_FLAG_VALID_OID
+#num GIT_DIFF_FLAG_VALID_ID
+#num GIT_DIFF_FLAG_EXISTS
 {- typedef enum {
             GIT_DELTA_UNMODIFIED = 0,
             GIT_DELTA_ADDED = 1,
@@ -94,7 +105,7 @@ import Bindings.Libgit2.Refs
             uint16_t mode;
         } git_diff_file; -}
 #starttype git_diff_file
-#field oid , <git_oid>
+#field id , <git_oid>
 #field path , CString
 #field size , CLong
 #field flags , CUInt
@@ -150,11 +161,13 @@ import Bindings.Libgit2.Refs
 {- typedef struct {
             int old_start; int old_lines; int new_start; int new_lines;
         } git_diff_range; -}
-#starttype git_diff_range
+#starttype git_diff_hunk
 #field old_start , CInt
 #field old_lines , CInt
 #field new_start , CInt
 #field new_lines , CInt
+#field header_len , CSize
+#array_field header , CChar
 #stoptype
 {- typedef int (* git_diff_hunk_cb)(const git_diff_delta * delta,
                                  const git_diff_range * range,
@@ -256,7 +269,7 @@ import Bindings.Libgit2.Refs
 #field rename_from_rewrite_threshold , CUInt
 #field copy_threshold , CUInt
 #field break_rewrite_threshold , CUInt
-#field target_limit , CUInt
+#field rename_limit , CUInt
 #field metric , Ptr <git_diff_similarity_metric>
 #stoptype
 #ccall git_diff_list_free , Ptr <git_diff_list> -> IO ()
