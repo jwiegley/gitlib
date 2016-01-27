@@ -31,19 +31,14 @@ import Bindings.Libgit2.Transport
         } git_clone_options; -}
 #starttype git_clone_options
 #field version , CUInt
-#field checkout_opts , <git_checkout_opts>
+#field checkout_opts , <git_checkout_options>
+#field fetch_opts , <git_fetch_options>
 #field bare , CInt
-#field fetch_progress_cb , CInt
-#field fetch_progress_payload , Ptr ()
-#field remote_name , CString
-#field pushurl , CString
-#field fetch_spec , CString
-#field push_spec , CString
-#field cred_acquire_cb , CInt
-#field cred_acquire_payload , Ptr ()
-#field transport , Ptr <git_transport>
-#field remote_callbacks , Ptr <git_remote_callbacks>
-#field remote_autotag , <git_remote_autotag_option_t>
+#field local , <git_clone_local_t>
 #field checkout_branch , CString
+#field repository_cb , <git_repository_create_cb>
+#field repository_cb_payload , Ptr ()
+#field remote_cb , <git_remote_create_cb>
+#field remote_cb_payload , Ptr ()
 #stoptype
 #ccall git_clone , Ptr (Ptr <git_repository>) -> CString -> CString -> Ptr <git_clone_options> -> IO (CInt)
