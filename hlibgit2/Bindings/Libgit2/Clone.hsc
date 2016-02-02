@@ -12,6 +12,19 @@ import Bindings.Libgit2.Indexer
 import Bindings.Libgit2.Checkout
 import Bindings.Libgit2.Remote
 import Bindings.Libgit2.Transport
+
+{- typedef enum {
+	 GIT_CLONE_LOCAL_AUTO,
+	 GIT_CLONE_LOCAL,
+	 GIT_CLONE_NO_LOCAL,
+	 GIT_CLONE_LOCAL_NO_LINKS,
+ } git_clone_local_t; -}
+#integral_t git_clone_local_t
+#num GIT_CLONE_LOCAL_AUTO
+#num GIT_CLONE_LOCAL
+#num GIT_CLONE_NO_LOCAL
+#num GIT_CLONE_LOCAL_NO_LINKS
+
 {- typedef struct git_clone_options {
             unsigned int version;
             git_checkout_opts checkout_opts;
@@ -41,4 +54,8 @@ import Bindings.Libgit2.Transport
 #field remote_cb , <git_remote_create_cb>
 #field remote_cb_payload , Ptr ()
 #stoptype
+
+#callback git_remote_create_cb , Ptr (Ptr <git_remote>) -> Ptr <git_repository> -> CString -> CString -> Ptr () -> IO CInt
+#callback git_repository_create_cb , Ptr (Ptr <git_repository>) -> CString -> CInt -> Ptr () -> IO CInt
+
 #ccall git_clone , Ptr (Ptr <git_repository>) -> CString -> CString -> Ptr <git_clone_options> -> IO (CInt)
