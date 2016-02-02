@@ -173,7 +173,7 @@ import Bindings.Libgit2.Refs
                                  const char * header,
                                  size_t header_len,
                                  void * payload); -}
-#callback git_diff_hunk_cb , Ptr (<git_diff_delta>) -> Ptr (<git_diff_range>) -> CString -> CSize -> Ptr () -> IO CInt
+#callback git_diff_hunk_cb , Ptr (<git_diff_delta>) -> Ptr (<git_diff_hunk>) -> Ptr () -> IO CInt
 {- typedef enum {
             GIT_DIFF_LINE_CONTEXT = ' ',
             GIT_DIFF_LINE_ADDITION = '+',
@@ -193,13 +193,6 @@ import Bindings.Libgit2.Refs
 #num GIT_DIFF_LINE_FILE_HDR
 #num GIT_DIFF_LINE_HUNK_HDR
 #num GIT_DIFF_LINE_BINARY
-{- typedef int (* git_diff_data_cb)(const git_diff_delta * delta,
-                                 const git_diff_range * range,
-                                 char line_origin,
-                                 const char * content,
-                                 size_t content_len,
-                                 void * payload); -}
-#callback git_diff_data_cb , Ptr (<git_diff_delta>) -> Ptr (<git_diff_range>) -> CChar -> CString -> CSize -> Ptr () -> IO CInt
 {- typedef struct git_diff_patch git_diff_patch; -}
 #opaque_t git_diff_patch
 {- typedef enum {
@@ -278,21 +271,21 @@ import Bindings.Libgit2.Refs
 #ccall git_diff_tree_to_workdir , Ptr (Ptr <git_diff_list>) -> Ptr <git_repository> -> Ptr <git_tree> -> Ptr <git_diff_options> -> IO (CInt)
 #ccall git_diff_merge , Ptr <git_diff_list> -> Ptr <git_diff_list> -> IO (CInt)
 #ccall git_diff_find_similar , Ptr <git_diff_list> -> Ptr <git_diff_find_options> -> IO (CInt)
-#ccall git_diff_foreach , Ptr <git_diff_list> -> <git_diff_file_cb> -> <git_diff_hunk_cb> -> <git_diff_data_cb> -> Ptr () -> IO (CInt)
-#ccall git_diff_print_compact , Ptr <git_diff_list> -> <git_diff_data_cb> -> Ptr () -> IO (CInt)
 #ccall git_diff_status_char , <git_delta_t> -> IO (CChar)
-#ccall git_diff_print_patch , Ptr <git_diff_list> -> <git_diff_data_cb> -> Ptr () -> IO (CInt)
-#ccall git_diff_num_deltas , Ptr <git_diff_list> -> IO (CSize)
-#ccall git_diff_num_deltas_of_type , Ptr <git_diff_list> -> <git_delta_t> -> IO (CSize)
-#ccall git_diff_get_patch , Ptr (Ptr <git_diff_patch>) -> Ptr (Ptr <git_diff_delta>) -> Ptr <git_diff_list> -> CSize -> IO (CInt)
-#ccall git_diff_patch_free , Ptr <git_diff_patch> -> IO ()
-#ccall git_diff_patch_delta , Ptr <git_diff_patch> -> IO (Ptr <git_diff_delta>)
-#ccall git_diff_patch_num_hunks , Ptr <git_diff_patch> -> IO (CSize)
-#ccall git_diff_patch_line_stats , Ptr CSize -> Ptr CSize -> Ptr CSize -> Ptr <git_diff_patch> -> IO (CInt)
-#ccall git_diff_patch_get_hunk , Ptr (Ptr <git_diff_range>) -> Ptr (CString) -> Ptr CSize -> Ptr CSize -> Ptr <git_diff_patch> -> CSize -> IO (CInt)
-#ccall git_diff_patch_num_lines_in_hunk , Ptr <git_diff_patch> -> CSize -> IO (CInt)
-#ccall git_diff_patch_get_line_in_hunk , CString -> Ptr (CString) -> Ptr CSize -> Ptr CInt -> Ptr CInt -> Ptr <git_diff_patch> -> CSize -> CSize -> IO (CInt)
-#ccall git_diff_patch_print , Ptr <git_diff_patch> -> <git_diff_data_cb> -> Ptr () -> IO (CInt)
-#ccall git_diff_patch_to_str , Ptr (CString) -> Ptr <git_diff_patch> -> IO (CInt)
-#ccall git_diff_blobs , Ptr <git_blob> -> Ptr <git_blob> -> Ptr <git_diff_options> -> <git_diff_file_cb> -> <git_diff_hunk_cb> -> <git_diff_data_cb> -> Ptr () -> IO (CInt)
-#ccall git_diff_blob_to_buffer , Ptr <git_blob> -> CString -> CSize -> Ptr <git_diff_options> -> <git_diff_file_cb> -> <git_diff_hunk_cb> -> <git_diff_data_cb> -> Ptr () -> IO (CInt)
+#ccall git_diff_num_deltas , Ptr <git_diff> -> IO (CSize)
+#ccall git_diff_num_deltas_of_type , Ptr <git_diff> -> <git_delta_t> -> IO (CSize)
+#ccall git_diff_get_delta , Ptr <git_diff> -> CSize -> IO (Ptr <git_diff_delta>)
+#ccall git_diff_is_sorted_icase , Ptr <git_diff> -> IO (CInt)
+#ccall git_diff_foreach , Ptr <git_diff> -> <git_diff_file_cb> -> <git_diff_binary_cb> <git_diff_hunk_cb> -> <git_diff_line_cb> -> Ptr () -> IO (CInt)
+
+#integral_t git_diff_format_t
+#num GIT_DIFF_FORMAT_PATCH
+#num GIT_DIFF_FORMAT_PATCH_HEADER
+#num GIT_DIFF_FORMAT_RAW
+#num GIT_DIFF_FORMAT_NAME_ONLY
+#num GIT_DIFF_FORMAT_NAME_STATUS
+  
+#ccall git_diff_print , Ptr <git_diff> -> <git_diff_format_t> -> <git_diff_line_cb> -> Ptr () -> IO CInt
+
+#ccall git_diff_blobs , Ptr <git_blob> -> CString -> Ptr <git_blob> -> CString -> Ptr <git_diff_options> -> <git_diff_file_cb> -> <git_diff_binary_cb> -> <git_diff_hunk_cb> -> <git_diff_line_cb> -> Ptr () -> IO CInt
+#ccall git_diff_blob_to_buffer , Ptr <git_blob> -> CString -> CString -> CSize -> CString -> Ptr <git_diff_options> -> <git_diff_file_cb> -> <git_diff_binary_cb> -> <git_diff_hunk_cb> -> <git_diff_line_cb> -> Ptr () -> IO CInt
