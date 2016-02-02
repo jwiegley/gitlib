@@ -68,9 +68,8 @@ import Bindings.Libgit2.Oid
 #callback git_remote_callbacks_update_tips_callback , CString -> Ptr <git_oid> -> Ptr <git_oid> -> Ptr () -> IO CInt
 #starttype git_remote_callbacks
 #field version , CUInt
-#field progress , <git_remote_callbacks_progress_callback>
+#field sideband_progress , <git_remote_callbacks_progress_callback>
 #field completion , <git_remote_callbacks_completion_callback>
-#field update_tips , <git_remote_callbacks_update_tips_callback>
 #field payload , Ptr ()
 #stoptype
 #ccall git_remote_set_callbacks , Ptr <git_remote> -> Ptr <git_remote_callbacks> -> IO (CInt)
@@ -82,7 +81,7 @@ import Bindings.Libgit2.Oid
             GIT_REMOTE_DOWNLOAD_TAGS_ALL
         } git_remote_autotag_option_t; -}
 #integral_t git_remote_autotag_option_t
-#num GIT_REMOTE_DOWNLOAD_TAGS_UNSET
+#num GIT_REMOTE_DOWNLOAD_TAGS_UNSPECIFIED
 #num GIT_REMOTE_DOWNLOAD_TAGS_NONE
 #num GIT_REMOTE_DOWNLOAD_TAGS_AUTO
 #num GIT_REMOTE_DOWNLOAD_TAGS_ALL

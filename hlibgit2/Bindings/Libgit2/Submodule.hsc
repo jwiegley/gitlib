@@ -31,7 +31,7 @@ import Bindings.Libgit2.Oid
             GIT_SUBMODULE_IGNORE_ALL = 3
         } git_submodule_ignore_t; -}
 #integral_t git_submodule_ignore_t
-#num GIT_SUBMODULE_IGNORE_DEFAULT
+#num GIT_SUBMODULE_IGNORE_UNSPECIFIED
 #num GIT_SUBMODULE_IGNORE_NONE
 #num GIT_SUBMODULE_IGNORE_UNTRACKED
 #num GIT_SUBMODULE_IGNORE_DIRTY
