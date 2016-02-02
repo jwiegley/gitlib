@@ -66,6 +66,17 @@ import Bindings.Libgit2.Diff
 #num GIT_CHECKOUT_NOTIFY_UPDATED
 #num GIT_CHECKOUT_NOTIFY_UNTRACKED
 #num GIT_CHECKOUT_NOTIFY_IGNORED
+
+{- typedef struct {
+        size_t mkdir_calls;
+        size_t stat_calls;
+        size_t chmod_calls;
+} git_checkout_perfdata; -}
+#starttype git_checkout_perfdata
+#field mkdir_calls , CSize
+#field stat_calls , CSize
+#field chmod_calls , CSize
+#stoptype
 {- typedef int (* git_checkout_notify_cb)(git_checkout_notify_t why,
                                        const char * path,
                                        const git_diff_file * baseline,
@@ -78,6 +89,8 @@ import Bindings.Libgit2.Diff
                                           size_t total_steps,
                                           void * payload); -}
 #callback git_checkout_progress_cb , CString -> CSize -> CSize -> Ptr () -> IO ()
+
+#callback git_checkout_perfdata_cb , Ptr (<git_checkout_perfdata>) -> Ptr () -> IO ()
 {- typedef struct git_checkout_options {
             unsigned int version;
             unsigned int checkout_strategy;
@@ -99,7 +112,7 @@ import Bindings.Libgit2.Diff
             const char * their_label;
             git_checkout_perfdata_cb perfdata_cb;
             void * perfdata_payload;
-        } git_checkout_opts; -}
+        } git_checkout_options; -}
 #starttype git_checkout_options
 #field version , CUInt
 #field checkout_strategy , CUInt
@@ -122,6 +135,6 @@ import Bindings.Libgit2.Diff
 #field perfdata_cb , <git_checkout_perfdata_cb>
 #field perfdata_payload , Ptr ()
 #stoptype
-#ccall git_checkout_head , Ptr <git_repository> -> Ptr <git_checkout_opts> -> IO (CInt)
-#ccall git_checkout_index , Ptr <git_repository> -> Ptr <git_index> -> Ptr <git_checkout_opts> -> IO (CInt)
-#ccall git_checkout_tree , Ptr <git_repository> -> Ptr <git_object> -> Ptr <git_checkout_opts> -> IO (CInt)
+#ccall git_checkout_head , Ptr <git_repository> -> Ptr <git_checkout_options> -> IO (CInt)
+#ccall git_checkout_index , Ptr <git_repository> -> Ptr <git_index> -> Ptr <git_checkout_options> -> IO (CInt)
+#ccall git_checkout_tree , Ptr <git_repository> -> Ptr <git_object> -> Ptr <git_checkout_options> -> IO (CInt)
