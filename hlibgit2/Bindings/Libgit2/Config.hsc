@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include <git2.h>
+#include <git2/sys/config.h>
 module Bindings.Libgit2.Config where
 import Foreign.Ptr
 #strict_import
@@ -30,6 +30,30 @@ import Bindings.Libgit2.Types
 {- typedef int (* git_config_foreach_cb)(const git_config_entry *,
                                       void *); -}
 #callback git_config_foreach_cb , Ptr (<git_config_entry>) -> Ptr () -> IO CInt
+
+{- struct git_config_iterator {
+  git_config_backend *backend;
+  unsigned int flags;
+
+  /**
+    * Return the current entry and advance the iterator. The
+    * memory belongs to the library.
+    */
+  int (*next)(git_config_entry **entry, git_config_iterator *iter);
+
+  /**
+    * Free the iterator
+    */
+  void (*free)(git_config_iterator *iter);
+}; -}
+#callback git_config_iterator_next_cb , Ptr (Ptr <git_config_entry>) -> Ptr <git_config_iterator> -> CInt
+#callback git_config_iterator_free_cb , Ptr <git_config_iterator> -> Ptr ()
+#starttype git_config_iterator
+#field backend , <git_config_backend>
+#field flags , CUInt
+#field next , <git_config_iterator_next_cb>
+#field free , <git_config_iterator_free_cb>
+#stoptype
 {- struct git_config_backend {
     unsigned int version;
     struct git_config * cfg;
@@ -57,28 +81,30 @@ import Bindings.Libgit2.Types
     int (* refresh)(struct git_config_backend *);
     void (* free)(struct git_config_backend *);
 }; -}
--- #callback git_config_backend_open_callback , Ptr <git_config_backend> -> CUInt -> IO CInt
--- #callback git_config_backend_get_callback , Ptr <git_config_backend> -> CString -> Ptr (Ptr <git_config_entry>) -> IO CInt
--- #callback git_config_backend_get_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
--- #callback git_config_backend_set_callback , Ptr <git_config_backend> -> CString -> CString -> IO CInt
--- #callback git_config_backend_set_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> CString -> IO CInt
--- #callback git_config_backend_del_callback , Ptr <git_config_backend> -> CString -> IO CInt
--- #callback git_config_backend_foreach_callback , Ptr <git_config_backend> -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
--- #callback git_config_backend_refresh_callback , Ptr <git_config_backend> -> IO CInt
--- #callback git_config_backend_free_callback , Ptr <git_config_backend> -> IO ()
--- #starttype git_config_backend
--- #field version , CUInt
--- #field cfg , Ptr <git_config>
--- #field open , <git_config_backend_open_callback>
--- #field get , <git_config_backend_get_callback>
--- #field get_multivar , <git_config_backend_get_multivar_callback>
--- #field set , <git_config_backend_set_callback>
--- #field set_multivar , <git_config_backend_set_multivar_callback>
--- #field del , <git_config_backend_del_callback>
--- #field foreach , <git_config_backend_foreach_callback>
--- #field refresh , <git_config_backend_refresh_callback>
--- #field free , <git_config_backend_free_callback>
--- #stoptype
+#callback git_config_backend_open_callback , Ptr <git_config_backend> -> CUInt -> IO CInt
+#callback git_config_backend_get_callback , Ptr <git_config_backend> -> CString -> Ptr (Ptr <git_config_entry>) -> IO CInt
+#callback git_config_backend_get_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> <git_config_foreach_cb> -> Ptr () -> IO CInt
+#callback git_config_backend_set_callback , Ptr <git_config_backend> -> CString -> CString -> IO CInt
+#callback git_config_backend_set_multivar_callback , Ptr <git_config_backend> -> CString -> CString -> CString -> IO CInt
+#callback git_config_backend_del_callback , Ptr <git_config_backend> -> CString -> IO CInt
+#callback git_config_backend_del_multivar_callback , Ptr <git_config_iterator> -> CString  -> CString -> IO CInt
+#callback git_config_backend_iterator_callback , Ptr (Ptr <git_config_iterator>) -> Ptr <git_config_backend> -> IO CInt
+#callback git_config_backend_snapshot_callback , Ptr (Ptr <git_config_backend>) -> Ptr <git_config_backend> -> IO CInt
+#callback git_config_backend_free_callback , Ptr <git_config_backend> -> IO ()
+#starttype git_config_backend
+#field version , CUInt
+#field readonly , CInt
+#field cfg , Ptr <git_config>
+#field open , <git_config_backend_open_callback>
+#field get , <git_config_backend_get_callback>
+#field set , <git_config_backend_set_callback>
+#field set_multivar , <git_config_backend_set_multivar_callback>
+#field del , <git_config_backend_del_callback>
+#field del_multivar , <git_config_backend_del_multivar_callback>
+#field iterator , <git_config_backend_iterator_callback>
+#field snapshot , <git_config_backend_snapshot_callback>
+#field free , <git_config_backend_free_callback>
+#stoptype
 {- typedef enum {
             GIT_CVAR_FALSE = 0,
             GIT_CVAR_TRUE = 1,
