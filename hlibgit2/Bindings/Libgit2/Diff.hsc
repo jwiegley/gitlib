@@ -63,8 +63,8 @@ import Bindings.Libgit2.Refs
 #num GIT_DIFF_PATIENCE
 #num GIT_DIFF_MINIMAL
 #num GIT_DIFF_SHOW_BINARY
-{- typedef struct git_diff_list git_diff_list; -}
-#opaque_t git_diff_list
+{- typedef struct git_diff git_diff; -}
+#opaque_t git_diff
 {- typedef enum {
             GIT_DIFF_FLAG_BINARY = 1 << 0,
             GIT_DIFF_FLAG_NOT_BINARY = 1 << 1,
