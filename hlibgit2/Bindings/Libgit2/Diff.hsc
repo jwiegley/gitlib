@@ -36,7 +36,6 @@ import Bindings.Libgit2.Refs
 #integral_t git_diff_option_t
 #num GIT_DIFF_NORMAL
 #num GIT_DIFF_REVERSE
-#num GIT_DIFF_FORCE_TEXT
 #num GIT_DIFF_INCLUDE_IGNORED
 #num GIT_DIFF_RECURSE_IGNORED_DIRS
 #num GIT_DIFF_INCLUDE_UNTRACKED
