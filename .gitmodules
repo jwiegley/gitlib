@@ -1,6 +1,6 @@
 [submodule "hlibgit2/libgit2"]
 	path = hlibgit2/libgit2
-	url = https://github.com/jwiegley/libgit2.git
+	url = https://github.com/libgit2/libgit2.git
 [submodule "vendor/aws"]
 	path = vendor/aws
 	url = https://github.com/fpco/aws
