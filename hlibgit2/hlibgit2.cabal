@@ -122,7 +122,6 @@ Library
     libgit2/src/clone.c
     libgit2/src/commit.c
     libgit2/src/commit_list.c
-    libgit2/src/compress.c
     libgit2/src/config.c
     libgit2/src/config_cache.c
     libgit2/src/config_file.c
@@ -131,7 +130,6 @@ Library
     libgit2/src/delta-apply.c
     libgit2/src/delta.c
     libgit2/src/diff.c
-    libgit2/src/diff_output.c
     libgit2/src/diff_tform.c
     libgit2/src/errors.c
     libgit2/src/fetch.c
@@ -230,7 +228,7 @@ Library
     include-dirs:
       libgit2/src/win32
   else
-    cc-options: -D_GNU_SOURCE -DOPENSSL_SHA1 -Wno-deprecated-declarations
+    cc-options: -D_GNU_SOURCE -Wno-deprecated-declarations
     c-sources:
       -- libgit2/src/hash/hash_generic.c
       libgit2/src/unix/map.c
@@ -238,4 +236,4 @@ Library
     include-dirs:
       libgit2/src/unix
     extra-libraries:
-      ssl, crypto, pthread
+      pthread
