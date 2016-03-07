@@ -23,6 +23,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Typeable
+import           Foreign.C.Types
 
 type RawFilePath = ByteString
 
@@ -182,8 +183,8 @@ data BlobContents m = BlobString !ByteString
                     | BlobStream !(ByteSource m)
                     | BlobSizedStream !(ByteSource m) !Int
 
-data BlobKind = PlainBlob | ExecutableBlob | SymlinkBlob
-              deriving (Show, Eq, Enum)
+data BlobKind = PlainBlob CUInt | ExecutableBlob CUInt | SymlinkBlob CUInt
+              deriving (Show, Eq)
 
 instance Eq (BlobContents m) where
   BlobString str1 == BlobString str2 = str1 == str2

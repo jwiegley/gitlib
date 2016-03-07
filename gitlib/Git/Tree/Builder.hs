@@ -258,7 +258,7 @@ putBlob' :: MonadGit r m
 putBlob' path b kind = putEntry path (BlobEntry b kind)
 
 putBlob :: MonadGit r m => TreeFilePath -> BlobOid r -> TreeT r m ()
-putBlob path b = putBlob' path b PlainBlob
+putBlob path b = putBlob' path b (PlainBlob 0o100644)
 
 putTree :: MonadGit r m => TreeFilePath -> TreeOid r -> TreeT r m ()
 putTree path t = putEntry path (TreeEntry t)

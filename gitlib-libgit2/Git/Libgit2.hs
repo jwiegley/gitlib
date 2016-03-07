@@ -443,9 +443,9 @@ lgPutEntry builder key (treeEntryToOid -> (oid, mode)) = do
 treeEntryToOid :: TreeEntry -> (Oid, CUInt)
 treeEntryToOid (Git.BlobEntry oid kind) =
     (untag oid, case kind of
-          Git.PlainBlob      -> 0o100644
-          Git.ExecutableBlob -> 0o100755
-          Git.SymlinkBlob    -> 0o120000)
+          (Git.PlainBlob mode)      -> mode
+          (Git.ExecutableBlob mode) -> mode
+          (Git.SymlinkBlob mode)    -> mode)
 treeEntryToOid (Git.CommitEntry coid) =
     (untag coid, 0o160000)
 treeEntryToOid (Git.TreeEntry toid) =
@@ -541,11 +541,10 @@ entryToTreeEntry entry = do
              do mode <- c'git_tree_entry_filemode entry
                 Git.BlobEntry (Tagged (mkOid oid)) <$>
                     case mode of
-                        0o100644 -> return Git.PlainBlob
-                        0o100755 -> return Git.ExecutableBlob
-                        0o120000 -> return Git.SymlinkBlob
-                        _        -> throwM $ Git.BackendError $
-                            "Unknown blob mode: " <> T.pack (show mode)
+                        0o100644 -> return $ Git.PlainBlob mode
+                        0o100755 -> return $ Git.ExecutableBlob mode
+                        0o120000 -> return $ Git.SymlinkBlob mode
+                        mode -> return $ Git.PlainBlob mode
            | typ == c'GIT_OBJ_TREE ->
              return $ Git.TreeEntry (Tagged (mkOid oid))
            | typ == c'GIT_OBJ_COMMIT ->
@@ -623,8 +622,8 @@ lgReadIndex = do
                       else Git.BlobEntry (Tagged (mkOid foid')) $
                            if (0 /= mode .&. 64 -- check if owner executable
                               )
-                           then Git.ExecutableBlob
-                           else Git.PlainBlob
+                           then (Git.ExecutableBlob mode)
+                           else (Git.PlainBlob mode)
                                 -- jww (2014-04-05): Handle CommitEntry
                      )]
   forM_ xs $ uncurry Git.putEntry
