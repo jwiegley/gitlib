@@ -110,6 +110,7 @@ import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
 import qualified System.IO.Unsafe as SU
 import           Unsafe.Coerce
+import Data.Word
 
 lgDebug :: MonadIO m => String -> m ()
 lgDebug = liftIO . putStrLn . ("[DEBUG] " ++)
@@ -440,7 +441,7 @@ lgPutEntry builder key (treeEntryToOid -> (oid, mode)) = do
                 (fromIntegral mode)
     when (r2 < 0) $ throwM (Git.TreeBuilderInsertFailed key)
 
-treeEntryToOid :: TreeEntry -> (Oid, CUInt)
+treeEntryToOid :: TreeEntry -> (Oid, Word32)
 treeEntryToOid (Git.BlobEntry oid kind) =
     (untag oid, case kind of
           (Git.PlainBlob mode)      -> mode
@@ -541,10 +542,10 @@ entryToTreeEntry entry = do
              do mode <- c'git_tree_entry_filemode entry
                 Git.BlobEntry (Tagged (mkOid oid)) <$>
                     case mode of
-                        0o100644 -> return $ Git.PlainBlob mode
-                        0o100755 -> return $ Git.ExecutableBlob mode
-                        0o120000 -> return $ Git.SymlinkBlob mode
-                        mode -> return $ Git.PlainBlob mode
+                        (CUInt 0o100644) -> return $ Git.PlainBlob 0o100644
+                        (CUInt 0o100755) -> return $ Git.ExecutableBlob 0o100755
+                        (CUInt 0o120000) -> return $ Git.SymlinkBlob 0o120000
+                        (CUInt mode') -> return $ Git.PlainBlob mode'
            | typ == c'GIT_OBJ_TREE ->
              return $ Git.TreeEntry (Tagged (mkOid oid))
            | typ == c'GIT_OBJ_COMMIT ->
@@ -620,11 +621,12 @@ lgReadIndex = do
                       if 0 /= mode .&. 16384 -- check if directory
                       then Git.TreeEntry (Tagged (mkOid foid'))
                       else Git.BlobEntry (Tagged (mkOid foid')) $
-                           if (0 /= mode .&. 64 -- check if owner executable
-                              )
-                           then (Git.ExecutableBlob mode)
-                           else (Git.PlainBlob mode)
-                                -- jww (2014-04-05): Handle CommitEntry
+                           let (CUInt mode') = mode in
+                            if (0 /= mode .&. 64 -- check if owner executable
+                                )
+                            then (Git.ExecutableBlob mode')
+                            else (Git.PlainBlob mode')
+                                  -- jww (2014-04-05): Handle CommitEntry
                      )]
   forM_ xs $ uncurry Git.putEntry
 

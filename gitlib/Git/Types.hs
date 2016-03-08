@@ -23,7 +23,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Time
 import           Data.Typeable
-import           Foreign.C.Types
+import           Data.Word
 
 type RawFilePath = ByteString
 
@@ -183,7 +183,7 @@ data BlobContents m = BlobString !ByteString
                     | BlobStream !(ByteSource m)
                     | BlobSizedStream !(ByteSource m) !Int
 
-data BlobKind = PlainBlob CUInt | ExecutableBlob CUInt | SymlinkBlob CUInt
+data BlobKind = PlainBlob Word32 | ExecutableBlob Word32 | SymlinkBlob Word32
               deriving (Show, Eq)
 
 instance Eq (BlobContents m) where
