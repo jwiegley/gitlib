@@ -239,5 +239,8 @@ Library
       libgit2/src/unix/realpath.c
     include-dirs:
       libgit2/src/unix
+    if os(darwin)
+      include-dirs: /usr/local/opt/openssl/include
+      extra-lib-dirs: /usr/local/opt/openssl/lib
     extra-libraries:
       ssl, crypto, pthread
