@@ -4,6 +4,7 @@
 
 module Git.Libgit2.Backend
        ( odbBackendAdd
+       , odbBackendAddPath
 
        , F'git_odb_backend_read_callback
        , F'git_odb_backend_read_prefix_callback
@@ -24,6 +25,7 @@ module Git.Libgit2.Backend
        where
 
 import Bindings.Libgit2
+import Foreign.C.String (withCString)
 import Foreign.C.Types
 import Foreign.ForeignPtr
 import Foreign.Marshal.Alloc
@@ -78,6 +80,21 @@ odbBackendAdd repo backend priority =
         else do
         odb <- peek odbPtr
         r2 <- c'git_odb_add_backend odb backend (fromIntegral priority)
+        c'git_odb_free odb
+        if r2 < 0
+          then return (Left "Cannot add backend to repository ODB")
+          else return (Right repo)
+
+odbBackendAddPath :: LgRepo -> String -> IO (Either String LgRepo)
+odbBackendAddPath repo filePath =
+  withForeignPtr (repoObj repo) $ \repoPtr ->
+    alloca $ \odbPtr -> do
+      r <- c'git_repository_odb odbPtr repoPtr
+      if r < 0
+        then return (Left "Cannot get repository ODB")
+        else do
+        odb <- peek odbPtr
+        r2 <- withCString filePath (c'git_odb_add_disk_alternate odb)
         c'git_odb_free odb
         if r2 < 0
           then return (Left "Cannot add backend to repository ODB")
