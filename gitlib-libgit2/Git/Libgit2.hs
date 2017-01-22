@@ -8,7 +8,6 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -109,7 +108,6 @@ import qualified Git
 import           Git (RefName)
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
-import           Language.Haskell.TH.Syntax (Loc(..))
 
 import           Prelude hiding (mapM, mapM_, sequence, catch)
 import           System.Directory
@@ -119,7 +117,10 @@ import qualified System.IO.Unsafe as SU
 import           Unsafe.Coerce
 
 instance Git.Repository LgRepo where
-    type Oid LgRepo = OidPtr
+    data Oid LgRepo = OidPtr
+        { getOid    :: ForeignPtr C'git_oid
+        , getOidLen :: Int           -- the number of digits, not bytes
+        }
     data Tree LgRepo =
         LgTree { lgTreePtr :: Maybe (ForeignPtr C'git_tree) }
 
@@ -128,7 +129,7 @@ runGit :: forall m a. MonadLgBase m
 runGit action = runReaderT (go action) undefined
   where
     go :: forall a. Git.GitT LgRepo (ReaderT LgRepo m) a -> ReaderT LgRepo m a
-    go g = runF (Git.getGitT g) return $(Git.gitDispatcher 'go "lg")
+    go g = iterT _ g
 
 lgCreateReference :: MonadLg m => RefName -> RefTarget -> m ()
 lgCreateReference = undefined
@@ -160,13 +161,6 @@ lgAllReferences = undefined
 -- peekFilePath :: CString -> IO Git.RawFilePath
 -- peekFilePath = B.packCString
 -- 
-type Oid = OidPtr
-
-data OidPtr = OidPtr
-    { getOid    :: ForeignPtr C'git_oid
-    , getOidLen :: Int           -- the number of digits, not bytes
-    }
-
 mkOid :: ForeignPtr C'git_oid -> OidPtr
 mkOid fptr = OidPtr fptr 40
 

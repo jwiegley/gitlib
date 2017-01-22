@@ -21,7 +21,7 @@ type CommitMessage = Text
 type TreeFilePath  = RawFilePath
 
 class (Eq (Oid r), Ord (Oid r), Show (Oid r)) => Repository r where
-    data Oid r :: *      -- jww (2015-06-14): should be an injective type family
+    data Oid r :: *     -- jww (2015-06-14): should be an injective type family
     data Tree r :: *
 
 type BlobOid r   = Oid r

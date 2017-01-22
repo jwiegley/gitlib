@@ -11,5 +11,4 @@ import Git.Object as X
 import Git.Reference as X
 import Git.Tree as X
 import Git.Tree.Builder as X
-import Git.TH as X
 import Git.Types as X
