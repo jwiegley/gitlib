@@ -1,3 +1,6 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ViewPatterns #-}
+
 module Git.Tree.Builder
        ( TreeT
        , TreeBuilder(..)
@@ -23,17 +26,14 @@ module Git.Tree.Builder
        , emptyTreeId
        ) where
 
-import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Catch
--- import           Control.Monad.Fix
--- import           Control.Monad.IO.Class
--- import           Control.Monad.Trans.Class
+import           Control.Monad.Trans.Class
 import           Control.Monad.Trans.State
 import qualified Data.ByteString as B
 import           Data.Char
 import qualified Data.HashMap.Strict as HashMap
-import           Data.Monoid
+import           Data.Semigroup
 import           Data.Word
 import           Git.DSL
 import           Git.Types
@@ -76,7 +76,7 @@ queryTreeBuilder builder path kind f = do
     walk _ [] = error "queryTreeBuilder called without a path"
     walk bm (name:names) = do
         let tb = fromBuilderMod bm
-        y <- case HashMap.lookup name (mtbPendingUpdates tb) of
+        y <- case HashMap.lookup name (mtbUpdates tb) of
             Just x  -> return $ Left (BuilderUnchanged x)
             Nothing -> do
                 mentry <- mtbLookupEntry tb name
@@ -109,7 +109,7 @@ queryTreeBuilder builder path kind f = do
             Right (Just (TreeEntry st')) -> do
                 tree <- lookupTree st'
                 ModifiedBuilder
-                    <$> mtbNewBuilder (fromBuilderMod bm) (Just tree)
+                    <$> mtbNewBuilder (fromBuilderMod bm) tree
             _ -> error "queryTreeBuilder encountered the impossible"
 
         (sbm', z) <- walk sbm names
@@ -123,15 +123,15 @@ queryTreeBuilder builder path kind f = do
             TreeEntryDeleted      -> do
                 bm' <- mtbDropEntry tb tb n
                 let tb'   = fromBuilderMod bm'
-                    upds' = mtbPendingUpdates tb'
+                    upds' = mtbUpdates tb'
                 return $ case bm' of
                     ModifiedBuilder _ ->
                         ModifiedBuilder tb'
-                            { mtbPendingUpdates = HashMap.delete n upds' }
+                            { mtbUpdates = HashMap.delete n upds' }
                     BuilderUnchanged _ ->
                         if HashMap.member n upds'
                         then ModifiedBuilder tb'
-                            { mtbPendingUpdates = HashMap.delete n upds' }
+                            { mtbUpdates = HashMap.delete n upds' }
                         else bm'
             TreeEntryMutated z'   -> mtbPutEntry tb tb n z'
         let bm'' = bm <> bm'
@@ -140,8 +140,8 @@ queryTreeBuilder builder path kind f = do
     postUpdate bm (BuilderUnchanged _) _ = bm
     postUpdate (fromBuilderMod -> tb) (ModifiedBuilder sbm) name =
         ModifiedBuilder $ tb
-            { mtbPendingUpdates =
-                   HashMap.insert name sbm (mtbPendingUpdates tb) }
+            { mtbUpdates =
+                   HashMap.insert name sbm (mtbUpdates tb) }
 
     pathSeparator :: Word8
     pathSeparator = fromIntegral $ ord '/'
@@ -170,13 +170,13 @@ writeTreeBuilder builder = do
     return (fromBuilderMod bm, tref)
   where
     go bm = do
-        let upds = mtbPendingUpdates (fromBuilderMod bm)
+        let upds = mtbUpdates (fromBuilderMod bm)
         bm' <- if HashMap.size upds == 0
                then return bm
                else do
                    bm' <- foldM update bm $ HashMap.toList upds
                    return $ ModifiedBuilder (fromBuilderMod bm')
-                       { mtbPendingUpdates = HashMap.empty }
+                       { mtbUpdates = HashMap.empty }
         let tb' = fromBuilderMod bm'
         cnt <- mtbEntryCount tb'
         if cnt == 0
@@ -188,7 +188,7 @@ writeTreeBuilder builder = do
     update bm (k,v) = do
         let tb = fromBuilderMod bm
         -- The intermediate TreeBuilder will be dropped after this fold is
-        -- completed, by setting mtbPendingUpdates to HashMap.empty, above.
+        -- completed, by setting mtbUpdates to HashMap.empty, above.
         (_,mtref) <- go (BuilderUnchanged v)
         bm' <- case mtref of
             Nothing   -> mtbDropEntry tb tb k
@@ -197,23 +197,23 @@ writeTreeBuilder builder = do
 
 getEntry :: MonadThrow m => TreeFilePath -> TreeT r m (Maybe (TreeEntry r))
 getEntry path = do
-    tb <- getBuilder
-    snd <$> liftGitT (queryTreeBuilder tb path GetEntry
-                     (toModifyTreeResult TreeEntryPersistent))
+    tb <- get
+    snd <$> lift (queryTreeBuilder tb path GetEntry
+                      (toModifyTreeResult TreeEntryPersistent))
 
 putEntry :: MonadThrow m => TreeFilePath -> TreeEntry r -> TreeT r m ()
 putEntry path ent = do
-    tb  <- getBuilder
-    tb' <- fst <$> liftGitT (queryTreeBuilder tb path PutEntry
+    tb  <- get
+    tb' <- fst <$> lift (queryTreeBuilder tb path PutEntry
                            (const (TreeEntryMutated ent)))
-    putBuilder tb'
+    put tb'
 
 dropEntry :: MonadThrow m => TreeFilePath -> TreeT r m ()
 dropEntry path = do
-    tb  <- getBuilder
-    tb' <- fst <$> liftGitT (queryTreeBuilder tb path DropEntry
+    tb  <- get
+    tb' <- fst <$> lift (queryTreeBuilder tb path DropEntry
                            (const TreeEntryDeleted))
-    putBuilder tb'
+    put tb'
 
 putBlob' :: MonadThrow m
          => TreeFilePath -> BlobOid r -> BlobKind -> TreeT r m ()
@@ -231,7 +231,7 @@ putCommit path c = putEntry path (CommitEntry c)
 doWithTree :: Monad m
            => Maybe (Tree r) -> TreeT r m a -> GitT r m (a, TreeOid r)
 doWithTree rtr act =
-    fst <$> (runStateT (runTreeT go) =<< newTreeBuilder rtr)
+    fst <$> (runStateT go =<< newTreeBuilder rtr)
   where
     go = liftM2 (,) act currentTreeOid
 
@@ -241,7 +241,7 @@ withTree tr = doWithTree (Just tr)
 withTreeOid :: Monad m => TreeOid r -> TreeT r m a -> GitT r m (a, TreeOid r)
 withTreeOid oid action = do
     tree <- lookupTree oid
-    doWithTree (Just tree) action
+    doWithTree tree action
 
 mutateTree :: Monad m => Tree r -> TreeT r m a -> GitT r m (TreeOid r)
 mutateTree tr action = snd <$> withTree tr action
@@ -251,13 +251,13 @@ mutateTreeOid tr action = snd <$> withTreeOid tr action
 
 currentTreeOid :: Monad m => TreeT r m (TreeOid r)
 currentTreeOid = do
-    tb <- getBuilder
-    (tb', toid) <- liftGitT $ writeTreeBuilder tb
-    putBuilder tb'
+    tb <- get
+    (tb', toid) <- lift $ writeTreeBuilder tb
+    put tb'
     return toid
 
-currentTree :: Monad m => TreeT r m (Tree r)
-currentTree = liftGitT . lookupTree =<< currentTreeOid
+currentTree :: Monad m => TreeT r m (Maybe (Tree r))
+currentTree = lift . lookupTree =<< currentTreeOid
 
 withNewTree :: Monad m => TreeT r m a -> GitT r m (a, TreeOid r)
 withNewTree = doWithTree Nothing

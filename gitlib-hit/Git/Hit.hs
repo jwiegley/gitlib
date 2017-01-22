@@ -25,7 +25,6 @@ import qualified Control.Exception as X
 import           Control.Monad (when)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 import           Data.Bits ((.&.))
-import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
 import           Data.Foldable (for_)
 import qualified Data.Git as DG

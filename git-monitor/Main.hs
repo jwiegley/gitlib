@@ -17,7 +17,6 @@ import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Logger
 import           Control.Monad.Trans.Class
 import qualified Data.ByteString as B (readFile)
-import qualified Data.ByteString.Char8 as B8
 import           Data.Function (fix)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map

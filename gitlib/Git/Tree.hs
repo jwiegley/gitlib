@@ -1,7 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Git.Tree where
 
 import           Control.Monad
 import           Control.Monad.Catch
+import           Control.Monad.Trans.Class
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import           Data.Monoid
@@ -10,11 +13,10 @@ import           Git.Blob
 import           Git.DSL
 import           Git.Tree.Builder
 import           Git.Types
-import           Pipes
-import qualified Pipes.Prelude as P
+import qualified Streaming.Prelude as S
 
 listTreeEntries :: Monad m => Tree r -> GitT r m [(TreeFilePath, TreeEntry r)]
-listTreeEntries = P.toListM . allTreeEntries
+listTreeEntries = S.toList_ . allTreeEntries
 
 copyTreeEntry :: (MonadThrow m, Repository r, Repository s)
               => TreeEntry s -> HashSet String
@@ -38,8 +40,8 @@ copyTree oid needed = do
     oid2 <- parseOid (show oid)
     if HashSet.member sha needed
         then do
-        tree    <- lift $ lookupTree oid
-        entries <- lift $ listTreeEntries tree
+        Just tree <- lift $ lookupTree oid
+        entries   <- lift $ listTreeEntries tree
         (needed', tref) <-
             withNewTree $ foldM doCopyTreeEntry needed entries
 
@@ -54,6 +56,6 @@ copyTree oid needed = do
                     -> TreeT s (GitT r m) (HashSet String)
     doCopyTreeEntry set (_, TreeEntry {}) = return set
     doCopyTreeEntry set (fp, ent) = do
-        (ent2,set') <- liftGitT $ copyTreeEntry ent set
+        (ent2,set') <- lift $ copyTreeEntry ent set
         putEntry fp ent2
         return set'

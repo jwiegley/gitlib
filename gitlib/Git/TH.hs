@@ -16,7 +16,7 @@ runcons (x:xs) = let (ys, y) = runcons xs in (x:ys, y)
 gitDispatcher :: Name -> String -> ExpQ
 gitDispatcher runF prefix = do
     Just ty <- lookupTypeName "Git.GitExprF"
-    TyConI (DataD _ _ _vars ctors _) <- reify ty
+    TyConI (DataD _ _ _vars _kind ctors _) <- reify ty
     [| \x -> $(caseE [|x|] (map branch ctors)) |]
   where
     branch (NormalC name@(nameBase -> "M") _) = do

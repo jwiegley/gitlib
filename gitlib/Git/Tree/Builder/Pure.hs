@@ -1,3 +1,5 @@
+{-# LANGUAGE TupleSections #-}
+
 module Git.Tree.Builder.Pure
        ( EntryHashMap
        , newPureTreeBuilder
@@ -42,12 +44,11 @@ makePureBuilder :: Monad m
                 -> (EntryHashMap r -> GitT r m (TreeOid r))
                 -> TreeBuilder r m
 makePureBuilder baseTree upds newBuilder entMap writer = TreeBuilder
-    { mtbBaseTreeOid    = baseTree
-    , mtbPendingUpdates = upds
-    , mtbNewBuilder     = newBuilder
+    { mtbTreeOid    = baseTree
+    , mtbUpdates    = upds
+    , mtbNewBuilder = newBuilder
 
-    , mtbWriteContents  = \tb -> (,) <$> pure (BuilderUnchanged tb)
-                                     <*> writer entMap
+    , mtbWriteContents  = \tb -> (BuilderUnchanged tb,) <$> writer entMap
 
     , mtbLookupEntry = \key -> return $ HashMap.lookup key entMap
     , mtbEntryCount = return $ HashMap.size entMap
@@ -56,7 +57,7 @@ makePureBuilder baseTree upds newBuilder entMap writer = TreeBuilder
         return . ModifiedBuilder $
             makePureBuilder
                 baseTree
-                (mtbPendingUpdates tb)
+                (mtbUpdates tb)
                 newBuilder
                 (HashMap.insert key ent entMap)
                 writer
@@ -65,7 +66,7 @@ makePureBuilder baseTree upds newBuilder entMap writer = TreeBuilder
         return . ModifiedBuilder $
             makePureBuilder
                 baseTree
-                (mtbPendingUpdates tb)
+                (mtbUpdates tb)
                 newBuilder
                 (HashMap.delete key entMap)
                 writer

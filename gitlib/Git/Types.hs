@@ -1,24 +1,16 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-#if __GLASGOW_HASKELL__ > 707
-{-# LANGUAGE AllowAmbiguousTypes #-}
-#endif
 
 module Git.Types where
 
-import qualified Control.Exception.Lifted as Exc
+import           Control.Exception
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString.Lazy as BL
 import           Data.Map (Map)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time
 import           Data.Typeable
-import           Pipes
 
 type RawFilePath = ByteString
 
@@ -29,13 +21,8 @@ type CommitMessage = Text
 type TreeFilePath  = RawFilePath
 
 class (Eq (Oid r), Ord (Oid r), Show (Oid r)) => Repository r where
-    data Oid r :: *      -- jww (2015-06-14): should be injective type family
+    data Oid r :: *      -- jww (2015-06-14): should be an injective type family
     data Tree r :: *
-
--- type BlobOid r   = Tagged r (Oid r)
--- type TreeOid r   = Tagged (Tree r) (Oid r)
--- type CommitOid r = Tagged (Commit r) (Oid r)
--- type TagOid r    = Tagged (Tag r) (Oid r)
 
 type BlobOid r   = Oid r
 type TreeOid r   = Oid r
@@ -54,24 +41,8 @@ instance Repository r => Show (ObjectOid r) where
     show (TagObjOid    oid) = show oid
 
 {- $blobs -}
-data Blob r m = Blob
-    { blobOid      :: !(Oid r)
-    , blobContents :: !(BlobContents m)
-    }
-
-type ByteSource m = Producer ByteString m ()
-
-data BlobContents m = BlobString      !ByteString
-                    | BlobStringLazy  !BL.ByteString
-                    | BlobStream      !(ByteSource m)
-                    | BlobSizedStream !(ByteSource m) !Int
-
 data BlobKind = PlainBlob | ExecutableBlob | SymlinkBlob
               deriving (Show, Eq, Enum)
-
-instance Eq (BlobContents m) where
-  BlobString str1 == BlobString str2 = str1 == str2
-  _ == _ = False
 
 {- $trees -}
 data TreeEntry r = BlobEntry   { blobEntryOid   :: !(Oid r)
@@ -128,13 +99,13 @@ data Tag r = Tag
     }
 
 {- $objects -}
-data Object r m = BlobObj   !(Blob r m)
-                | TreeObj   !(Tree r)
-                | CommitObj !(Commit r)
-                | TagObj    !(Tag r)
+data Object r = BlobObj   !(Oid r)
+              | TreeObj   !(Tree r)
+              | CommitObj !(Commit r)
+              | TagObj    !(Tag r)
 
 {- $references -}
-data RefTarget (r :: *) = RefObj !(Oid r) | RefSymbolic !RefName
+data RefTarget r = RefObj !(Oid r) | RefSymbolic !RefName
 
 instance Repository r => Show (RefTarget r) where
     show (RefObj oid)       = "RefObj#" ++ show oid
@@ -144,8 +115,9 @@ commitRefTarget :: Commit r -> RefTarget r
 commitRefTarget = RefObj . commitOid
 
 {- $merges -}
-data ModificationKind = Unchanged | Modified | Added | Deleted | TypeChanged
-                      deriving (Eq, Ord, Enum, Show, Read)
+data ModificationKind
+    = Unchanged | Modified | Added | Deleted | TypeChanged
+    deriving (Eq, Ord, Enum, Show, Read)
 
 data MergeStatus
     = NoConflict
@@ -265,4 +237,4 @@ data GitException
 -- jww (2013-02-11): Create a BackendException data constructor of forall
 -- e. Exception e => BackendException e, so that each can throw a derived
 -- exception.
-instance Exc.Exception GitException
+instance Exception GitException

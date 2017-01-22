@@ -1,20 +1,20 @@
-{ mkDerivation, base, base16-bytestring, bytestring, pipes
-, pipes-group, containers, directory, exceptions, filepath
-, hashable, lifted-async, lifted-base, monad-control
-, mtl, semigroups, stdenv, tagged, text, time, free
-, transformers, unix, unordered-containers, pipes-safe
-, transformers-base, template-haskell, pipes-bytestring
+{ mkDerivation, base, base16-bytestring, bytestring, containers
+, directory, exceptions, filepath, hashable, lifted-async
+, lifted-base, monad-control, mtl, semigroups, stdenv, streaming
+, tagged, template-haskell, text, time, transformers
+, transformers-base, unix, unordered-containers, mmorph
+, cabal-install, resourcet, streaming-bytestring
 }:
 mkDerivation {
   pname = "gitlib";
   version = "4.0.0.0";
   src = ./.;
-  buildDepends = [
-    base base16-bytestring bytestring pipes pipes-group
-    containers directory exceptions filepath hashable lifted-async
-    lifted-base monad-control mtl semigroups free pipes-safe
-    tagged text time transformers unix unordered-containers
-    transformers-base template-haskell pipes-bytestring
+  libraryHaskellDepends = [
+    base base16-bytestring bytestring containers directory exceptions
+    filepath hashable lifted-async lifted-base monad-control mtl
+    semigroups streaming tagged template-haskell text time transformers
+    transformers-base unix unordered-containers cabal-install mmorph
+    resourcet streaming-bytestring
   ];
   description = "API library for working with Git repositories";
   license = stdenv.lib.licenses.mit;

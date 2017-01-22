@@ -22,7 +22,6 @@ import           Control.Monad
 import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Char8 as BC
 import           Data.Foldable (for_)
 import           Data.Function
 import qualified Data.HashMap.Strict as HashMap

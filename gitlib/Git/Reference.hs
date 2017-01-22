@@ -2,10 +2,10 @@ module Git.Reference where
 
 import           Git.DSL
 import           Git.Types
-import qualified Pipes.Prelude as P
+import qualified Streaming.Prelude as S
 
 listReferences :: Monad m => GitT r m [RefName]
-listReferences = P.toListM allReferences
+listReferences = S.toList_ allReferences
 
 resolveReference :: Monad m => RefName -> GitT r m (Maybe (Oid r))
 resolveReference name = do

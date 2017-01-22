@@ -1,7 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Git.Commit where
 
 import           Control.Monad
 import           Control.Monad.Catch
+import           Control.Monad.Trans.Class
 import           Data.Function
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
@@ -12,13 +15,14 @@ import           Data.Text (pack)
 import           Git.DSL
 import           Git.Tree
 import           Git.Types
-import           Pipes
-import qualified Pipes.Prelude as P
+import qualified Streaming.Prelude as S
 import           Prelude hiding (FilePath)
 
 commitTreeEntry :: Monad m
                 => Commit r -> TreeFilePath -> GitT r m (Maybe (TreeEntry r))
-commitTreeEntry c path = flip getTreeEntry path =<< lookupTree (commitTree c)
+commitTreeEntry c path = do
+    Just t <- lookupTree (commitTree c)
+    getTreeEntry t path
 
 copyCommit :: (MonadThrow m, Repository r, Repository s)
            => CommitOid s
@@ -27,8 +31,8 @@ copyCommit :: (MonadThrow m, Repository r, Repository s)
            -> GitT r (GitT s m) (CommitOid r, HashSet String)
 copyCommit oid mref needed = do
     let sha = show oid
-    commit <- lift $ lookupCommit oid
-    oid2   <- parseOid sha
+    Just commit <- lift $ lookupCommit oid
+    oid2 <- parseOid sha
     if HashSet.member sha needed
         then do
         let parents = commitParents commit
@@ -63,8 +67,8 @@ listCommits :: Monad m
             -> CommitOid r         -- ^ The commit we need
             -> GitT r m [CommitOid r]     -- ^ All the objects in between
 listCommits mhave need =
-    P.toListM $ allObjects mhave need False
-            >-> P.mapM (\(CommitObjOid c) -> return c)
+    S.toList_ $ S.mapM (\(CommitObjOid c) -> return c)
+              $ allObjects mhave need False
 
 traverseCommits :: Monad m
                 => (CommitOid r -> GitT r m a) -> CommitOid r -> GitT r m [a]

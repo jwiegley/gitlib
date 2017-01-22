@@ -1,11 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Git.Commit.Push where
 
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Catch
-import           Control.Monad.IO.Class
 import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Control
 import           Data.Function
 import qualified Data.HashSet as HashSet
 import           Data.List
