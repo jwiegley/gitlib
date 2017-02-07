@@ -5,8 +5,8 @@ mkDerivation {
   pname = "gitlib-cross";
   version = "3.1.0";
   src = ./.;
-  buildDepends = [ base ];
-  testDepends = [
+  libraryHaskellDepends = [ base ];
+  testHaskellDepends = [
     base gitlib gitlib-cmdline gitlib-libgit2 gitlib-test hspec
     hspec-expectations HUnit
   ];

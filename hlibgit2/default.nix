@@ -3,7 +3,7 @@
 }:
 mkDerivation {
   pname = "hlibgit2";
-  version = "0.18.0.14";
+  version = "0.18.0.16";
   src = ./.;
   buildDepends = [ base bindings-DSL zlib ];
   testDepends = [ base process ];
