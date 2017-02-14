@@ -62,6 +62,11 @@ data GitExprF r m s
     | RunTreeBuilderF (TreeBuilderT r (GitT r m) s)
     deriving Functor
 
+newtype GitT r m a = GitT { runGitT :: Stream (GitExprF r m) m a }
+    deriving (Functor, Applicative, Monad, MonadIO)
+
+type Git r = GitT r Identity
+
 pattern ParseOid s k = Step (ParseOidF s k)
 
 pattern CreateReference r t s = Step (CreateReferenceF r t s)
@@ -84,11 +89,6 @@ pattern CreateCommit c r k = Step (CreateCommitF c r k)
 pattern CreateTag t r k    = Step (CreateTagF t r k)
 
 pattern RunTreeBuilder k   = Step (RunTreeBuilderF k)
-
-newtype GitT r m a = GitT { runGitT :: Stream (GitExprF r m) m a }
-    deriving (Functor, Applicative, Monad, MonadIO)
-
-type Git r = GitT r Identity
 
 parseOid :: Monad m => String -> GitT r m (Oid r)
 parseOid str = GitT $ ParseOid str return
@@ -163,6 +163,117 @@ createTag t name = GitT $ CreateTag t name return
 runTreeBuilder :: Monad m => TreeBuilderT r (GitT r m) a -> GitT r m a
 runTreeBuilder builder = GitT $ RunTreeBuilder (Return <$> builder)
 
+data TreeExprF r m s
+    = SetBaseOidF (TreeOid r) s
+    | GetBaseOidF (Maybe (TreeOid r) -> s)
+    | SetBaseTreeF (Tree r) s
+    | CurrentTreeF (Tree r -> s)
+    | WriteTreeF (TreeOid r -> s)
+    | ReadFromIndexF s
+    | WriteToIndexF s
+    | ClearEntriesF s
+    | EntryCountF (Int -> s)
+    | PutEntryF TreeFilePath (TreeEntry r) s
+    | DropEntryF TreeFilePath s
+    | LookupEntryF TreeFilePath (Maybe (TreeEntry r) -> s)
+    | AllEntriesF (Consumer (TreeFilePath, TreeEntry r) (TreeBuilderT r m) s)
+    | WithStateMapF (StateT (HashMap TreeFilePath (TreeEntry r))
+                            (TreeBuilderT r m) s)
+    | GetTreeMapF (HashMap TreeFilePath (TreeEntry r) -> s)
+    | DiffContentsWithTreeF
+        { pathsToCompare :: [Either TreeFilePath ByteString]
+        , basisTree      :: Tree r
+        , diffStream     :: Consumer ByteString (TreeBuilderT r m) s
+        }
+    deriving Functor
+
+newtype TreeBuilderT r m a
+    = TreeBuilderT { runTreeBuilderT :: Stream (TreeExprF r m) m a }
+    deriving (Functor, Applicative, Monad, MonadIO)
+
+type TreeBuilder r = TreeBuilderT r Identity
+
+instance MonadTrans (TreeBuilderT r) where
+    lift = TreeBuilderT . lift
+
+pattern SetBaseOid s k  = Step (SetBaseOidF s k)
+pattern GetBaseOid k    = Step (GetBaseOidF k)
+pattern SetBaseTree t k = Step (SetBaseTreeF t k)
+pattern CurrentTree k   = Step (CurrentTreeF k)
+pattern WriteTree k     = Step (WriteTreeF k)
+pattern ReadFromIndex s = Step (ReadFromIndexF s)
+pattern WriteToIndex s  = Step (WriteToIndexF s)
+pattern ClearEntries s  = Step (ClearEntriesF s)
+pattern EntryCount k    = Step (EntryCountF k)
+pattern PutEntry p e s  = Step (PutEntryF p e s)
+pattern DropEntry p s   = Step (DropEntryF p s)
+pattern LookupEntry p k = Step (LookupEntryF p k)
+pattern AllEntries c    = Step (AllEntriesF c)
+pattern WithStateMap s  = Step (WithStateMapF s)
+pattern GetTreeMap k    = Step (GetTreeMapF k)
+
+pattern DiffContentsWithTree ps t c = Step (DiffContentsWithTreeF ps t c)
+
+setBaseOid :: (Repository r, Monad m) => TreeOid r -> TreeBuilderT r m ()
+setBaseOid str = TreeBuilderT $ SetBaseOid str (pure ())
+
+getBaseOid :: (Repository r, Monad m) => TreeBuilderT r m (Maybe (TreeOid r))
+getBaseOid = TreeBuilderT $ GetBaseOid return
+
+setBaseTree :: (Repository r, Monad m) => Tree r -> TreeBuilderT r m ()
+setBaseTree t = TreeBuilderT $ SetBaseTree t (pure ())
+
+currentTree :: (Repository r, Monad m) => TreeBuilderT r m (Tree r)
+currentTree = TreeBuilderT $ CurrentTree return
+
+writeTree :: (Repository r, Monad m) => TreeBuilderT r m (TreeOid r)
+writeTree = TreeBuilderT $ WriteTree return
+
+readFromIndex :: (Repository r, Monad m) => TreeBuilderT r m ()
+readFromIndex = TreeBuilderT $ ReadFromIndex (pure ())
+
+writeToIndex :: (Repository r, Monad m) => TreeBuilderT r m ()
+writeToIndex = TreeBuilderT $ WriteToIndex (pure ())
+
+clearEntries :: (Repository r, Monad m) => TreeBuilderT r m ()
+clearEntries = TreeBuilderT $ ClearEntries (pure ())
+
+entryCount :: (Repository r, Monad m) => TreeBuilderT r m Int
+entryCount = TreeBuilderT $ EntryCount return
+
+putEntry :: (Repository r, Monad m)
+         => TreeFilePath -> TreeEntry r -> TreeBuilderT r m ()
+putEntry p e = TreeBuilderT $ PutEntry p e (pure ())
+
+dropEntry :: (Repository r, Monad m) => TreeFilePath -> TreeBuilderT r m ()
+dropEntry p = TreeBuilderT $ DropEntry p (pure ())
+
+lookupEntry :: (Repository r, Monad m)
+            => TreeFilePath -> TreeBuilderT r m (Maybe (TreeEntry r))
+lookupEntry p = TreeBuilderT $ LookupEntry p return
+
+allEntries :: (Repository r, Monad m)
+           => Consumer (TreeFilePath, TreeEntry r) (TreeBuilderT r m) a
+           -> TreeBuilderT r m a
+allEntries c = TreeBuilderT $ AllEntries (Return <$> c)
+
+withStateMap :: (Repository r, Monad m)
+             => StateT (HashMap TreeFilePath (TreeEntry r)) (TreeBuilderT r m) a
+             -> TreeBuilderT r m a
+withStateMap s = TreeBuilderT $ WithStateMap (Return <$> s)
+
+getTreeMap :: (Repository r, Monad m)
+           => TreeBuilderT r m (HashMap TreeFilePath (TreeEntry r))
+getTreeMap = TreeBuilderT $ GetTreeMap pure
+
+diffContentsWithTree :: (Repository r, Monad m)
+                     => [Either TreeFilePath ByteString]
+                     -> Tree r
+                     -> Consumer ByteString (TreeBuilderT r m) a
+                     -> TreeBuilderT r m a
+diffContentsWithTree ps t c =
+    TreeBuilderT $ DiffContentsWithTree ps t (Return <$> c)
+
 -- Utility functions; jww (2015-06-14): these belong elsewhere
 
 copyOid :: (Repository r, Monad m) => Oid r -> GitT s m (Oid s)
@@ -182,35 +293,3 @@ copyMergeResult (MergeConflicted hl hr mc cs) =
                     <*> parseOid (show hr)
                     <*> parseOid (show mc)
                     <*> pure cs
-
-data TreeExprF r m s
-    = SetBaseOidF (TreeOid r) s
-    | GetBaseOidF (Maybe (TreeOid r) -> s)
-    | SetBaseTreeF (Tree r) s
-    | CurrentTreeF (Tree r -> s)
-    | WriteTreeF (TreeOid r -> s)
-    | ReadFromIndexF s
-    | WriteToIndexF s
-    | ClearEntriesF s
-    | EntryCountF (Int -> s)
-    | PutEntryF TreeFilePath (TreeEntry r) s
-    | DropEntryF TreeFilePath s
-    | LookupEntryF TreeFilePath (Maybe (TreeEntry r) -> s)
-    | AllEntriesF (Consumer (TreeFilePath, TreeEntry r) m s)
-    | WithStateMapF (StateT (HashMap TreeFilePath (TreeEntry r)) m s)
-    | GetTreeMapF (HashMap TreeFilePath (TreeEntry r) -> s)
-    | DiffContentsWithTreeF
-        { pathsToCompare :: [Either TreeFilePath ByteString]
-        , basisTree      :: Tree r
-        , diffStream     :: Consumer ByteString m s
-        }
-    deriving Functor
-
-newtype TreeBuilderT r m a
-    = TreeBuilderT { runTreeBuilderT :: Stream (TreeExprF r m) m a }
-    deriving (Functor, Applicative, Monad, MonadIO)
-
-type TreeBuilder r = TreeBuilderT r Identity
-
-instance MonadTrans (TreeBuilderT r) where
-    lift = TreeBuilderT . lift
