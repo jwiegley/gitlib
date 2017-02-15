@@ -93,23 +93,6 @@ class (Applicative m, Monad m, MonadThrow m,
                  -> m (Commit r)
     createTag :: CommitOid r -> Signature -> CommitMessage -> Text -> m (Tag r)
 
-    -- -- Pack files
-    -- buildPackFile :: FilePath -> [Either (CommitOid r) (TreeOid r)]
-    --               -> m FilePath
-    -- buildPackFile _ _ =
-    --     failure (BackendError "Backend does not support building pack files")
-
-    -- buildPackIndex :: FilePath -> ByteString -> m (Text, FilePath, FilePath)
-    -- buildPackIndex _ _ =
-    --     failure (BackendError "Backend does not support building pack indexes")
-
-    -- writePackFile :: FilePath -> m ()
-    -- writePackFile _ =
-    --     failure (BackendError "Backend does not support writing  pack files")
-
-    -- -- Git remotes
-    -- remoteFetch :: Text {- URI -} -> Text {- fetch spec -} -> m ()
-
 data RepositoryOptions = RepositoryOptions
     { repoPath       :: !FilePath
     , repoWorkingDir :: !(Maybe FilePath)
