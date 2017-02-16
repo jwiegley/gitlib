@@ -202,6 +202,7 @@ instance (Applicative m, MonadExcept m,
     lookupBlob        = lgLookupBlob
     lookupTag         = error "Not implemented: LgRepository.lookupTag"
     readIndex         = lgReadIndex
+    writeIndex        = error "Not implemented: LgRepository.writeIndex"
     lookupObject      = lgLookupObject
     existsObject      = lgExistsObject
     sourceObjects     = lgSourceObjects

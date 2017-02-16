@@ -21,6 +21,7 @@ import           Data.Function (fix)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import           Data.Maybe
+import           Data.Monoid ((<>))
 import           Data.Tagged
 import           Data.Text (pack)
 import qualified Data.Text as T
