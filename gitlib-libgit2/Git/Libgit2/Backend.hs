@@ -85,7 +85,7 @@ odbBackendAdd repo backend priority =
           then return (Left "Cannot add backend to repository ODB")
           else return (Right repo)
 
-odbBackendAddPath :: LgRepo -> String -> IO (Either String LgRepo)
+odbBackendAddPath :: LgRepo -> FilePath -> IO (Either String LgRepo)
 odbBackendAddPath repo filePath =
   withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \odbPtr -> do
