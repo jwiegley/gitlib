@@ -11,7 +11,6 @@
 
 module Git.DSL where
 
-import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.Trans.Class (MonadTrans(lift))
 import           Control.Monad.Trans.State (StateT)
@@ -21,12 +20,9 @@ import           Data.Functor.Identity
 import           Data.HashMap.Strict (HashMap)
 import           Data.Text (Text)
 import           Git.Types
+import           Streaming
 import           Streaming.Internal (Stream(..))
-
-type Consumer a m = Stream ((->) a) m
-
-await :: Monad m => Consumer a m a
-await = Step pure
+import qualified Streaming.Prelude as S
 
 data GitExprF r m s
     = ParseOidF String (Oid r -> s)
@@ -34,7 +30,7 @@ data GitExprF r m s
     | CreateReferenceF RefName (RefTarget r) s
     | LookupReferenceF RefName (Maybe (RefTarget r) -> s)
     | DeleteReferenceF RefName s
-    | AllReferencesF (Consumer RefName (GitT r m) s)
+    | AllReferencesF (Stream (Of RefName) (GitT r m) () -> s)
 
     | LookupObjectF (Oid r) (Maybe (Object r) -> s)
     | ExistsObjectF (Oid r) (Maybe (ObjectOid r) -> s)
@@ -42,10 +38,10 @@ data GitExprF r m s
         { haveCommit   :: Maybe (CommitOid r)
         , needCommit   :: CommitOid r
         , includeTrees :: Bool
-        , objConsumer  :: Consumer (ObjectOid r) (GitT r m) s
+        , objProducer  :: Stream (Of (ObjectOid r)) (GitT r m) () -> s
         }
 
-    | LookupBlobF   (BlobOid r) (Consumer ByteString (GitT r m) s)
+    | LookupBlobF   (BlobOid r) (Stream (Of ByteString) (GitT r m) () -> s)
     | LookupCommitF (CommitOid r) (Maybe (Commit r) -> s)
     | LookupTagF    (TagOid r) (Maybe (Tag r) -> s)
     | LookupTreeF   (TreeOid r) (Maybe (Tree r) -> s)
@@ -59,6 +55,7 @@ data GitExprF r m s
         }
     | CreateTagF (Tag r) RefName (TagOid r -> s)
 
+    | RunTreeBuilderFromF (TreeOid r) (TreeBuilderT r (GitT r m) s)
     | RunTreeBuilderF (TreeBuilderT r (GitT r m) s)
     deriving Functor
 
@@ -88,57 +85,57 @@ pattern CreateBlob c k     = Step (CreateBlobF c k)
 pattern CreateCommit c r k = Step (CreateCommitF c r k)
 pattern CreateTag t r k    = Step (CreateTagF t r k)
 
-pattern RunTreeBuilder k   = Step (RunTreeBuilderF k)
+pattern RunTreeBuilderFrom t k = Step (RunTreeBuilderFromF t k)
+pattern RunTreeBuilder k       = Step (RunTreeBuilderF k)
 
 parseOid :: Monad m => String -> GitT r m (Oid r)
-parseOid str = GitT $ ParseOid str return
+parseOid str = GitT $ ParseOid str pure
 
 createReference :: Monad m => RefName -> RefTarget r -> GitT r m ()
 createReference name target = GitT $ CreateReference name target (pure ())
 
 lookupReference :: Monad m => RefName -> GitT r m (Maybe (RefTarget r))
-lookupReference name = GitT $ LookupReference name return
+lookupReference name = GitT $ LookupReference name pure
 
 deleteReference :: Monad m => RefName -> GitT r m ()
 deleteReference name = GitT $ DeleteReference name (pure ())
 
-allReferences :: Monad m => Consumer RefName (GitT r m) a -> GitT r m a
-allReferences m = GitT $ AllReferences (Return <$> m)
+allReferences :: Monad m => GitT r m (Stream (Of RefName) (GitT r m) ())
+allReferences = GitT $ AllReferences pure
 
 printReferences :: MonadIO m => GitT r m ()
-printReferences = allReferences $ forever $ await >>= liftIO . print
+printReferences = S.print =<< allReferences
 
 lookupObject :: Monad m => Oid r -> GitT r m (Maybe (Object r))
-lookupObject o = GitT $ LookupObject o return
+lookupObject o = GitT $ LookupObject o pure
 
 existsObject :: Monad m => Oid r -> GitT r m (Maybe (ObjectOid r))
-existsObject o = GitT $ ExistsObject o return
+existsObject o = GitT $ ExistsObject o pure
 
 allObjects :: Monad m
            => Maybe (Oid r)
            -> Oid r
            -> Bool
-           -> Consumer (ObjectOid r) (GitT r m) a
-           -> GitT r m a
-allObjects mhave need trees m = GitT $ AllObjects mhave need trees (Return <$> m)
+           -> GitT r m (Stream (Of (ObjectOid r)) (GitT r m) ())
+allObjects mhave need trees = GitT $ AllObjects mhave need trees pure
 
 lookupCommit :: Monad m => CommitOid r -> GitT r m (Maybe (Commit r))
-lookupCommit o = GitT $ LookupCommit o return
+lookupCommit o = GitT $ LookupCommit o pure
 
 lookupTree :: Monad m => TreeOid r -> GitT r m (Maybe (Tree r))
-lookupTree o = GitT $ LookupTree o return
+lookupTree o = GitT $ LookupTree o pure
 
 treeOid :: Monad m => Tree r -> GitT r m (TreeOid r)
-treeOid o = GitT $ TreeOid o return
+treeOid o = GitT $ TreeOid o pure
 
-lookupBlob :: Monad m => BlobOid r -> Consumer ByteString (GitT r m) a -> GitT r m a
-lookupBlob o m = GitT $ LookupBlob o (Return <$> m)
+lookupBlob :: Monad m => BlobOid r -> GitT r m (Stream (Of ByteString) (GitT r m) ())
+lookupBlob o = GitT $ LookupBlob o pure
 
 lookupTag :: Monad m => TagOid r -> GitT r m (Maybe (Tag r))
-lookupTag o = GitT $ LookupTag o return
+lookupTag o = GitT $ LookupTag o pure
 
 createBlob :: Monad m => BL.ByteString -> GitT r m (BlobOid r)
-createBlob contents = GitT $ CreateBlob contents return
+createBlob contents = GitT $ CreateBlob contents pure
 
 emptyTreeId :: String
 emptyTreeId = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -152,16 +149,19 @@ commitObj :: Monad m => [CommitOid r]
           -> GitT r m (Commit r)
 commitObj a b c d e f = do
     oid <- parseOid emptyTreeId
-    return $ Commit oid a b c d e f
+    pure $ Commit oid a b c d e f
 
 createCommit :: Monad m => Commit r -> Maybe RefName -> GitT r m (CommitOid r)
-createCommit c mname = GitT $ CreateCommit c mname return
+createCommit c mname = GitT $ CreateCommit c mname pure
 
 createTag :: Monad m => Tag r -> RefName -> GitT r m (TagOid r)
-createTag t name = GitT $ CreateTag t name return
+createTag t name = GitT $ CreateTag t name pure
 
-runTreeBuilder :: Monad m => TreeBuilderT r (GitT r m) a -> GitT r m a
-runTreeBuilder builder = GitT $ RunTreeBuilder (Return <$> builder)
+runTreeBuilderFromT :: Monad m => TreeOid r -> TreeBuilderT r (GitT r m) a -> GitT r m a
+runTreeBuilderFromT toid m = GitT $ RunTreeBuilderFrom toid (Return <$> m)
+
+runTreeBuilderT :: Monad m => TreeBuilderT r (GitT r m) a -> GitT r m a
+runTreeBuilderT m = GitT $ RunTreeBuilder (Return <$> m)
 
 data TreeExprF r m s
     = SetBaseOidF (TreeOid r) s
@@ -176,19 +176,20 @@ data TreeExprF r m s
     | PutEntryF TreeFilePath (TreeEntry r) s
     | DropEntryF TreeFilePath s
     | LookupEntryF TreeFilePath (Maybe (TreeEntry r) -> s)
-    | AllEntriesF (Consumer (TreeFilePath, TreeEntry r) (TreeBuilderT r m) s)
+    | AllEntriesF
+          (Stream (Of (TreeFilePath, TreeEntry r)) (TreeBuilderT r m) () -> s)
     | WithStateMapF (StateT (HashMap TreeFilePath (TreeEntry r))
                             (TreeBuilderT r m) s)
     | GetTreeMapF (HashMap TreeFilePath (TreeEntry r) -> s)
     | DiffContentsWithTreeF
         { pathsToCompare :: [Either TreeFilePath ByteString]
         , basisTree      :: Tree r
-        , diffStream     :: Consumer ByteString (TreeBuilderT r m) s
+        , diffStream     :: Stream (Of ByteString) (TreeBuilderT r m) () -> s
         }
     deriving Functor
 
 newtype TreeBuilderT r m a
-    = TreeBuilderT { runTreeBuilderT :: Stream (TreeExprF r m) m a }
+    = TreeBuilderT { getTreeBuilderT :: Stream (TreeExprF r m) m a }
     deriving (Functor, Applicative, Monad, MonadIO)
 
 type TreeBuilder r = TreeBuilderT r Identity
@@ -214,76 +215,74 @@ pattern GetTreeMap k    = Step (GetTreeMapF k)
 
 pattern DiffContentsWithTree ps t c = Step (DiffContentsWithTreeF ps t c)
 
-setBaseOid :: (Repository r, Monad m) => TreeOid r -> TreeBuilderT r m ()
+setBaseOid :: Monad m => TreeOid r -> TreeBuilderT r m ()
 setBaseOid str = TreeBuilderT $ SetBaseOid str (pure ())
 
-getBaseOid :: (Repository r, Monad m) => TreeBuilderT r m (Maybe (TreeOid r))
-getBaseOid = TreeBuilderT $ GetBaseOid return
+getBaseOid :: Monad m => TreeBuilderT r m (Maybe (TreeOid r))
+getBaseOid = TreeBuilderT $ GetBaseOid pure
 
-setBaseTree :: (Repository r, Monad m) => Tree r -> TreeBuilderT r m ()
+setBaseTree :: Monad m => Tree r -> TreeBuilderT r m ()
 setBaseTree t = TreeBuilderT $ SetBaseTree t (pure ())
 
-currentTree :: (Repository r, Monad m) => TreeBuilderT r m (Tree r)
-currentTree = TreeBuilderT $ CurrentTree return
+currentTree :: Monad m => TreeBuilderT r m (Tree r)
+currentTree = TreeBuilderT $ CurrentTree pure
 
-writeTree :: (Repository r, Monad m) => TreeBuilderT r m (TreeOid r)
-writeTree = TreeBuilderT $ WriteTree return
+writeTree :: Monad m => TreeBuilderT r m (TreeOid r)
+writeTree = TreeBuilderT $ WriteTree pure
 
-readFromIndex :: (Repository r, Monad m) => TreeBuilderT r m ()
+readFromIndex :: Monad m => TreeBuilderT r m ()
 readFromIndex = TreeBuilderT $ ReadFromIndex (pure ())
 
-writeToIndex :: (Repository r, Monad m) => TreeBuilderT r m ()
+writeToIndex :: Monad m => TreeBuilderT r m ()
 writeToIndex = TreeBuilderT $ WriteToIndex (pure ())
 
-clearEntries :: (Repository r, Monad m) => TreeBuilderT r m ()
+clearEntries :: Monad m => TreeBuilderT r m ()
 clearEntries = TreeBuilderT $ ClearEntries (pure ())
 
-entryCount :: (Repository r, Monad m) => TreeBuilderT r m Int
-entryCount = TreeBuilderT $ EntryCount return
+entryCount :: Monad m => TreeBuilderT r m Int
+entryCount = TreeBuilderT $ EntryCount pure
 
-putEntry :: (Repository r, Monad m)
+putEntry :: Monad m
          => TreeFilePath -> TreeEntry r -> TreeBuilderT r m ()
 putEntry p e = TreeBuilderT $ PutEntry p e (pure ())
 
-dropEntry :: (Repository r, Monad m) => TreeFilePath -> TreeBuilderT r m ()
+dropEntry :: Monad m => TreeFilePath -> TreeBuilderT r m ()
 dropEntry p = TreeBuilderT $ DropEntry p (pure ())
 
-lookupEntry :: (Repository r, Monad m)
+lookupEntry :: Monad m
             => TreeFilePath -> TreeBuilderT r m (Maybe (TreeEntry r))
-lookupEntry p = TreeBuilderT $ LookupEntry p return
+lookupEntry p = TreeBuilderT $ LookupEntry p pure
 
-allEntries :: (Repository r, Monad m)
-           => Consumer (TreeFilePath, TreeEntry r) (TreeBuilderT r m) a
-           -> TreeBuilderT r m a
-allEntries c = TreeBuilderT $ AllEntries (Return <$> c)
+allEntries :: Monad m
+           => TreeBuilderT r m (Stream (Of (TreeFilePath, TreeEntry r))
+                                       (TreeBuilderT r m) ())
+allEntries = TreeBuilderT $ AllEntries pure
 
-withStateMap :: (Repository r, Monad m)
+withStateMap :: Monad m
              => StateT (HashMap TreeFilePath (TreeEntry r)) (TreeBuilderT r m) a
              -> TreeBuilderT r m a
 withStateMap s = TreeBuilderT $ WithStateMap (Return <$> s)
 
-getTreeMap :: (Repository r, Monad m)
+getTreeMap :: Monad m
            => TreeBuilderT r m (HashMap TreeFilePath (TreeEntry r))
 getTreeMap = TreeBuilderT $ GetTreeMap pure
 
-diffContentsWithTree :: (Repository r, Monad m)
+diffContentsWithTree :: Monad m
                      => [Either TreeFilePath ByteString]
                      -> Tree r
-                     -> Consumer ByteString (TreeBuilderT r m) a
-                     -> TreeBuilderT r m a
-diffContentsWithTree ps t c =
-    TreeBuilderT $ DiffContentsWithTree ps t (Return <$> c)
+                     -> TreeBuilderT r m (Stream (Of ByteString) (TreeBuilderT r m) ())
+diffContentsWithTree ps t = TreeBuilderT $ DiffContentsWithTree ps t pure
 
 -- Utility functions; jww (2015-06-14): these belong elsewhere
 
-copyOid :: (Repository r, Monad m) => Oid r -> GitT s m (Oid s)
+copyOid :: (Monad m, Repository r) => Oid r -> GitT s m (Oid s)
 copyOid = parseOid . show
 
 objectOid :: Monad m => Object r -> GitT r m (Oid r)
-objectOid (BlobObj oid)   = return oid
+objectOid (BlobObj oid)   = pure oid
 objectOid (TreeObj obj)   = treeOid obj
-objectOid (CommitObj obj) = return $ commitOid obj
-objectOid (TagObj obj)    = return $ tagOid obj
+objectOid (CommitObj obj) = pure $ commitOid obj
+objectOid (TagObj obj)    = pure $ tagOid obj
 
 copyMergeResult :: (Repository s, Monad m)
                 => MergeResult s -> GitT r m (MergeResult r)

@@ -16,7 +16,7 @@ listObjects :: Monad m
             -> CommitOid r            -- ^ The commit we need
             -> Bool                   -- ^ Include commit trees also?
             -> GitT r m [ObjectOid r] -- ^ All the objects in between
-listObjects mhave need alsoTrees = S.toList_ $ allObjects mhave need alsoTrees
+listObjects mhave need alsoTrees = S.toList_ =<< allObjects mhave need alsoTrees
 
 traverseObjects :: Monad m
                 => (ObjectOid r -> GitT r m a) -> CommitOid r -> GitT r m [a]
@@ -44,16 +44,15 @@ expandTreeObjects :: Monad m
 expandTreeObjects str = S.for str $ \case
     TreeObjOid toid -> do
         S.yield $ TreeObjOid toid
-        lift (lookupTree toid) >>= \case
-            Nothing -> return ()
-            Just tr ->
-                S.for (allTreeEntries tr) $ \case
-                    (_, BlobEntry oid _) -> S.yield $ BlobObjOid oid
-                    (_, TreeEntry oid)   -> S.yield $ TreeObjOid oid
-                    _ -> return ()
+        lift $ runTreeBuilderFromT toid $ do
+            ents <- allEntries
+            return $ S.for ents $ \case
+                (_, BlobEntry oid _) -> S.yield $ BlobObjOid oid
+                (_, TreeEntry oid)   -> S.yield $ TreeObjOid oid
+                _ -> return ()
     obj -> S.yield obj
 
 listAllObjects :: Monad m
                => Maybe (CommitOid r) -> CommitOid r -> GitT r m [ObjectOid r]
 listAllObjects mhave need =
-    S.toList_ $ expandTreeObjects $ allObjects mhave need True
+    S.toList_ . expandTreeObjects =<< allObjects mhave need True
