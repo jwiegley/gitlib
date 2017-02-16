@@ -203,6 +203,7 @@ instance (Applicative m, MonadExcept m,
     lookupBlob        = lgLookupBlob
     lookupTag         = error "Not implemented: LgRepository.lookupTag"
     readIndex         = lgReadIndex
+    writeIndex        = error "Not implemented: LgRepository.writeIndex"
     lookupObject      = lgLookupObject
     existsObject      = lgExistsObject
     sourceObjects     = lgSourceObjects
@@ -639,6 +640,7 @@ lgLookupObject :: MonadLg m
                => Oid
                -> ReaderT LgRepo m (Git.Object LgRepo (ReaderT LgRepo m))
 lgLookupObject oid = do
+    repo <- Git.getRepository
     (oid', typ, fptr) <-
         lookupObject' (getOid oid) (getOidLen oid)
             (\x y z   -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
@@ -657,7 +659,17 @@ lgLookupObject oid = do
                 Git.CommitObj <$>
                 liftIO (withForeignPtr fptr $ \y ->
                          lgObjToCommit (Tagged oid') (castPtr y))
-           | typ == c'GIT_OBJ_TAG -> error "jww (2013-07-08): NYI"
+           | typ == c'GIT_OBJ_TAG -> do
+                commit <- liftIO (withForeignPtr (repoObj repo) $ \repoPtr ->
+                     liftIO (withForeignPtr fptr $ \y ->
+                           do oid'' <- c'git_tag_target_id (castPtr y)
+                              alloca $ \pptr -> do
+                                  _ <- c'git_commit_lookup pptr repoPtr oid''
+                                  ptr <- peek pptr
+                                  coid <- coidPtrToOid oid''
+                                  lgObjToCommit (Tagged . mkOid $ coid) ptr
+                        ))
+                Git.CommitObj <$> (pure commit)
            | otherwise -> error $ "Unknown object type: " ++ show typ
 
 lgExistsObject :: MonadLg m => Oid -> ReaderT LgRepo m Bool

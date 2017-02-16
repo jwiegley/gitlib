@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module Git.Tree.Builder
        ( TreeT
        , TreeBuilder(..)
