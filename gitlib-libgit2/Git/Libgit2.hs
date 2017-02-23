@@ -33,6 +33,7 @@ module Git.Libgit2
        , lgRepoPath
        , addTracingBackend
        , checkResult
+       , lgBlobRawSize
        , lgBuildPackIndex
        , lgFactory
        , lgForEachObject
@@ -322,6 +323,14 @@ lgLookupBlob oid =
     lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
         c'git_blob_lookup c'git_blob_lookup_prefix
         $ \boid obj _ -> lgObjToBlob (Tagged (mkOid boid)) obj
+
+lgBlobRawSize :: MonadLg m => BlobOid -> ReaderT LgRepo m Int
+lgBlobRawSize oid = do
+  lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
+      c'git_blob_lookup c'git_blob_lookup_prefix
+      $ \boid objectPtr _ ->
+          liftIO . withForeignPtr objectPtr $ \ptr ->
+            fromIntegral <$> c'git_blob_rawsize ptr
 
 lgTreeEntry :: MonadLg m
             => Tree -> Git.TreeFilePath -> ReaderT LgRepo m (Maybe TreeEntry)
