@@ -122,7 +122,7 @@ import Bindings.Libgit2.Common
             GIT_FILEMODE_COMMIT = 0160000
         } git_filemode_t; -}
 #integral_t git_filemode_t
-#num GIT_FILEMODE_NEW
+#num GIT_FILEMODE_UNREADABLE
 #num GIT_FILEMODE_TREE
 #num GIT_FILEMODE_BLOB
 #num GIT_FILEMODE_BLOB_EXECUTABLE

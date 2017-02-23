@@ -31,18 +31,24 @@ import Bindings.Libgit2.Diff
 #integral_t git_checkout_strategy_t
 #num GIT_CHECKOUT_NONE
 #num GIT_CHECKOUT_SAFE
-#num GIT_CHECKOUT_SAFE_CREATE
 #num GIT_CHECKOUT_FORCE
+#num GIT_CHECKOUT_RECREATE_MISSING
 #num GIT_CHECKOUT_ALLOW_CONFLICTS
 #num GIT_CHECKOUT_REMOVE_UNTRACKED
 #num GIT_CHECKOUT_REMOVE_IGNORED
 #num GIT_CHECKOUT_UPDATE_ONLY
 #num GIT_CHECKOUT_DONT_UPDATE_INDEX
 #num GIT_CHECKOUT_NO_REFRESH
-#num GIT_CHECKOUT_DISABLE_PATHSPEC_MATCH
 #num GIT_CHECKOUT_SKIP_UNMERGED
 #num GIT_CHECKOUT_USE_OURS
 #num GIT_CHECKOUT_USE_THEIRS
+#num GIT_CHECKOUT_DISABLE_PATHSPEC_MATCH
+#num GIT_CHECKOUT_SKIP_LOCKED_DIRECTORIES
+#num GIT_CHECKOUT_DONT_OVERWRITE_IGNORED
+#num GIT_CHECKOUT_CONFLICT_STYLE_MERGE
+#num GIT_CHECKOUT_CONFLICT_STYLE_DIFF3
+#num GIT_CHECKOUT_DONT_REMOVE_EXISTING
+#num GIT_CHECKOUT_DONT_WRITE_INDEX
 #num GIT_CHECKOUT_UPDATE_SUBMODULES
 #num GIT_CHECKOUT_UPDATE_SUBMODULES_IF_CHANGED
 {- typedef enum {
@@ -60,6 +66,17 @@ import Bindings.Libgit2.Diff
 #num GIT_CHECKOUT_NOTIFY_UPDATED
 #num GIT_CHECKOUT_NOTIFY_UNTRACKED
 #num GIT_CHECKOUT_NOTIFY_IGNORED
+
+{- typedef struct {
+        size_t mkdir_calls;
+        size_t stat_calls;
+        size_t chmod_calls;
+} git_checkout_perfdata; -}
+#starttype git_checkout_perfdata
+#field mkdir_calls , CSize
+#field stat_calls , CSize
+#field chmod_calls , CSize
+#stoptype
 {- typedef int (* git_checkout_notify_cb)(git_checkout_notify_t why,
                                        const char * path,
                                        const git_diff_file * baseline,
@@ -72,7 +89,9 @@ import Bindings.Libgit2.Diff
                                           size_t total_steps,
                                           void * payload); -}
 #callback git_checkout_progress_cb , CString -> CSize -> CSize -> Ptr () -> IO ()
-{- typedef struct git_checkout_opts {
+
+#callback git_checkout_perfdata_cb , Ptr (<git_checkout_perfdata>) -> Ptr () -> IO ()
+{- typedef struct git_checkout_options {
             unsigned int version;
             unsigned int checkout_strategy;
             int disable_filters;
@@ -86,8 +105,15 @@ import Bindings.Libgit2.Diff
             void * progress_payload;
             git_strarray paths;
             git_tree * baseline;
-        } git_checkout_opts; -}
-#starttype git_checkout_opts
+            git_index * baseline_index;
+            const char * target_directory;
+            const char * ancestor_label;
+            const char * our_label;
+            const char * their_label;
+            git_checkout_perfdata_cb perfdata_cb;
+            void * perfdata_payload;
+        } git_checkout_options; -}
+#starttype git_checkout_options
 #field version , CUInt
 #field checkout_strategy , CUInt
 #field disable_filters , CInt
@@ -101,7 +127,14 @@ import Bindings.Libgit2.Diff
 #field progress_payload , Ptr ()
 #field paths , <git_strarray>
 #field baseline , Ptr <git_tree>
+#field baseline_index , Ptr <git_index>
+#field target_directory , CString
+#field ancestor_label , CString
+#field our_label , CString
+#field their_label , CString
+#field perfdata_cb , <git_checkout_perfdata_cb>
+#field perfdata_payload , Ptr ()
 #stoptype
-#ccall git_checkout_head , Ptr <git_repository> -> Ptr <git_checkout_opts> -> IO (CInt)
-#ccall git_checkout_index , Ptr <git_repository> -> Ptr <git_index> -> Ptr <git_checkout_opts> -> IO (CInt)
-#ccall git_checkout_tree , Ptr <git_repository> -> Ptr <git_object> -> Ptr <git_checkout_opts> -> IO (CInt)
+#ccall git_checkout_head , Ptr <git_repository> -> Ptr <git_checkout_options> -> IO (CInt)
+#ccall git_checkout_index , Ptr <git_repository> -> Ptr <git_index> -> Ptr <git_checkout_options> -> IO (CInt)
+#ccall git_checkout_tree , Ptr <git_repository> -> Ptr <git_object> -> Ptr <git_checkout_options> -> IO (CInt)

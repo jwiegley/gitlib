@@ -1,3 +1,5 @@
+
+
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
@@ -31,11 +33,21 @@ import Bindings.Libgit2.Common
 #num GIT_EBUFS
 #num GIT_EUSER
 #num GIT_EBAREREPO
-#num GIT_EORPHANEDHEAD
+#num GIT_EUNBORNBRANCH
 #num GIT_EUNMERGED
 #num GIT_ENONFASTFORWARD
 #num GIT_EINVALIDSPEC
-#num GIT_EMERGECONFLICT
+#num GIT_ECONFLICT
+#num GIT_ELOCKED
+#num GIT_EMODIFIED
+#num GIT_EAUTH
+#num GIT_ECERTIFICATE
+#num GIT_EAPPLIED
+#num GIT_EPEEL
+#num GIT_EEOF
+#num GIT_EINVALID
+#num GIT_EUNCOMMITTED
+#num GIT_EDIRECTORY
 #num GIT_PASSTHROUGH
 #num GIT_ITEROVER
 {- typedef struct {

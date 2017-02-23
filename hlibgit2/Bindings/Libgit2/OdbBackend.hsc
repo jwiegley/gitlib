@@ -1,6 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
+#include <git2/sys/odb_backend.h>
 module Bindings.Libgit2.OdbBackend where
 import Foreign.Ptr
 #strict_import
@@ -64,7 +65,8 @@ import Bindings.Libgit2.Indexer
 #callback git_odb_backend_write_callback , Ptr <git_oid> -> Ptr <git_odb_backend> -> Ptr () -> CSize -> <git_otype> -> IO CInt
 #callback git_odb_backend_writestream_callback , Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> CSize -> <git_otype> -> IO CInt
 #callback git_odb_backend_readstream_callback , Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
-#callback git_odb_backend_exists_callback , Ptr <git_odb_backend> -> Ptr <git_oid> -> CInt -> IO CInt
+#callback git_odb_backend_exists_callback , Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
+#callback git_odb_backend_exists_prefix_callback , Ptr <git_oid> -> Ptr <git_odb_backend> -> Ptr <git_oid> -> CSize -> IO CInt
 #callback git_odb_backend_refresh_callback , Ptr <git_odb_backend> -> IO CInt
 #callback git_odb_backend_foreach_callback , Ptr <git_odb_backend> -> <git_odb_foreach_cb> -> Ptr () -> IO CInt
 #callback git_odb_backend_writepack_callback , Ptr (Ptr <git_odb_writepack>) -> Ptr <git_odb_backend> -> <git_transfer_progress_callback> -> Ptr () -> IO CInt
@@ -79,6 +81,7 @@ import Bindings.Libgit2.Indexer
 #field writestream , <git_odb_backend_writestream_callback>
 #field readstream , <git_odb_backend_readstream_callback>
 #field exists , <git_odb_backend_exists_callback>
+#field exists_prefix , <git_odb_backend_exists_prefix_callback>
 #field refresh , <git_odb_backend_refresh_callback>
 #field foreach , <git_odb_backend_foreach_callback>
 #field writepack , <git_odb_backend_writepack_callback>
@@ -132,7 +135,7 @@ import Bindings.Libgit2.Indexer
 #callback git_odb_writepack_free_callback , Ptr <git_odb_writepack> -> IO ()
 #starttype git_odb_writepack
 #field backend , Ptr <git_odb_backend>
-#field add , <git_odb_writepack_add_callback>
+#field append , <git_odb_writepack_add_callback>
 #field commit , <git_odb_writepack_commit_callback>
 #field free , <git_odb_writepack_free_callback>
 #stoptype

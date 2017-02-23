@@ -413,9 +413,9 @@ cliParseLsTree line =
         "blob"   -> do
             oid <- mkOid sha
             BlobEntry oid <$> case mode of
-                "100644" -> return PlainBlob
-                "100755" -> return ExecutableBlob
-                "120000" -> return SymlinkBlob
+                "100644" -> return $ PlainBlob (read . T.unpack $ mode)
+                "100755" -> return $ ExecutableBlob (read . T.unpack $ mode)
+                "120000" -> return $ SymlinkBlob (read . T.unpack $ mode)
                 _        -> throwM $ BackendError $
                     "Unknown blob mode: " <> T.pack (show mode)
         "commit" -> CommitEntry <$> mkOid sha
@@ -435,9 +435,9 @@ cliWriteTree entMap = do
                 BlobEntry (renderObjOid -> sha) kind) =
         return $ TL.concat
             [ case kind of
-                   PlainBlob      -> "100644"
-                   ExecutableBlob -> "100755"
-                   SymlinkBlob    -> "120000"
+                   PlainBlob _      -> "100644"
+                   ExecutableBlob _ -> "100755"
+                   SymlinkBlob _    -> "120000"
             , " blob ", fromStrict sha, "\t", path
             ]
     renderLine (fromStrict . T.decodeUtf8 -> path, CommitEntry coid) =

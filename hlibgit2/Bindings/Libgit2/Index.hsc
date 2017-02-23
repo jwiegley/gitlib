@@ -1,7 +1,10 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 #include <bindings.dsl.h>
-#include <git2.h>
+#include <git2/oid.h>
+#include <git2/common.h>
+#include <git2/sys/index.h>
+#include <git2/index.h>
 module Bindings.Libgit2.Index where
 import Foreign.Ptr
 #strict_import
@@ -16,6 +19,19 @@ import Bindings.Libgit2.Oid
 #starttype git_index_time
 #field seconds , CLong
 #field nanoseconds , CUInt
+#stoptype
+
+{-
+typedef struct git_index_reuc_entry {
+	unsigned int mode[3];
+	git_oid oid[3];
+	char *path;
+} git_index_reuc_entry;
+-}
+#starttype git_index_reuc_entry
+#array_field mode , CUInt
+#array_field oid , <git_oid>
+#field path , CString
 #stoptype
 {- typedef struct git_index_entry {
             git_index_time ctime;
@@ -40,17 +56,9 @@ import Bindings.Libgit2.Oid
 #field uid , CUInt
 #field gid , CUInt
 #field file_size , CLong
-#field oid , <git_oid>
+#field id , <git_oid>
 #field flags , CUShort
 #field flags_extended , CUShort
-#field path , CString
-#stoptype
-{- typedef struct git_index_reuc_entry {
-            unsigned int mode[3]; git_oid oid[3]; char * path;
-        } git_index_reuc_entry; -}
-#starttype git_index_reuc_entry
-#array_field mode , CUInt
-#array_field oid , <git_oid>
 #field path , CString
 #stoptype
 {- enum {

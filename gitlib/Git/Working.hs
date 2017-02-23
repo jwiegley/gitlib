@@ -43,7 +43,7 @@ checkoutFiles destPath tree decode cloneSubmodules =
         Blob _ contents <- lookupBlob oid
         case kind of
 #if !mingw32_HOST_OS
-            SymlinkBlob -> do
+            (SymlinkBlob _) -> do
                 target <- blobContentsToByteString contents
                 case decode target of
                     Left e -> decodeError target e

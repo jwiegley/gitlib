@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
 #include <git2.h>
-#include <git2/transport.h>
+#include <git2/sys/transport.h>
 module Bindings.Libgit2.Transport where
 import Foreign.Ptr
 #strict_import
@@ -42,7 +42,6 @@ import Bindings.Libgit2.Types
         } git_transport_flags_t; -}
 #integral_t git_transport_flags_t
 #num GIT_TRANSPORTFLAGS_NONE
-#num GIT_TRANSPORTFLAGS_NO_CHECK_CERT
 {- typedef void (* git_transport_message_cb)(const char * str,
                                           int len,
                                           void * data); -}

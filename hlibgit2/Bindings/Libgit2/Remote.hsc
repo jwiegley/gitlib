@@ -68,13 +68,23 @@ import Bindings.Libgit2.Oid
 #callback git_remote_callbacks_update_tips_callback , CString -> Ptr <git_oid> -> Ptr <git_oid> -> Ptr () -> IO CInt
 #starttype git_remote_callbacks
 #field version , CUInt
-#field progress , <git_remote_callbacks_progress_callback>
+#field sideband_progress , <git_remote_callbacks_progress_callback>
 #field completion , <git_remote_callbacks_completion_callback>
-#field update_tips , <git_remote_callbacks_update_tips_callback>
 #field payload , Ptr ()
 #stoptype
 #ccall git_remote_set_callbacks , Ptr <git_remote> -> Ptr <git_remote_callbacks> -> IO (CInt)
 #ccall git_remote_stats , Ptr <git_remote> -> IO (Ptr <git_transfer_progress>)
+
+{- typedef enum {
+	 GIT_FETCH_PRUNE_UNSPECIFIED,
+	 GIT_FETCH_PRUNE,
+	 GIT_FETCH_NO_PRUNE,
+ } git_fetch_prune_t; -}
+#integral_t git_fetch_prune_t
+#num GIT_FETCH_PRUNE_UNSPECIFIED
+#num GIT_FETCH_PRUNE
+#num GIT_FETCH_NO_PRUNE
+
 {- typedef enum {
             GIT_REMOTE_DOWNLOAD_TAGS_UNSET,
             GIT_REMOTE_DOWNLOAD_TAGS_NONE,
@@ -82,10 +92,29 @@ import Bindings.Libgit2.Oid
             GIT_REMOTE_DOWNLOAD_TAGS_ALL
         } git_remote_autotag_option_t; -}
 #integral_t git_remote_autotag_option_t
-#num GIT_REMOTE_DOWNLOAD_TAGS_UNSET
+#num GIT_REMOTE_DOWNLOAD_TAGS_UNSPECIFIED
 #num GIT_REMOTE_DOWNLOAD_TAGS_NONE
 #num GIT_REMOTE_DOWNLOAD_TAGS_AUTO
 #num GIT_REMOTE_DOWNLOAD_TAGS_ALL
+
+{- typedef struct {
+        int version;
+        git_remote_callbacks callbacks;
+        git_fetch_prune_t prune;
+        int update_fetchhead;
+        git_remote_autotag_option_t download_tags;
+} git_fetch_options;
+-}
+
+#starttype git_fetch_options
+#field version , CInt
+#field callbacks , <git_remote_callbacks>
+#field prune, <git_fetch_prune_t>
+#field update_fetchhead , CInt
+#field download_tags , <git_remote_autotag_option_t>
+#stoptype
+
+
 #ccall git_remote_autotag , Ptr <git_remote> -> IO (<git_remote_autotag_option_t>)
 #ccall git_remote_set_autotag , Ptr <git_remote> -> <git_remote_autotag_option_t> -> IO ()
 #ccall git_remote_rename , Ptr <git_remote> -> CString -> <git_remote_rename_problem_cb> -> Ptr () -> IO (CInt)
