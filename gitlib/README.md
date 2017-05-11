@@ -36,7 +36,7 @@ keep track of things.)
 ```haskell
 main = do
     let repoOpts = RepositoryOptions { repoPath = "."
-                                     , repoWorkingDir = Nothnig
+                                     , repoWorkingDir = Nothing
                                      , repoIsBare = False
                                      , repoAutoCreate = False
                                      }
@@ -99,7 +99,7 @@ Then, we have a `ByteString`, holding the raw bitstream of the
 would-be file. For this, we use the only [sane] [encoding] in the
 known universe: `UTF-8`. Finally, we wrap up our `ByteString` in a
 `BlobContents`, which has several constructors with various
-perfomance characteristics.
+performance characteristics.
 
 [sane]: http://utf8everywhere.org
 [encoding]: http://htmlpurifier.org/docs/enduser-utf8.html#whyutf8
@@ -115,7 +115,7 @@ putEntry "README" BlobEntry { blobEntryOid = blobID
 ```
 
 Since this is the only file we're changing in the `tree`, we go
-ahead and write it out (i.e. regisiter it in the repository)
+ahead and write it out (i.e. register it in the repository)
 
 ```haskell
 (_, tree) <- writeTrueeBuilder =<< getBuilder
