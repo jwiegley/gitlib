@@ -21,6 +21,7 @@
 --   queried as needed.
 module Git.Libgit2
        ( MonadLg
+       , HasLgRepo(..)
        , LgRepo(..)
        , BlobOid()
        , Commit()
@@ -174,10 +175,16 @@ instance Ord OidPtr where
 
 instance Eq OidPtr where
     oid1 == oid2 = oid1 `compare` oid2 == EQ
-
+
+class HasLgRepo m where
+  getRepository :: m LgRepo
+
+instance Monad m => HasLgRepo (ReaderT LgRepo m) where
+  getRepository = ask
+
 instance (Applicative m, MonadExcept m,
-          MonadBaseControl IO m, MonadIO m)
-         => Git.MonadGit LgRepo (ReaderT LgRepo m) where
+          MonadBaseControl IO m, MonadIO m, HasLgRepo m)
+         => Git.MonadGit LgRepo m where
     type Oid LgRepo = OidPtr
     data Tree LgRepo =
         LgTree { lgTreePtr :: Maybe (ForeignPtr C'git_tree) }
@@ -185,7 +192,7 @@ instance (Applicative m, MonadExcept m,
 
     facts = return Git.RepositoryFacts { Git.hasSymbolicReferences = True }
 
-    getRepository    = ask
+    getRepository    = getRepository
     closeRepository  = return ()
     deleteRepository =
         Git.getRepository >>= liftIO . removeDirectoryRecursive . lgRepoPath
@@ -224,19 +231,20 @@ instance (Applicative m, MonadExcept m,
 
     -- remoteFetch     = lgRemoteFetch
 
-lgExcTrap :: MonadLg m => ReaderT LgRepo m (IORef (Maybe Git.GitException))
-lgExcTrap = repoExcTrap `liftM` Git.getRepository
+lgExcTrap :: (MonadLg m, HasLgRepo m)
+          => m (IORef (Maybe Git.GitException))
+lgExcTrap = repoExcTrap `liftM` getRepository
 
-lgWrap :: MonadLg m => ReaderT LgRepo m a -> ReaderT LgRepo m a
+lgWrap :: (MonadLg m, HasLgRepo m) => m a -> m a
 lgWrap f = f `catch` \e -> do
     etrap <- lgExcTrap
     mexc  <- liftIO $ readIORef etrap
     liftIO $ writeIORef etrap Nothing
     maybe (throwM (e :: SomeException)) throwM mexc
 
-lgHashContents :: MonadLg m
-               => Git.BlobContents (ReaderT LgRepo m)
-               -> ReaderT LgRepo m BlobOid
+lgHashContents :: (MonadLg m, HasLgRepo m)
+               => Git.BlobContents m
+               -> m BlobOid
 lgHashContents b = do
     ptr <- liftIO mallocForeignPtr
     r   <- Git.blobContentsToByteString b >>= \bs ->
@@ -251,11 +259,11 @@ lgHashContents b = do
 --
 --   Note that since empty blobs cannot exist in Git, no means is provided for
 --   creating one; if the given string is 'empty', it is an error.
-lgCreateBlob :: MonadLg m
-             => Git.BlobContents (ReaderT LgRepo m)
-             -> ReaderT LgRepo m BlobOid
+lgCreateBlob :: (MonadLg m, HasLgRepo m)
+             => Git.BlobContents m
+             -> m BlobOid
 lgCreateBlob b = do
-    repo <- Git.getRepository
+    repo <- getRepository
     ptr  <- liftIO mallocForeignPtr -- freed automatically if GC'd
     r <- case b of
         Git.BlobString bs         -> createBlob repo ptr bs
@@ -306,7 +314,7 @@ lgCreateBlob b = do
 lgObjToBlob :: MonadLg m
             => BlobOid
             -> ForeignPtr C'git_blob
-            -> ReaderT LgRepo m (Git.Blob LgRepo (ReaderT LgRepo m))
+            -> m (Git.Blob LgRepo m)
 lgObjToBlob oid fptr = do
     bs <- liftIO $ withForeignPtr fptr $ \ptr -> do
         size <- c'git_blob_rawsize ptr
@@ -314,16 +322,16 @@ lgObjToBlob oid fptr = do
         B.packCStringLen (castPtr buf, fromIntegral size)
     return $ Git.Blob oid $ Git.BlobString bs
 
-lgLookupBlob :: MonadLg m
+lgLookupBlob :: (MonadLg m, HasLgRepo m)
              => BlobOid
-             -> ReaderT LgRepo m (Git.Blob LgRepo (ReaderT LgRepo m))
+             -> m (Git.Blob LgRepo m)
 lgLookupBlob oid =
     lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
         c'git_blob_lookup c'git_blob_lookup_prefix
         $ \boid obj _ -> lgObjToBlob (Tagged (mkOid boid)) obj
 
-lgTreeEntry :: MonadLg m
-            => Tree -> Git.TreeFilePath -> ReaderT LgRepo m (Maybe TreeEntry)
+lgTreeEntry :: (MonadLg m, HasLgRepo m)
+            => Tree -> Git.TreeFilePath -> m (Maybe TreeEntry)
 lgTreeEntry (LgTree Nothing) _ = return Nothing
 lgTreeEntry (LgTree (Just tree)) fp = liftIO $ alloca $ \entryPtr ->
     withFilePath fp $ \pathStr ->
@@ -333,7 +341,7 @@ lgTreeEntry (LgTree (Just tree)) fp = liftIO $ alloca $ \entryPtr ->
                 then return Nothing
                 else Just <$> (entryToTreeEntry =<< peek entryPtr)
 
-lgTreeOid :: MonadLg m => Tree -> ReaderT LgRepo m TreeOid
+lgTreeOid :: (MonadLg m, HasLgRepo m) => Tree -> m TreeOid
 lgTreeOid (LgTree Nothing) =
     liftIO $ Tagged . fromJust <$> lgParseOidIO Git.emptyTreeId 40
 lgTreeOid (LgTree (Just tree)) = liftIO $ do
@@ -362,9 +370,9 @@ gatherFrom' size scatter = do
             Nothing        -> gather worker chan
 
 lgSourceTreeEntries
-    :: MonadLg m
+    :: (MonadLg m, HasLgRepo m)
     => Tree
-    -> Producer (ReaderT LgRepo m) (Git.TreeFilePath, TreeEntry)
+    -> Producer m (Git.TreeFilePath, TreeEntry)
 lgSourceTreeEntries (LgTree Nothing) = return ()
 lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
     liftIO $ withForeignPtr tree $ \tr -> do
@@ -384,8 +392,8 @@ lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
             writeTBQueue queue $ name `seq` entry `seq` (name,entry)
         return 0
 
-lgMakeBuilder :: MonadLg m
-              => ForeignPtr C'git_treebuilder -> TreeBuilder (ReaderT LgRepo m)
+lgMakeBuilder :: (MonadLg m, HasLgRepo m)
+              => ForeignPtr C'git_treebuilder -> TreeBuilder m
 lgMakeBuilder builder = Git.TreeBuilder
     { Git.mtbBaseTreeOid    = Nothing
     , Git.mtbPendingUpdates = mempty
@@ -404,9 +412,9 @@ lgMakeBuilder builder = Git.TreeBuilder
 --
 --   Since empty trees cannot exist in Git, attempting to write out an empty
 --   tree is a no-op.
-lgNewTreeBuilder :: MonadLg m
+lgNewTreeBuilder :: (MonadLg m, HasLgRepo m)
                  => Maybe Tree
-                 -> ReaderT LgRepo m (TreeBuilder (ReaderT LgRepo m))
+                 -> m (TreeBuilder m)
 lgNewTreeBuilder mtree = do
     mfptr <- liftIO $ alloca $ \pptr -> do
         r <- case mtree of
@@ -432,7 +440,7 @@ lgNewTreeBuilder mtree = do
 
 lgPutEntry :: MonadLg m
            => ForeignPtr C'git_treebuilder -> Git.TreeFilePath -> TreeEntry
-           -> ReaderT LgRepo m ()
+           -> m ()
 lgPutEntry builder key (treeEntryToOid -> (oid, mode)) = do
     r2 <- liftIO $ withForeignPtr (getOid oid) $ \coid ->
         withForeignPtr builder $ \ptr ->
@@ -454,7 +462,7 @@ treeEntryToOid (Git.TreeEntry toid) =
 
 lgDropEntry :: MonadLg m
             => ForeignPtr C'git_treebuilder -> Git.TreeFilePath
-            -> ReaderT LgRepo m ()
+            -> m ()
 lgDropEntry builder key =
     void $ liftIO $ withForeignPtr builder $ \ptr ->
         withFilePath key $ c'git_treebuilder_remove ptr
@@ -462,7 +470,7 @@ lgDropEntry builder key =
 lgLookupBuilderEntry :: MonadLg m
                      => ForeignPtr C'git_treebuilder
                      -> Git.TreeFilePath
-                     -> ReaderT LgRepo m (Maybe TreeEntry)
+                     -> m (Maybe TreeEntry)
 lgLookupBuilderEntry builderPtr name = do
     entry <- liftIO $ withForeignPtr builderPtr $ \builder ->
         withFilePath name $ c'git_treebuilder_get builder
@@ -471,7 +479,7 @@ lgLookupBuilderEntry builderPtr name = do
         else Just <$> liftIO (entryToTreeEntry entry)
 
 lgBuilderEntryCount :: MonadLg m
-                    => ForeignPtr C'git_treebuilder -> ReaderT LgRepo m Int
+                    => ForeignPtr C'git_treebuilder -> m Int
 lgBuilderEntryCount tb =
     fromIntegral <$> liftIO (withForeignPtr tb c'git_treebuilder_entrycount)
 
@@ -480,10 +488,10 @@ lgTreeEntryCount (LgTree Nothing) = return 0
 lgTreeEntryCount (LgTree (Just tree)) =
     fromIntegral <$> liftIO (withForeignPtr tree c'git_tree_entrycount)
 
-lgWriteBuilder :: MonadLg m
-               => ForeignPtr C'git_treebuilder -> ReaderT LgRepo m TreeOid
+lgWriteBuilder :: (MonadLg m, HasLgRepo m)
+               => ForeignPtr C'git_treebuilder -> m TreeOid
 lgWriteBuilder tb = do
-    repo <- Git.getRepository
+    repo <- getRepository
     (r3,coid) <- liftIO $ do
         coid <- mallocForeignPtr
         withForeignPtr coid $ \coid' ->
@@ -523,7 +531,7 @@ lgCloneBuilder fptr =
             throwM (Git.BackendError "Could not insert entry in treebuilder")
         return 0
 
-lgLookupTree :: MonadLg m => TreeOid -> ReaderT LgRepo m Tree
+lgLookupTree :: (MonadLg m, HasLgRepo m) => TreeOid -> m Tree
 lgLookupTree (untag -> oid)
     | show oid == unpack Git.emptyTreeId = return $ LgTree Nothing
     | otherwise = do
@@ -587,16 +595,16 @@ lgObjToCommit oid c = do
         , Git.commitEncoding  = "utf-8"
         }
 
-lgLookupCommit :: MonadLg m => CommitOid -> ReaderT LgRepo m Commit
+lgLookupCommit :: (MonadLg m, HasLgRepo m) => CommitOid -> m Commit
 lgLookupCommit oid =
   lookupObject' (getOid (untag oid)) (getOidLen (untag oid))
       c'git_commit_lookup c'git_commit_lookup_prefix
       $ \coid obj _ -> liftIO $ withForeignPtr obj $
           lgObjToCommit (Tagged (mkOid coid))
 
-lgReadIndex :: MonadLg m => Git.TreeT LgRepo (ReaderT LgRepo m) ()
+lgReadIndex :: (MonadLg m, HasLgRepo m) => Git.TreeT LgRepo m ()
 lgReadIndex = do
-  repo <- lift Git.getRepository
+  repo <- lift getRepository
   xs <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
     alloca $ \indexPp -> do
       r <- c'git_repository_index indexPp repoPtr
@@ -635,11 +643,11 @@ data ObjectPtr = BlobPtr (ForeignPtr C'git_blob)
                | CommitPtr (ForeignPtr C'git_commit)
                | TagPtr (ForeignPtr C'git_tag)
 
-lgLookupObject :: MonadLg m
+lgLookupObject :: (MonadLg m, HasLgRepo m)
                => Oid
-               -> ReaderT LgRepo m (Git.Object LgRepo (ReaderT LgRepo m))
+               -> m (Git.Object LgRepo m)
 lgLookupObject oid = do
-    repo <- Git.getRepository
+    repo <- getRepository
     (oid', typ, fptr) <-
         lookupObject' (getOid oid) (getOidLen oid)
             (\x y z   -> c'git_object_lookup x y z c'GIT_OBJ_ANY)
@@ -671,9 +679,9 @@ lgLookupObject oid = do
                 Git.CommitObj <$> (pure commit)
            | otherwise -> error $ "Unknown object type: " ++ show typ
 
-lgExistsObject :: MonadLg m => Oid -> ReaderT LgRepo m Bool
+lgExistsObject :: (MonadLg m, HasLgRepo m) => Oid -> m Bool
 lgExistsObject oid = do
-    repo <- Git.getRepository
+    repo <- getRepository
     result <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \pptr -> do
             r <- c'git_repository_odb pptr repoPtr
@@ -699,11 +707,11 @@ lgForEachObject odbPtr f payload =
         freeHaskellFunPtr
         (flip (c'git_odb_foreach odbPtr) payload)
 
-lgSourceObjects :: MonadLg m
+lgSourceObjects :: (MonadLg m, HasLgRepo m)
                 => Maybe CommitOid -> CommitOid -> Bool
-                -> Producer (ReaderT LgRepo m) ObjectOid
+                -> Producer m ObjectOid
 lgSourceObjects mhave need alsoTrees = do
-    repo   <- lift Git.getRepository
+    repo   <- lift getRepository
     walker <- liftIO $ alloca $ \pptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
                 c'git_revwalk_new pptr repoPtr
@@ -747,16 +755,16 @@ lgSourceObjects mhave need alsoTrees = do
 
 -- | Write out a commit to its repository.  If it has already been written,
 --   nothing will happen.
-lgCreateCommit :: MonadLg m
+lgCreateCommit :: (MonadLg m, HasLgRepo m)
                => [CommitOid]
                -> TreeOid
                -> Git.Signature
                -> Git.Signature
                -> Git.CommitMessage
                -> Maybe Git.RefName
-               -> ReaderT LgRepo m Commit
+               -> m Commit
 lgCreateCommit pptrs tree author committer logText ref = do
-    repo <- Git.getRepository
+    repo <- getRepository
     let toid  = getOid . untag $ tree
     coid <- liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
         coid <- mallocForeignPtr
@@ -803,9 +811,9 @@ withForeignPtrs fos io = do
     mapM_ touchForeignPtr fos
     return r
 
-lgLookupRef :: MonadLg m => Git.RefName -> ReaderT LgRepo m (Maybe RefTarget)
+lgLookupRef :: (MonadLg m, HasLgRepo m) => Git.RefName -> m (Maybe RefTarget)
 lgLookupRef name = do
-    repo <- Git.getRepository
+    repo <- getRepository
     liftIO $ alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
               withCString (unpack name) $ \namePtr ->
@@ -825,10 +833,10 @@ lgLookupRef name = do
             c'git_reference_free ref
             return (Just targ)
 
-lgUpdateRef :: MonadLg m
-            => Git.RefName -> Git.RefTarget LgRepo -> ReaderT LgRepo m ()
+lgUpdateRef :: (MonadLg m, HasLgRepo m)
+            => Git.RefName -> Git.RefTarget LgRepo -> m ()
 lgUpdateRef name refTarg = do
-    repo <- Git.getRepository
+    repo <- getRepository
     r <- liftIO $ alloca $ \ptr ->
         withForeignPtr (repoObj repo) $ \repoPtr ->
         withCString (unpack name) $ \namePtr ->
@@ -849,7 +857,7 @@ lgUpdateRef name refTarg = do
 
 lgResolveRef :: MonadLg m => Git.RefName -> ReaderT LgRepo m (Maybe CommitOid)
 lgResolveRef name = do
-    repo <- Git.getRepository
+    repo <- getRepository
     oid <- liftIO $ alloca $ \ptr ->
         withCString (unpack name) $ \namePtr ->
         withForeignPtr (repoObj repo) $ \repoPtr -> do
@@ -864,9 +872,9 @@ lgResolveRef name = do
 
 --renameRef = c'git_reference_rename
 
-lgDeleteRef :: MonadLg m => Git.RefName -> ReaderT LgRepo m ()
+lgDeleteRef :: (MonadLg m, HasLgRepo m) => Git.RefName -> m ()
 lgDeleteRef name = do
-    repo <- Git.getRepository
+    repo <- getRepository
     r <- liftIO $ alloca $ \ptr ->
         withCString (unpack name) $ \namePtr ->
         withForeignPtr (repoObj repo) $ \repoPtr -> do
@@ -932,10 +940,11 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
                  + (if listFlagPacked flags   then 4 else 0)
                  + (if listFlagHasPeel flags  then 8 else 0)
 
-lgSourceRefs :: MonadLg m => Producer (ReaderT LgRepo m) Git.RefName
+
+lgSourceRefs :: (MonadLg m, HasLgRepo m) => Producer m Git.RefName
 lgSourceRefs =
     gatherFrom' 16 $ \queue -> do
-        repo <- Git.getRepository
+        repo <- getRepository
         r <- liftIO $ bracket
             (mk'git_reference_foreach_cb (callback queue))
             freeHaskellFunPtr
@@ -1034,7 +1043,7 @@ lgDiffContentsWithTree _contents (LgTree Nothing) =
         Git.DiffTreeToIndexFailed "Cannot diff against an empty tree"
 
 lgDiffContentsWithTree contents tree = do
-    repo <- lift Git.getRepository
+    repo <- lift getRepository
     gatherFrom' 16 $ generateDiff repo
   where
     -- generateDiff :: MonadLg m => LgRepo -> TBQueue ByteString -> m ()
@@ -1235,7 +1244,7 @@ lgBuildPackFile :: MonadLg m
                 => FilePath -> [Either CommitOid TreeOid]
                 -> ReaderT LgRepo m FilePath
 lgBuildPackFile dir oids = do
-    repo <- Git.getRepository
+    repo <- getRepository
     liftIO $ do
         (filePath, fHandle) <- openBinaryTempFile dir "pack"
         hClose fHandle
@@ -1354,7 +1363,7 @@ lgCopyPackFile packFile = do
     -- yet because it only calls into the Libgit2 backend, which doesn't know
     -- anything about the S3 backend.  As far as Libgit2 is concerned, the S3
     -- backend is just a black box with no special properties.
-    repo <- Git.getRepository
+    repo <- getRepository
     control $ \run -> withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \odbPtrPtr ->
         alloca $ \statsPtr ->
@@ -1484,7 +1493,7 @@ lgReadFromPack odbPtr sha metadataOnly = liftIO $ do
 
 lgRemoteFetch :: MonadLg m => Text -> Text -> ReaderT LgRepo m ()
 lgRemoteFetch uri fetchSpec = do
-    xferRepo <- Git.getRepository
+    xferRepo <- getRepository
     liftIO $ withForeignPtr (repoObj xferRepo) $ \repoPtr ->
         withCString (unpack uri) $ \uriStr ->
         withCString (unpack fetchSpec) $ \fetchStr ->
