@@ -1513,7 +1513,7 @@ lgRemoteFetch uri fetchSpec = do
         r2 <- liftIO $ c'git_remote_download remotePtr nullFunPtr nullPtr
         checkResult r2 "c'git_remote_download failed"
 
-lgFactory :: MonadIO m
+lgFactory :: (MonadIO m, MonadMask m)
           => Git.RepositoryFactory (ReaderT LgRepo m) m LgRepo
 lgFactory = Git.RepositoryFactory
     { Git.openRepository = openLgRepository
@@ -1523,26 +1523,25 @@ lgFactory = Git.RepositoryFactory
 runLgRepository :: LgRepo -> ReaderT LgRepo m a -> m a
 runLgRepository = flip runReaderT
 
-openLgRepository :: MonadIO m => Git.RepositoryOptions -> m LgRepo
+openLgRepository :: (MonadIO m, MonadMask m) => Git.RepositoryOptions -> m LgRepo
 openLgRepository opts = do
     startupLgBackend
     let path = Git.repoPath opts
     p <- liftIO $ doesDirectoryExist path
-    liftIO $ openRepositoryWith path $
+    openRepositoryWith path $
         if not (Git.repoAutoCreate opts) || p
         then c'git_repository_open
         else \x y -> c'git_repository_init x y
                          (fromBool (Git.repoIsBare opts))
   where
     openRepositoryWith path fn = do
-        fptr <- alloca $ \ptr ->
-            withCString path $ \str -> do
-                r <- fn ptr str
-                when (r < 0) $
-                    error $ "Could not open repository " ++ show path
-                ptr' <- peek ptr
-                FC.newForeignPtr ptr' (c'git_repository_free ptr')
-        excTrap <- newIORef Nothing
+        ptr <- liftIO malloc
+        r <- liftIO $ withCString path $ fn ptr
+        when (r < 0) $ lgThrow Git.RepositoryCannotAccess
+        excTrap <- liftIO $ newIORef Nothing
+        fptr <- liftIO $ do
+            ptr' <- peek ptr
+            FC.newForeignPtr ptr' (c'git_repository_free ptr')
         return LgRepo
             { repoOptions = opts
             , repoObj     = fptr
