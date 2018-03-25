@@ -1,7 +1,6 @@
 module Git.Blob where
 
 import           Conduit
-import           Control.Applicative
 import           Control.Monad
 import           Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
