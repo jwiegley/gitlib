@@ -67,9 +67,9 @@ listCommits :: MonadGit r m
             -> CommitOid r         -- ^ The commit we need
             -> m [CommitOid r]     -- ^ All the objects in between
 listCommits mhave need =
-    sourceObjects mhave need False
-        $= mapMC (\(CommitObjOid c) -> return c)
-        $$ sinkList
+    runConduit $ sourceObjects mhave need False
+        .| mapMC (\(CommitObjOid c) -> return c)
+        .| sinkList
 
 traverseCommits :: MonadGit r m => (CommitOid r -> m a) -> CommitOid r -> m [a]
 traverseCommits f need = mapM f =<< listCommits Nothing need

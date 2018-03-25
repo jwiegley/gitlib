@@ -29,9 +29,9 @@ blobContentsToByteString (BlobString bs) = return bs
 blobContentsToByteString (BlobStringLazy bs) =
     return $ B.concat (BL.toChunks bs)
 blobContentsToByteString (BlobStream bs) =
-    B.concat . BL.toChunks <$> (bs $$ sinkLazy)
+    B.concat . BL.toChunks <$> (runConduit $ bs .| sinkLazy)
 blobContentsToByteString (BlobSizedStream bs _) =
-    B.concat . BL.toChunks <$> (bs $$ sinkLazy)
+    runConduit $ B.concat . BL.toChunks <$> (bs .| sinkLazy)
 
 blobToByteString :: MonadGit r m => Blob r m -> m ByteString
 blobToByteString (Blob _ contents) = blobContentsToByteString contents
@@ -40,8 +40,8 @@ blobContentsToLazyByteString :: MonadGit r m
                              => BlobContents m -> m BL.ByteString
 blobContentsToLazyByteString (BlobString bs) = return $ BL.fromChunks [bs]
 blobContentsToLazyByteString (BlobStringLazy bs) = return bs
-blobContentsToLazyByteString (BlobStream bs) = bs $$ sinkLazy
-blobContentsToLazyByteString (BlobSizedStream bs _) = bs $$ sinkLazy
+blobContentsToLazyByteString (BlobStream bs) = runConduit $ bs .| sinkLazy
+blobContentsToLazyByteString (BlobSizedStream bs _) = runConduit $ bs .| sinkLazy
 
 blobToLazyByteString :: MonadGit r m => Blob r m -> m BL.ByteString
 blobToLazyByteString (Blob _ contents) = blobContentsToLazyByteString contents
@@ -49,19 +49,19 @@ blobToLazyByteString (Blob _ contents) = blobContentsToLazyByteString contents
 writeBlob :: (MonadGit r m, MonadIO m, MonadResource m)
           => FilePath -> BlobContents m -> m ()
 writeBlob path (BlobString bs)         = liftIO $ B.writeFile path bs
-writeBlob path (BlobStringLazy bs)     = sourceLazy bs $$ sinkFile path
-writeBlob path (BlobStream str)        = str $$ sinkFile path
-writeBlob path (BlobSizedStream str _) = str $$ sinkFile path
+writeBlob path (BlobStringLazy bs)     = runConduit $ sourceLazy bs .| sinkFile path
+writeBlob path (BlobStream str)        = runConduit $ str .| sinkFile path
+writeBlob path (BlobSizedStream str _) = runConduit $ str .| sinkFile path
 
 treeBlobEntries :: MonadGit r m
                 => Tree r -> m [(TreeFilePath, BlobOid r, BlobKind)]
-treeBlobEntries tree = sourceTreeBlobEntries tree $$ sinkList
+treeBlobEntries tree = runConduit $ sourceTreeBlobEntries tree .| sinkList
 
 sourceTreeBlobEntries
     :: MonadGit r m
-    => Tree r -> Producer m (TreeFilePath, BlobOid r, BlobKind)
+    => Tree r -> ConduitT i (TreeFilePath, BlobOid r, BlobKind) m ()
 sourceTreeBlobEntries tree =
-    sourceTreeEntries tree =$= awaitForever go
+    sourceTreeEntries tree .| awaitForever go
   where
     go (fp ,BlobEntry oid k) = yield (fp, oid, k)
     go _ = return ()

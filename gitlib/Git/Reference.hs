@@ -4,7 +4,7 @@ import Conduit
 import Git.Types
 
 listReferences :: MonadGit r m => m [RefName]
-listReferences = sourceReferences $$ sinkList
+listReferences = runConduit $ sourceReferences .| sinkList
 
 resolveReference :: MonadGit r m => RefName -> m (Maybe (Oid r))
 resolveReference name = do
