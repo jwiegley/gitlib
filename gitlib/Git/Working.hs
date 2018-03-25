@@ -5,6 +5,7 @@ module Git.Working where
 import Conduit
 import Control.Applicative
 import Control.Monad.Catch
+import Control.Monad.Trans.Control
 import Data.Semigroup
 import Data.Text as T
 import Git.Blob
