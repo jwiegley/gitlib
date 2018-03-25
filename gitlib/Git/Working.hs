@@ -23,7 +23,7 @@ checkoutFiles :: (MonadGit r m, MonadBaseControl IO m, MonadIO m,
               -> Bool
               -> m ()
 checkoutFiles destPath tree decode cloneSubmodules =
-    sourceTreeEntries tree $$ mapM_C $ \(path, entry) ->
+    runConduit $ sourceTreeEntries tree .| (mapM_C $ \(path, entry) ->
         case (destPath </>) <$> decode path of
             Left e ->  decodeError path e
             Right fullPath -> do
@@ -34,7 +34,7 @@ checkoutFiles destPath tree decode cloneSubmodules =
                     CommitEntry oid
                         -- jww (2013-12-26): Recursively clone submodules?
                         | cloneSubmodules -> cloneSubmodule oid fullPath
-                        | otherwise -> liftIO $ createDirectory fullPath
+                        | otherwise -> liftIO $ createDirectory fullPath)
   where
     decodeError path e = throwM $ PathEncodingError $
         "Could not decode path " <> T.pack (show path) <> ":" <> T.pack e

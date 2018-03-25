@@ -57,7 +57,7 @@ class (Applicative m, Monad m, MonadThrow m,
     lookupReference :: RefName -> m (Maybe (RefTarget r))
     updateReference :: RefName -> RefTarget r -> m ()
     deleteReference :: RefName -> m ()
-    sourceReferences :: Producer m RefName
+    sourceReferences :: ConduitT i RefName m ()
 
     -- Object lookup
     lookupObject  :: Oid r -> m (Object r m)
@@ -65,7 +65,7 @@ class (Applicative m, Monad m, MonadThrow m,
     sourceObjects :: Maybe (CommitOid r)    -- ^ A commit we may already have
                   -> CommitOid r            -- ^ The commit we need
                   -> Bool                   -- ^ Include commit trees also?
-                  -> Producer m (ObjectOid r) -- ^ All the objects in between
+                  -> ConduitT i (ObjectOid r) m () -- ^ All the objects in between
 
     lookupCommit  :: CommitOid r -> m (Commit r)
     lookupTree    :: TreeOid r -> m (Tree r)
@@ -80,10 +80,10 @@ class (Applicative m, Monad m, MonadThrow m,
 
     treeOid   :: Tree r -> m (TreeOid r)
     treeEntry :: Tree r -> TreeFilePath -> m (Maybe (TreeEntry r))
-    sourceTreeEntries :: Tree r -> Producer m (TreeFilePath, TreeEntry r)
+    sourceTreeEntries :: Tree r -> ConduitT i (TreeFilePath, TreeEntry r) m ()
 
-    diffContentsWithTree :: Source m (Either TreeFilePath ByteString)
-                         -> Tree r -> Producer m ByteString
+    diffContentsWithTree :: ConduitT () (Either TreeFilePath ByteString) m ()
+                         -> Tree r -> ConduitT i ByteString m ()
 
     -- Creating other objects
     hashContents :: BlobContents m -> m (BlobOid r)
@@ -158,7 +158,7 @@ data Blob r m = Blob
     , blobContents :: !(BlobContents m)
     }
 
-type ByteSource m = Source m ByteString
+type ByteSource m = ConduitT () ByteString m ()
 
 data BlobContents m = BlobString !ByteString
                     | BlobStringLazy !BL.ByteString
@@ -231,12 +231,12 @@ data Commit r = Commit
     , commitEncoding  :: !Text
     }
 
-sourceCommitParents :: MonadGit r m => Commit r -> Producer m (Commit r)
+sourceCommitParents :: MonadGit r m => Commit r -> ConduitT i (Commit r) m ()
 sourceCommitParents commit =
     forM_ (commitParents commit) $ yield <=< lift . lookupCommit
 
 lookupCommitParents :: MonadGit r m => Commit r -> m [Commit r]
-lookupCommitParents commit = sourceCommitParents commit $$ sinkList
+lookupCommitParents commit = runConduit $ sourceCommitParents commit .| sinkList
 
 data Signature = Signature
     { signatureName  :: !CommitAuthor
