@@ -6,7 +6,6 @@
 module Git.Types where
 
 import           Conduit
-import           Control.Applicative
 import qualified Control.Exception.Lifted as Exc
 import           Control.Monad
 import           Control.Monad.Trans.State

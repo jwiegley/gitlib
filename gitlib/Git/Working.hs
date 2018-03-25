@@ -3,8 +3,6 @@
 module Git.Working where
 
 import Conduit
-import Control.Applicative
-import Control.Monad.Catch
 import Data.Semigroup
 import Data.Text as T
 import Git.Blob
