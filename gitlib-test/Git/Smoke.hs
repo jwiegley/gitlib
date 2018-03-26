@@ -15,6 +15,7 @@ import           Conduit
 import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
+import           Control.Monad.Trans.Control
 import qualified Data.ByteString.Lazy as BL
 import           Data.List (sort)
 import           Data.Monoid

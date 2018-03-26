@@ -64,6 +64,7 @@ Library
         , time                 >= 1.4
         , transformers         >= 0.3.0.0
         , transformers-base    >= 0.4.1
+        , unliftio-core        >= 0.1.1
     exposed-modules:
         Git.Libgit2
         Git.Libgit2.Backend

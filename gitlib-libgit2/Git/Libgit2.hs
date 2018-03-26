@@ -69,6 +69,7 @@ import           Control.Monad.Reader.Class
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Control.Monad.Trans.Resource
+import           Control.Monad.IO.Unlift
 import           Data.Bits ((.|.), (.&.))
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -183,7 +184,7 @@ instance Monad m => HasLgRepo (ReaderT LgRepo m) where
   getRepository = ask
 
 instance (Applicative m, MonadExcept m,
-          MonadBaseControl IO m, MonadIO m, HasLgRepo m)
+          MonadBaseControl IO m, MonadUnliftIO m, MonadIO m, HasLgRepo m)
          => Git.MonadGit LgRepo m where
     type Oid LgRepo = OidPtr
     data Tree LgRepo =

@@ -12,6 +12,7 @@ import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
+import           Control.Monad.IO.Unlift
 import           Control.Monad.Trans.Control
 import           Data.IORef
 import           Foreign.ForeignPtr
@@ -54,6 +55,6 @@ type Options     = Git.Options LgRepo
 type MonadExcept m = (MonadThrow m, MonadCatch m, MonadMask m)
 
 type MonadLg m = (Applicative m, MonadExcept m,
-                  MonadIO m, MonadBaseControl IO m)
+                  MonadIO m, MonadBaseControl IO m, MonadUnliftIO m)
 
 -- Types.hs
