@@ -10,7 +10,7 @@ import           Bindings.Libgit2
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Catch
-import           Control.Monad.Trans.Control
+import           Control.Monad.IO.Unlift
 import           Data.ByteString
 import qualified Data.Text as T
 import qualified Data.Text.ICU.Convert as U
@@ -51,7 +51,7 @@ coidPtrToOid coidptr = do
     return fptr
 
 lookupObject'
-  :: (Git.MonadGit LgRepo m, MonadBaseControl IO m)
+  :: (Git.MonadGit LgRepo m, MonadUnliftIO m)
   => ForeignPtr C'git_oid -> Int
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> IO CInt)
   -> (Ptr (Ptr a) -> Ptr C'git_repository -> Ptr C'git_oid -> CSize -> IO CInt)
@@ -59,7 +59,7 @@ lookupObject'
   -> m b
 lookupObject' oid len lookupFn lookupPrefixFn createFn = do
     repo <- Git.getRepository
-    result <- liftBaseWith $ \run -> alloca $ \ptr -> do
+    result <- withRunInIO $ \run -> alloca $ \ptr -> do
         r <- withForeignPtr (repoObj repo) $ \repoPtr ->
             withForeignPtr oid $ \oidPtr ->
                 if len == 40
@@ -85,7 +85,7 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
               let p = castPtr ptr'
               fptr <- FC.newForeignPtr p (c'git_object_free p)
               Right <$> run (createFn coidCopy (castForeignPtr fptr) ptr')
-    either (throwM . Git.BackendError) restoreM result
+    either (throwM . Git.BackendError) pure result
 
 -- lgLookupObject :: Text -> LgRepository Dynamic
 -- lgLookupObject str

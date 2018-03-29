@@ -37,7 +37,6 @@ Executable git-monitor
                  , time                 >= 1.4
                  , transformers         >= 0.3.0.0
                  , unordered-containers >= 0.2.3.0
-                 , lifted-async         >= 0.1.1
                  , unix
 
 Source-repository head

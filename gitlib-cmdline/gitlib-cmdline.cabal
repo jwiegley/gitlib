@@ -27,7 +27,6 @@ Library
     , containers           >= 0.4.2.1
     , directory            >= 1.1.0.2
     , exceptions           >= 0.5
-    , monad-control        <  1.1
     , mtl                  >= 2.1.2
     , old-locale           >= 1.0.0.4
     , parsec               >= 3.1.3

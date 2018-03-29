@@ -15,7 +15,7 @@ import           Conduit
 import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.Trans.Control
+import           Control.Monad.IO.Unlift
 import qualified Data.ByteString.Lazy as BL
 import           Data.List (sort)
 import           Data.Monoid
@@ -34,8 +34,8 @@ sampleCommit :: MonadGit r m => TreeOid r -> Signature -> m (Commit r)
 sampleCommit tr sig =
     createCommit [] tr sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (MonadGit r m, MonadIO m, MonadBaseControl IO m, MonadThrow m,
-                  MonadGit s n, MonadIO n, MonadBaseControl IO n, MonadThrow n)
+smokeTestSpec :: (MonadGit r m, MonadUnliftIO m, MonadThrow m,
+                  MonadGit s n, MonadUnliftIO n, MonadThrow n)
               => RepositoryFactory m IO r
               -> RepositoryFactory n m s
               -> Spec
@@ -430,8 +430,7 @@ mkBlob path = putBlob path
     =<< lift (createBlob $ BlobStream $
                   sourceLazy (BL.fromChunks [path <> "\n"]))
 
-doTreeit :: (MonadBaseControl IO m, MonadIO m,
-             MonadGit r n, MonadBaseControl IO n, MonadIO n)
+doTreeit :: (MonadUnliftIO m, MonadGit r n, MonadUnliftIO n)
        => String -> RepositoryFactory n m r -> [Kind] -> TreeT r n a -> m ()
 doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     tref <- createTree action
@@ -457,12 +456,12 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
     fullPath  = normalize label <> ".git"
     normalize = map (\x -> if x == ' ' then '-' else x)
 
--- treeit :: (Example (m ()), MonadIO m, MonadBaseControl IO m,
---            MonadGit r n, MonadIO n, MonadBaseControl IO n)
+-- treeit :: (Example (m ()), MonadUnliftIO m
+--            MonadGit r n, MonadUnliftIO n)
 --        => String -> RepositoryFactory n m r -> [Kind] -> TreeT r n a -> Spec
 treeit label pr kinds action = it label $ doTreeit label pr kinds action
 
-treeitFail :: (MonadGit r m, MonadIO m, MonadBaseControl IO m)
+treeitFail :: (MonadGit r m, MonadUnliftIO m)
            => String -> RepositoryFactory m IO r -> [Kind] -> TreeT r m a
            -> Spec
 treeitFail label pr kinds action =

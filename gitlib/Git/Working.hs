@@ -5,7 +5,6 @@ module Git.Working where
 import Conduit
 import Control.Applicative
 import Control.Monad.Catch
-import Control.Monad.Trans.Control
 import Data.Semigroup
 import Data.Text as T
 import Git.Blob
@@ -16,8 +15,7 @@ import System.FilePath
 import System.Posix.Files
 #endif
 
-checkoutFiles :: (MonadGit r m, MonadBaseControl IO m, MonadIO m,
-                  MonadResource m)
+checkoutFiles :: (MonadGit r m, MonadResource m)
               => FilePath
               -> Tree r
               -> (TreeFilePath -> Either String FilePath)

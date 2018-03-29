@@ -1,13 +1,13 @@
 module Git.Repository where
 
-import Control.Exception.Lifted
 import Control.Monad
 import Control.Monad.IO.Class
-import Control.Monad.Trans.Control
+import Control.Monad.IO.Unlift
 import Git.Types
 import System.Directory
+import UnliftIO.Exception
 
-withNewRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
+withNewRepository :: (MonadGit r n, MonadUnliftIO n, MonadUnliftIO m)
                   => RepositoryFactory n m r
                   -> FilePath -> n a -> m a
 withNewRepository factory path action = do
@@ -29,8 +29,7 @@ withNewRepository factory path action = do
 
     return a
 
-withNewRepository' :: (MonadGit r n, MonadBaseControl IO n,
-                       MonadBaseControl IO m, MonadIO m)
+withNewRepository' :: (MonadGit r n, MonadUnliftIO n, MonadUnliftIO m)
                    => RepositoryFactory n m r -> FilePath -> n a -> m a
 withNewRepository' factory path action =
     bracket_ recover recover $
@@ -45,13 +44,13 @@ withNewRepository' factory path action =
         exists <- doesDirectoryExist path
         when exists $ removeDirectoryRecursive path
 
-withRepository' :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
+withRepository' :: (MonadGit r n, MonadUnliftIO n, MonadUnliftIO m)
                 => RepositoryFactory n m r -> RepositoryOptions -> n a -> m a
 withRepository' factory opts action = do
     repo <- openRepository factory opts
     runRepository factory repo $ action `finally` closeRepository
 
-withRepository :: (MonadGit r n, MonadBaseControl IO n, MonadIO m)
+withRepository :: (MonadGit r n, MonadUnliftIO n, MonadUnliftIO m)
                => RepositoryFactory n m r -> FilePath -> n a -> m a
 withRepository factory path =
     withRepository' factory defaultRepositoryOptions { repoPath = path }
