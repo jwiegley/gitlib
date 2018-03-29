@@ -7,7 +7,7 @@ module Git.Types where
 
 import           Conduit
 import           Control.Applicative
-import qualified Control.Exception.Lifted as Exc
+import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
@@ -435,4 +435,4 @@ data GitException
 -- jww (2013-02-11): Create a BackendException data constructor of forall
 -- e. Exception e => BackendException e, so that each can throw a derived
 -- exception.
-instance Exc.Exception GitException
+instance Exception GitException

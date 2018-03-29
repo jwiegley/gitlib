@@ -4,8 +4,8 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
+import           Control.Monad.IO.Unlift
 import           Control.Monad.Trans.Class
-import           Control.Monad.Trans.Control
 import           Data.Function
 import qualified Data.HashSet as HashSet
 import           Data.List
@@ -46,8 +46,8 @@ pushCommit coid remoteRefName = do
     -- updateReference_ remoteRefName (RefObj cref)
     return cref
 
-copyRepository :: (MonadGit r m, MonadIO m, MonadBaseControl IO m,
-                   MonadGit s (t m), MonadTrans t, MonadBaseControl IO (t m))
+copyRepository :: (MonadGit r m, MonadUnliftIO m,
+                   MonadGit s (t m), MonadTrans t, MonadUnliftIO (t m))
                 => RepositoryFactory (t m) m s
                 -> Maybe (CommitOid r)
                 -> Text

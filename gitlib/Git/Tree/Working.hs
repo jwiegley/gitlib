@@ -2,11 +2,12 @@
 module Git.Tree.Working where
 
 import           Control.Applicative
-import           Control.Concurrent.Async.Lifted
+-- import           Control.Concurrent.Async.Lifted
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class (MonadIO(..))
-import           Control.Monad.Trans.Control
+import           Control.Monad.IO.Unlift
+-- import           Control.Monad.Trans.Control
 import qualified Data.ByteString as B (readFile)
 import qualified Data.ByteString.Char8 as B8
 import           Data.Foldable (foldl')
@@ -18,6 +19,7 @@ import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
 import           Prelude hiding (log)
+import           UnliftIO.Async
 import           System.FilePath.Posix
 #ifndef mingw32_HOST_OS
 import           System.Posix.Files
@@ -34,7 +36,7 @@ data FileEntry m = FileEntry
 
 type FileTree m = HashMap TreeFilePath (FileEntry m)
 
-readFileTree :: (MonadBaseControl IO m, MonadIO m, MonadGit r m)
+readFileTree :: (MonadGit r m, MonadUnliftIO m)
              => RefName
              -> FilePath
              -> Bool
@@ -47,7 +49,7 @@ readFileTree ref wdir getHash = do
             tr <- lookupTree . commitTree =<< lookupCommit (Tagged h')
             readFileTree' tr wdir getHash
 
-readFileTree' :: (MonadBaseControl IO m, MonadIO m, MonadGit r m)
+readFileTree' :: (MonadGit r m, MonadUnliftIO m)
               => Tree r -> FilePath -> Bool
               -> m (FileTree r)
 readFileTree' tr wdir getHash = do

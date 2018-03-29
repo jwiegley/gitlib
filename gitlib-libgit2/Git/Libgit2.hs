@@ -59,14 +59,12 @@ import           Bindings.Libgit2
 import           Conduit
 import           Control.Applicative
 import           Control.Concurrent (threadDelay)
-import           Control.Concurrent.Async.Lifted
 import           Control.Concurrent.STM
---import           Control.Exception.Lifted
+import           UnliftIO.Async
 import           Control.Monad hiding (forM, forM_, mapM, mapM_, sequence)
 import           Control.Monad.Catch
 import           Control.Monad.Loops
 import           Control.Monad.Reader.Class
-import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.IO.Unlift
@@ -183,8 +181,7 @@ class HasLgRepo m where
 instance Monad m => HasLgRepo (ReaderT LgRepo m) where
   getRepository = ask
 
-instance (Applicative m, MonadExcept m,
-          MonadBaseControl IO m, MonadUnliftIO m, MonadIO m, HasLgRepo m)
+instance (Applicative m, MonadExcept m, MonadUnliftIO m, HasLgRepo m)
          => Git.MonadGit LgRepo m where
     type Oid LgRepo = OidPtr
     data Tree LgRepo =
@@ -350,14 +347,14 @@ lgTreeOid (LgTree (Just tree)) = liftIO $ do
     ftoid <- coidPtrToOid toid
     return $ Tagged (mkOid ftoid)
 
-gatherFrom' :: (MonadIO m, MonadBaseControl IO m, MonadExcept m)
+gatherFrom' :: (MonadExcept m, MonadUnliftIO m)
            => Int                -- ^ Size of the queue to create
            -> (TBQueue o -> m ()) -- ^ Action that generates output values
            -> Producer m o
 gatherFrom' size scatter = do
     chan   <- liftIO $ newTBQueueIO size
     worker <- lift $ async (scatter chan)
-    lift . restoreM =<< gather worker chan
+    gather worker chan
   where
     gather worker chan = do
         (xs, mres) <- liftIO $ atomically $ do
@@ -1295,14 +1292,14 @@ lgBuildPackFile dir oids = do
 lift_ :: (Monad m, Functor (t m), MonadTrans t) => m a -> t m ()
 lift_ = void . lift
 
-lgBuildPackIndex :: (MonadIO m, MonadBaseControl IO m)
+lgBuildPackIndex :: MonadUnliftIO m
                  => FilePath -> BL.ByteString -> m (Text, FilePath, FilePath)
 lgBuildPackIndex dir bytes = do
     sha <- go dir bytes
     return (sha, dir </> ("pack-" <> unpack sha <> ".pack"),
                  dir </> ("pack-" <> unpack sha <> ".idx"))
   where
-    go dir bytes = control $ \run -> alloca $ \idxPtrPtr -> runResourceT $ do
+    go dir bytes = withRunInIO $ \run -> alloca $ \idxPtrPtr -> runResourceT $ do
         lift_ . run $ lgDebug "Allocate a new indexer stream"
         (_,idxPtr) <- flip allocate c'git_indexer_stream_free $
             withCString dir $ \dirStr -> do
@@ -1365,7 +1362,7 @@ lgCopyPackFile packFile = do
     -- anything about the S3 backend.  As far as Libgit2 is concerned, the S3
     -- backend is just a black box with no special properties.
     repo <- getRepository
-    control $ \run -> withForeignPtr (repoObj repo) $ \repoPtr ->
+    withRunInIO $ \run -> withForeignPtr (repoObj repo) $ \repoPtr ->
         alloca $ \odbPtrPtr ->
         alloca $ \statsPtr ->
         alloca $ \writepackPtrPtr -> do
@@ -1407,7 +1404,7 @@ lgCopyPackFile packFile = do
         checkResult r "c'git_odb_writepack'commit failed"
 
 lgLoadPackFileInMemory
-    :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
+    :: (MonadIO m, MonadExcept m)
     => FilePath
     -> Ptr (Ptr C'git_odb_backend)
     -> Ptr (Ptr C'git_odb)
@@ -1438,22 +1435,22 @@ lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr = do
 
     return odbPtr
 
-lgOpenPackFile :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
+lgOpenPackFile :: (MonadExcept m, MonadUnliftIO m)
                => FilePath -> m (Ptr C'git_odb)
-lgOpenPackFile idxPath = control $ \run ->
+lgOpenPackFile idxPath = withRunInIO $ \run ->
     alloca $ \odbPtrPtr ->
     alloca $ \backendPtrPtr -> run $
         lgLoadPackFileInMemory idxPath backendPtrPtr odbPtrPtr
 
-lgClosePackFile :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
+lgClosePackFile :: (MonadIO m, MonadExcept m)
                => Ptr C'git_odb -> m ()
 lgClosePackFile = liftIO . c'git_odb_free
 
-lgWithPackFile :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
+lgWithPackFile :: (MonadExcept m, MonadUnliftIO m)
                => FilePath -> (Ptr C'git_odb -> m a) -> m a
 lgWithPackFile idxPath = bracket (lgOpenPackFile idxPath) lgClosePackFile
 
-lgReadFromPack :: (MonadBaseControl IO m, MonadIO m, MonadExcept m)
+lgReadFromPack :: (MonadIO m, MonadExcept m)
                => Ptr C'git_odb -> Git.SHA -> Bool
                -> m (Maybe (C'git_otype, CSize, ByteString))
 lgReadFromPack odbPtr sha metadataOnly = liftIO $ do
