@@ -6,4 +6,3 @@ fpbuild/
 /vendor/
 result
 tags
-*.nix
