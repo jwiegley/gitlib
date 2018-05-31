@@ -1,0 +1,24 @@
+language: nix
+
+sudo: true
+
+git:
+  depth: 1
+
+env:
+  global:
+  matrix:
+    - GHCVERSION=ghc802
+    - GHCVERSION=ghc822
+    - GHCVERSION=ghc842
+
+matrix:
+  allow_failures:
+  exclude:
+
+script:
+  - (cd gitlib ; nix-build --argstr compiler $GHCVERSION)
+
+branches:
+  only:
+    - master
