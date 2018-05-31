@@ -1,5 +1,5 @@
 Name:          gitlib
-Version:       3.1.1
+Version:       3.1.2
 Synopsis:      API library for working with Git repositories
 License-file:  LICENSE
 License:       MIT
@@ -29,7 +29,7 @@ Source-repository head
 --     Type:    exitcode-stdio-1.0
 --     Main-is: Doctest.hs
 --     Hs-source-dirs: test
---     Build-depends:      
+--     Build-depends:
 --           base
 --         , directory    >= 1.0
 --         , doctest      >= 0.8
@@ -82,7 +82,7 @@ Library
         Git.Types
         Git.Utils
         Git.Working
-    default-extensions: 
+    default-extensions:
         BangPatterns
         ConstraintKinds
         DeriveDataTypeable
