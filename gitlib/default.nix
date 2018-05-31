@@ -1,20 +1,30 @@
-{ mkDerivation, base, base16-bytestring, bytestring, conduit
-, conduit-combinators, containers, directory, exceptions, filepath
-, hashable, mtl, resourcet, semigroups, stdenv, tagged, text, time
-, transformers, unix, unliftio, unliftio-core, unordered-containers
-, ...
+{ compiler    ? "ghc822" # "ghc842" also works
+, doBenchmark ? false
+, doTracing   ? false
+, doStrict    ? false
+, rev         ? "95b1827682dc30ff1ccffb4f46c197289cea3e1c"
+, sha256      ? "0v5s2918a04h6h1m18pzp36l5f41rhkipwqgysamsz7h0q4zwhwz"
+, pkgs        ? import (builtins.fetchTarball {
+    url = "https://github.com/NixOS/nixpkgs/archive/${rev}.tar.gz";
+    inherit sha256; }) {
+    config.allowUnfree = true;
+    config.allowBroken = false;
+  }
+, returnShellEnv ? pkgs.lib.inNixShell
+, mkDerivation ? null
 }:
-mkDerivation {
-  pname = "gitlib";
-  version = "3.1.2";
-  src = ./.;
-  libraryHaskellDepends = [
-    base base16-bytestring bytestring conduit conduit-combinators
-    containers directory exceptions filepath hashable mtl resourcet
-    semigroups tagged text time transformers unix unliftio
-    unliftio-core unordered-containers
-  ];
-  homepage = "https://github.com/jwiegley/gitlib";
-  description = "API library for working with Git repositories";
-  license = stdenv.lib.licenses.mit;
+
+let haskellPackages = pkgs.haskell.packages.${compiler};
+
+in haskellPackages.developPackage {
+  root = ./.;
+
+  source-overrides = {
+  };
+
+  modifier = drv: pkgs.haskell.lib.overrideCabal drv (attrs: {
+    inherit doBenchmark;
+  });
+
+  inherit returnShellEnv;
 }
