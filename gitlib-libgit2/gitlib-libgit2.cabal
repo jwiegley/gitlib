@@ -1,5 +1,5 @@
 Name:                gitlib-libgit2
-Version:       3.1.1
+Version:             3.1.2
 Synopsis:            Libgit2 backend for gitlib
 License-file:        LICENSE
 License:             MIT
@@ -21,11 +21,11 @@ Test-suite smoke
     Type: exitcode-stdio-1.0
     Main-is: Smoke.hs
     Hs-source-dirs: test
-    Build-depends: 
+    Build-depends:
           base >=3
         , gitlib             >= 3.1.1
         , gitlib-test        >= 3.0.0
-        , gitlib-libgit2     >= 3.1.1
+        , gitlib-libgit2
         , HUnit              >= 1.2.5
         , hspec              >= 1.4.4
         , hspec-expectations >= 0.3
