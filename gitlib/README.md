@@ -103,7 +103,7 @@ Finally, we're ready to make our awesome commit! Here it goes:
         case maybeObjID of
             Just commitID -> do
                 headCommit <- lookupCommit (Tagged commitID)
-                mutatedTreeId <- mutateTreeOid (commitTree headCommit) (putBlob "newfile.txt" blobID)
+                mutatedTreeId <- mutateTreeOid (commitTree headCommit) (putBlob "README" blobID)
                 now <- liftIO getZonedTime
                 let sig = Signature { signatureName = "Nobody"
                                     , signatureEmail = "nobody@example.com"
