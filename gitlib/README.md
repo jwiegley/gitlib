@@ -6,11 +6,10 @@ allow for a more functional style of interacting with Git objects.
 
 Basic Work-flow
 --------------
-TODO: Make the example actually work.
 
-Unfortunately, [libgit2] is rather spotty on its documentation of how to
-do typical things, like creating new commits containing actual changes.
-With `gitlib`, it's even easier, since we can take a high-level
+Unfortunately, [libgit2] is rather spotty on its documentation of how
+to do typical things, like creating new commits containing actual
+changes.  With `gitlib`, it's easier, since we can take a high-level
 approach. Nevertheless, a tutorial is instructive.
 
 [libgit2]: https://libgit2.github.com
@@ -23,9 +22,10 @@ First things first&nbsp;&mdash; import the library
 {-# Language OverloadedStrings #-}
 
 import Git
-import Data.ByteString (ByteString)
-import Data.Maybe
-import Data.Text.Encoding (encodeUtf8)
+import Git.Libgit2
+import Control.Monad.IO.Class
+import Data.Tagged
+import Data.Time
 import qualified Data.Text as T
 ```
 
@@ -40,10 +40,10 @@ main = do
                                      , repoIsBare = False
                                      , repoAutoCreate = False
                                      }
-    repo <- openRepository repoOpts False
+    withRepository' lgFactory repoOpts $ do
 ```
 
-You can see above that `openRepository` is a versatile action, which
+You can see above that `withRepository'` is a versatile action, which
 can handle a working directory separate from the `.git` directory, or a
 bare repository; it can even automatically create a missing repository,
 if you need that.
@@ -77,70 +77,47 @@ working directory directly (i.e. to save the file), we'll use an
 in-memory `blob`, to keep things simple.
 
 [blob]: https://github.com/jwiegley/gitlib/tree/master/gitlib/Git/Types.hs#L168
-[Signatures]: https://github.com/jwiegley/gitlib/tree/master/gitlib/Git/Types.hs#L253
+[Signatures]: https://github.com/jwiegley/gitlib/tree/master/gitlib/Git/Types.hs#L241
 
 ```haskell
-let contents :: T.Text
-    contents = "Welcome to my shiney new project"
-
-    bytes :: ByteString
-    bytes = encodeUtf8 contents
-
-    buffer :: BlobContents
-    buffer = BlobString bytes
+        let contents :: T.Text
+            contents = "Welcome to my shiny new project"
+        blobID <- createBlobUtf8 contents
 ```
 
-Notice the layers here. First, we start off with a `Text` string,
+Notice the layers here. We start off with a `Text` string,
 an abstract object which is not tied to any particular encoding.
 (The fact that it maintains an internal encoding is irrelevant: as
 long as it can re-encode its contents faithfully, it doesn't matter).
 
-Then, we have a `ByteString`, holding the raw bitstream of the
-would-be file. For this, we use the only [sane] [encoding] in the
-known universe: `UTF-8`. Finally, we wrap up our `ByteString` in a
-`BlobContents`, which has several constructors with various
-performance characteristics.
+Then, we use the only [sane] [encoding] in the
+known universe: `UTF-8` to create a blob and obtain a blob ID.
 
 [sane]: http://utf8everywhere.org
 [encoding]: http://htmlpurifier.org/docs/enduser-utf8.html#whyutf8
 
-Now, we register our new blob in the repository, and add in into the
-new `tree`:
+Finally, we're ready to make our awesome commit! Here it goes:
 
 ```haskell
-blobID <- createBlob buffer
-putEntry "README" BlobEntry { blobEntryOid = blobID
-                            , blobEntryKind = PlainBlob
-                            }
+        maybeObjID <- resolveReference "HEAD"
+        case maybeObjID of
+            Just commitID -> do
+                headCommit <- lookupCommit (Tagged commitID)
+                mutatedTreeId <- mutateTreeOid (commitTree headCommit) (putBlob "README" blobID)
+                now <- liftIO getZonedTime
+                let sig = Signature { signatureName = "Nobody"
+                                    , signatureEmail = "nobody@example.com"
+                                    , signatureWhen = now
+                                    }
+                newCommit <- createCommit [commitOid headCommit] mutatedTreeId sig sig "Commit message\n" Nothing
+                updateReference "refs/heads/master" (RefObj (untag (commitOid newCommit)))
+                pure ()
+            _ ->
+                liftIO (print "Couldn't resolve HEAD")
 ```
 
-Since this is the only file we're changing in the `tree`, we go
-ahead and write it out (i.e. register it in the repository)
-
-```haskell
-(_, tree) <- writeTrueeBuilder =<< getBuilder
-```
-
-Finally, we're ready to make our awesome commit! We'll go ahead and
-Here it goes:
-
-```haskell
-now <- getCurrentTime
-let sig = Signature { signatureName = "Nobody"
-                    , signatureEmail = "nobody@example.com"
-                    , signatureWhen = now
-                    }
-    commitMessage :: T.Text
-    commitMessage = "Added new README\n\nIt's about time!"
-
-mRef <- lookupReference "HEAD"
-let ref = fromMaybe (error "Invalid ref: HEAD") mRef
-
-mCid <- referenceToOid ref
-let head = fromMaybe (error "Something bad happened") mCid
-
-commit <- createCommit [head] tree sig sig commitMessage
-```
+Note that it's a separate step to update our master branch with the
+new commit.
 
 MonadGit
 --------
