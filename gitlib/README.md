@@ -119,6 +119,12 @@ Finally, we're ready to make our awesome commit! Here it goes:
 Note that it's a separate step to update our master branch with the
 new commit.
 
+
+Example Projects
+-----------
+https://github.com/nomeata/gipeda
+
+
 MonadGit
 --------
 TODO: Explain the interface a bit, the reason for the phantom variable,
