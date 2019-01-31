@@ -352,7 +352,7 @@ gatherFrom' :: (MonadExcept m, MonadUnliftIO m)
            -> (TBQueue o -> m ()) -- ^ Action that generates output values
            -> Producer m o
 gatherFrom' size scatter = do
-    chan   <- liftIO $ newTBQueueIO size
+    chan   <- liftIO $ newTBQueueIO (fromIntegral size)
     worker <- lift $ async (scatter chan)
     gather worker chan
   where
