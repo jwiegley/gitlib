@@ -15,6 +15,7 @@ import           Conduit
 import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
+import           Control.Monad.Fail
 import           Control.Monad.IO.Unlift
 import qualified Data.ByteString.Lazy as BL
 import           Data.List (sort)
@@ -34,7 +35,7 @@ sampleCommit :: MonadGit r m => TreeOid r -> Signature -> m (Commit r)
 sampleCommit tr sig =
     createCommit [] tr sig sig "Sample log message.\n" Nothing
 
-smokeTestSpec :: (MonadGit r m, MonadUnliftIO m, MonadThrow m,
+smokeTestSpec :: (MonadGit r m, MonadUnliftIO m, MonadThrow m, MonadFail m,
                   MonadGit s n, MonadUnliftIO n, MonadThrow n)
               => RepositoryFactory m IO r
               -> RepositoryFactory n m s
