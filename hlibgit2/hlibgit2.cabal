@@ -6,7 +6,7 @@ License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
 Maintainer:          johnw@newartisans.com
-Build-Type:          Custom
+Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
 
