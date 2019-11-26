@@ -96,6 +96,8 @@ import Bindings.Libgit2.Common
 #stoptype
 {- typedef struct git_reference git_reference; -}
 #opaque_t git_reference
+{- typedef struct git_status_list git_status_list; -}
+#opaque_t git_status_list
 {- typedef enum {
             GIT_REF_INVALID = 0,
             GIT_REF_OID = 1,

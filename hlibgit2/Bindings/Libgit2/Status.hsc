@@ -6,6 +6,7 @@ import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common
+import Bindings.Libgit2.Diff
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Strarray
 {- typedef enum {
@@ -81,3 +82,13 @@ import Bindings.Libgit2.Strarray
 #ccall git_status_foreach_ext , Ptr <git_repository> -> Ptr <git_status_options> -> <git_status_cb> -> Ptr () -> IO (CInt)
 #ccall git_status_file , Ptr CUInt -> Ptr <git_repository> -> CString -> IO (CInt)
 #ccall git_status_should_ignore , Ptr CInt -> Ptr <git_repository> -> CString -> IO (CInt)
+#starttype git_status_byindex
+#field status , <git_status_t>
+#field head_to_index , Ptr <git_diff_delta>
+#field index_to_workdir , <git_diff_delta>
+#stoptype
+#ccall git_status_byindex , Ptr <git_status_list> -> CSize -> Ptr <git_status_byindex>
+#ccall git_status_list_entrycount , Ptr <git_status_list> -> IO CSize
+#ccall git_status_list_free , Ptr <git_status_list> -> IO ()
+#ccall git_status_list_new , Ptr (Ptr <git_status_list>) -> Ptr <git_repository> -> Ptr <git_status_options> -> IO CInt
+#ccall git_status_options_init , Ptr <git_status_options> -> CUInt -> IO CInt
