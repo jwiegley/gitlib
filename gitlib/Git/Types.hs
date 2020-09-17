@@ -6,6 +6,7 @@
 module Git.Types where
 
 import           Conduit
+import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Fail (MonadFail)
@@ -16,6 +17,7 @@ import qualified Data.ByteString.Lazy as BL
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
 import           Data.Map (Map)
+import           Data.Semigroup
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
