@@ -6,7 +6,6 @@
 module Git.Types where
 
 import           Conduit
-import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.Trans.State
@@ -16,7 +15,6 @@ import qualified Data.ByteString.Lazy as BL
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
 import           Data.Map (Map)
-import           Data.Semigroup
 import           Data.Tagged
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -137,7 +135,7 @@ newtype SHA = SHA { getSHA :: ByteString } deriving (Eq, Ord, Read)
 shaToText :: SHA -> Text
 shaToText (SHA bs) = T.decodeUtf8 (B16.encode bs)
 
-textToSha :: Monad m => Text -> m SHA
+textToSha :: MonadFail m => Text -> m SHA
 textToSha t =
     case B16.decode $ T.encodeUtf8 t of
         (bs, "") -> return (SHA bs)
