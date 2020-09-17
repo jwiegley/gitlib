@@ -7,7 +7,7 @@ module Git.Types where
 
 import           Conduit
 import           Control.Exception
-import           Control.Monad
+import           Control.Monad ( (<=<), forM_ )
 import           Control.Monad.Fail
 import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
