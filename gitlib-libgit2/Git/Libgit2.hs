@@ -45,6 +45,7 @@ module Git.Libgit2
        , lgWithPackFile
        , lgCopyPackFile
        , lgDiffContentsWithTree
+       , lgDiffTreeToTree
        , lgWrap
        , oidToSha
        , shaToCOid
@@ -69,6 +70,7 @@ import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.IO.Unlift
 import           Data.Bits ((.|.), (.&.))
+import           Data.Bool (bool)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -1551,5 +1553,63 @@ startupLgBackend = liftIO (void c'git_threads_init)
 
 shutdownLgBackend :: MonadIO m => m ()
 shutdownLgBackend = liftIO c'git_threads_shutdown
+
+type FileCallback = Ptr C'git_diff_delta
+                 -> CFloat
+                 -> Ptr ()
+                 -> IO CInt
+
+type HunkCallback = Ptr C'git_diff_delta
+                 -> Ptr C'git_diff_range
+                 -> CString
+                 -> CSize
+                 -> Ptr ()
+                 -> IO CInt
+
+type DataCallback = Ptr C'git_diff_delta
+                 -> Ptr C'git_diff_range
+                 -> CChar
+                 -> CString
+                 -> CSize
+                 -> Ptr ()
+                 -> IO CInt
+
+lgDiffTreeToTree
+    :: (MonadIO m, MonadLg m, HasLgRepo m)
+    => FileCallback
+    -> HunkCallback
+    -> DataCallback
+    -> Maybe Tree
+    -> Maybe Tree
+    -> m ()
+lgDiffTreeToTree file_cb hunk_cb data_cb oldTree newTree = do
+    repo <- getRepository
+    liftIO $ withForeignPtr (repoObj repo) $ \repoPtr -> do
+        maybeWithFPtr oldTree $ \ptr1 ->
+            maybeWithFPtr newTree $ \ptr2 ->
+                alloca $ runResourceT . treeToTree repoPtr ptr1 ptr2
+  where
+    maybeWithFPtr :: Maybe Tree -> (Ptr C'git_tree -> IO b) -> IO b
+    maybeWithFPtr Nothing io = io nullPtr
+    maybeWithFPtr (Just (LgTree (Just ptr))) io = withForeignPtr ptr io
+    maybeWithFPtr (Just (LgTree Nothing)) _ =
+        throwM $ Git.DiffTreeToTreeFailed "Cannot diff against an empty tree"
+
+    treeToTree :: Ptr C'git_repository
+        -> Ptr C'git_tree
+        -> Ptr C'git_tree
+        -> Ptr (Ptr C'git_diff_list)
+        -> ResourceT IO ()
+    treeToTree repoPtr ptr1 ptr2 diffPtrPtr = do
+        r <- liftIO $ c'git_diff_tree_to_tree diffPtrPtr repoPtr ptr1 ptr2 nullPtr
+        when (r < 0) . throwM $ Git.DiffTreeToTreeFailed "git_diff_tree_to_tree failed."
+
+        (_, fcb) <- allocate (mk'git_diff_file_cb file_cb) freeHaskellFunPtr
+        (_, hcb) <- allocate (mk'git_diff_hunk_cb hunk_cb) freeHaskellFunPtr
+        (_, dcb) <- allocate (mk'git_diff_data_cb data_cb) freeHaskellFunPtr
+        diffPtr <- liftIO . peek $ diffPtrPtr
+        r' <- liftIO $ c'git_diff_foreach diffPtr fcb hcb dcb nullPtr
+        when (r' < 0) . throwM $ Git.DiffTreeToTreeFailed "git_diff_foreach failed."
+        liftIO . c'git_diff_list_free $ diffPtr
 
 -- Libgit2.hs
