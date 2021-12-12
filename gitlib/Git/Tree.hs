@@ -4,7 +4,6 @@ import           Conduit
 import           Control.Monad
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import           Data.Monoid
 import           Data.Tagged
 import           Data.Text (Text)
 import           Git.Blob
