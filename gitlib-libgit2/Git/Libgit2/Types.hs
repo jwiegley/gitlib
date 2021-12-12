@@ -9,9 +9,7 @@
 module Git.Libgit2.Types where
 
 import           Bindings.Libgit2
-import           Control.Applicative
 import           Control.Monad.Catch
-import           Control.Monad.IO.Class
 import           Control.Monad.IO.Unlift
 import           Data.IORef
 import           Foreign.ForeignPtr
