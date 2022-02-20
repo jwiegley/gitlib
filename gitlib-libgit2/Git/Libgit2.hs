@@ -67,7 +67,6 @@ import           Control.Monad.Catch
 import           Control.Monad.Loops
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 import           Control.Monad.Trans.Resource
-import           Control.Monad.IO.Unlift
 import           Data.Bits ((.|.), (.&.))
 import           Data.Bool (bool)
 import           Data.ByteString (ByteString)
@@ -103,9 +102,8 @@ import           Foreign.Storable
 import qualified Git
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
-import           Language.Haskell.TH.Syntax (Loc(..))
 
-import           Prelude hiding (mapM, mapM_, sequence, catch)
+import           Prelude hiding (mapM, mapM_, sequence)
 import           System.Directory
 import           System.FilePath.Posix
 import           System.IO (openBinaryTempFile, hClose)
@@ -351,7 +349,7 @@ lgTreeOid (LgTree (Just tree)) = liftIO $ do
 gatherFrom' :: (MonadExcept m, MonadUnliftIO m)
            => Int                -- ^ Size of the queue to create
            -> (TBQueue o -> m ()) -- ^ Action that generates output values
-           -> Producer m o
+           -> ConduitT i o m ()
 gatherFrom' size scatter = do
     chan   <- liftIO $ newTBQueueIO (fromIntegral size)
     worker <- lift $ async (scatter chan)
@@ -371,7 +369,7 @@ gatherFrom' size scatter = do
 lgSourceTreeEntries
     :: (MonadLg m, HasLgRepo m)
     => Tree
-    -> Producer m (Git.TreeFilePath, TreeEntry)
+    -> ConduitT i (Git.TreeFilePath, TreeEntry) m ()
 lgSourceTreeEntries (LgTree Nothing) = return ()
 lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
     liftIO $ withForeignPtr tree $ \tr -> do
@@ -708,7 +706,7 @@ lgForEachObject odbPtr f payload =
 
 lgSourceObjects :: (MonadLg m, HasLgRepo m)
                 => Maybe CommitOid -> CommitOid -> Bool
-                -> Producer m ObjectOid
+                -> ConduitT i ObjectOid m ()
 lgSourceObjects mhave need alsoTrees = do
     repo   <- lift getRepository
     walker <- liftIO $ alloca $ \pptr -> do
@@ -940,7 +938,7 @@ flagsToInt flags = (if listFlagOid flags      then 1 else 0)
                  + (if listFlagHasPeel flags  then 8 else 0)
 
 
-lgSourceRefs :: (MonadLg m, HasLgRepo m) => Producer m Git.RefName
+lgSourceRefs :: (MonadLg m, HasLgRepo m) => ConduitT i Git.RefName m ()
 lgSourceRefs =
     gatherFrom' 16 $ \queue -> do
         repo <- getRepository
@@ -1033,10 +1031,11 @@ lgThrow f = do
 
 lgDiffContentsWithTree
     :: MonadLg m
-    => Source (ReaderT LgRepo m)
+    => ConduitM ()
         (Either Git.TreeFilePath (Either Git.SHA ByteString))
+        (ReaderT LgRepo m) ()
     -> Tree
-    -> Producer (ReaderT LgRepo m) ByteString
+    -> ConduitT i ByteString (ReaderT LgRepo m) ()
 lgDiffContentsWithTree _contents (LgTree Nothing) =
     liftIO $ throwM $
         Git.DiffTreeToIndexFailed "Cannot diff against an empty tree"

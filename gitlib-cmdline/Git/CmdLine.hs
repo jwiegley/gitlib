@@ -372,7 +372,7 @@ cliExistsObject (shaToText -> sha) = do
 
 cliSourceObjects :: MonadCli m
                  => Maybe (CommitOid CliRepo) -> CommitOid CliRepo -> Bool
-                 -> Producer (ReaderT CliRepo m) (ObjectOid CliRepo)
+                 -> ConduitT i (ObjectOid CliRepo) (ReaderT CliRepo m ())
 cliSourceObjects mhave need alsoTrees = do
     shas <- lift $ doRunGit run
             ([ "--no-pager", "log", "--format=%H %T" ]
@@ -496,7 +496,7 @@ cliTreeEntry tree fp = do
 
 cliSourceTreeEntries :: MonadCli m
                      => Tree CliRepo
-                     -> Producer (ReaderT CliRepo m) (TreeFilePath, TreeEntry CliRepo)
+                     -> ConduitT i (TreeFilePath, TreeEntry CliRepo) (ReaderT CliRepo m ())
 cliSourceTreeEntries tree = do
     contents <- lift $ do
         toid <- treeOid tree
@@ -633,7 +633,7 @@ cliUpdateRef refName (RefSymbolic targetName) =
 cliDeleteRef :: MonadCli m => Text -> ReaderT CliRepo m ()
 cliDeleteRef refName = runGit_ ["update-ref", "-d", fromStrict refName]
 
-cliSourceRefs :: MonadCli m => Producer (ReaderT CliRepo m) Text
+cliSourceRefs :: MonadCli m => ConduitT i Text (ReaderT CliRepo m ())
 cliSourceRefs = do
     mxs <- lift $ cliShowRef Nothing
     yieldMany $ case mxs of
