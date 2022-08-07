@@ -16,6 +16,7 @@ import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as BL
 import           Data.HashMap.Strict (HashMap)
 import           Data.Hashable
+import           Data.Kind (Type)
 import           Data.Map (Map)
 import           Data.Semigroup
 import           Data.Tagged
@@ -42,9 +43,9 @@ type TreeFilePath  = RawFilePath
 class (Applicative m, Monad m, MonadThrow m,
        IsOid (Oid r), Show (Oid r), Eq (Oid r), Ord (Oid r))
       => MonadGit r m | m -> r where
-    type Oid r :: *
-    data Tree r :: *
-    data Options r :: *
+    type Oid r :: Type
+    data Tree r :: Type
+    data Options r :: Type
 
     facts :: m RepositoryFacts
     parseOid :: Text -> m (Oid r)
@@ -295,7 +296,7 @@ untagObjOid (CommitObjOid oid) = untag oid
 untagObjOid (TagObjOid oid)    = untag oid
 
 {- $references -}
-data RefTarget (r :: *) = RefObj !(Oid r) | RefSymbolic !RefName
+data RefTarget (r :: Type) = RefObj !(Oid r) | RefSymbolic !RefName
 
 -- instance Show (RefTarget r) where
 --     show (RefObj oid) = "RefObj#" ++ T.unpack (renderOid oid)
