@@ -64,8 +64,7 @@ import           UnliftIO.Async
 import           Control.Monad hiding (forM, forM_, mapM, mapM_, sequence)
 import           Control.Monad.Catch
 import           Control.Monad.Loops
-import           Control.Monad.Reader.Class
-import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
+import           Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 import           Control.Monad.Trans.Resource
 import           Control.Monad.IO.Unlift
 import           Data.Bits ((.|.), (.&.))
