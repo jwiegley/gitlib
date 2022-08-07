@@ -6,3 +6,4 @@ fpbuild/
 /vendor/
 result
 tags
+.stack-work
