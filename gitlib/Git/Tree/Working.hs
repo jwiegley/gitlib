@@ -5,7 +5,6 @@ import           Control.Applicative
 -- import           Control.Concurrent.Async.Lifted
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class (MonadIO(..))
 import           Control.Monad.IO.Unlift
 -- import           Control.Monad.Trans.Control
 import qualified Data.ByteString as B (readFile)

@@ -36,7 +36,6 @@ import           Control.Monad.Trans.State
 import qualified Data.ByteString as B
 import           Data.Char
 import qualified Data.HashMap.Strict as HashMap
-import           Data.Monoid
 import           Data.Text (Text)
 import           Data.Word
 import           Git.Types
