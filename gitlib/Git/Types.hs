@@ -399,6 +399,7 @@ data GitException
     | DiffBlobFailed Text
     | DiffPrintToPatchFailed Text
     | DiffTreeToIndexFailed Text
+    | DiffTreeToTreeFailed Text
     | IndexAddFailed TreeFilePath Text
     | IndexCreateFailed Text
     | PathEncodingError Text
