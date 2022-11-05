@@ -380,7 +380,7 @@ hitWriteTree entMap = do
     fmap Tagged $ liftIO $ DGS.setObject g $ DGO.ObjTree $ DGT.Tree ents
 
 
-hitSourceRefs :: MonadHit m => Producer (ReaderT HitRepo m) Text
+hitSourceRefs :: MonadHit m => ConduitT i Text (ReaderT HitRepo m ())
 hitSourceRefs = do
     g <- lift $ hitGit <$> getRepository
     -- TODO: this produces branches & tags, but not remotes
@@ -394,7 +394,7 @@ hitSourceRefs = do
 
 hitSourceTreeEntries :: MonadHit m
                      => Tree HitRepo
-                     -> Producer (ReaderT HitRepo m) TreePathEntry
+                     -> ConduitT i TreePathEntry (ReaderT HitRepo m ())
 hitSourceTreeEntries (HitTree oid) = do
     g <- lift $ hitGit <$> getRepository
     ents <- liftIO $ readTreeRecurse "" (untag oid) g
