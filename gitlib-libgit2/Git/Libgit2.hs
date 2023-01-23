@@ -100,6 +100,7 @@ import           Foreign.Marshal.Utils
 import           Foreign.Ptr
 import           Foreign.Storable
 import qualified Git
+import qualified Git.Types
 import           Git.Libgit2.Internal
 import           Git.Libgit2.Types
 
@@ -1591,7 +1592,7 @@ lgDiffTreeToTree file_cb hunk_cb data_cb oldTree newTree = do
     maybeWithFPtr Nothing io = io nullPtr
     maybeWithFPtr (Just (LgTree (Just ptr))) io = withForeignPtr ptr io
     maybeWithFPtr (Just (LgTree Nothing)) _ =
-        throwM $ Git.DiffTreeToTreeFailed "Cannot diff against an empty tree"
+        throwM $ Git.Types.DiffTreeToTreeFailed "Cannot diff against an empty tree"
 
     treeToTree :: Ptr C'git_repository
         -> Ptr C'git_tree
@@ -1600,14 +1601,14 @@ lgDiffTreeToTree file_cb hunk_cb data_cb oldTree newTree = do
         -> ResourceT IO ()
     treeToTree repoPtr ptr1 ptr2 diffPtrPtr = do
         r <- liftIO $ c'git_diff_tree_to_tree diffPtrPtr repoPtr ptr1 ptr2 nullPtr
-        when (r < 0) . throwM $ Git.DiffTreeToTreeFailed "git_diff_tree_to_tree failed."
+        when (r < 0) . throwM $ Git.Types.DiffTreeToTreeFailed "git_diff_tree_to_tree failed."
 
         (_, fcb) <- allocate (mk'git_diff_file_cb file_cb) freeHaskellFunPtr
         (_, hcb) <- allocate (mk'git_diff_hunk_cb hunk_cb) freeHaskellFunPtr
         (_, dcb) <- allocate (mk'git_diff_data_cb data_cb) freeHaskellFunPtr
         diffPtr <- liftIO . peek $ diffPtrPtr
         r' <- liftIO $ c'git_diff_foreach diffPtr fcb hcb dcb nullPtr
-        when (r' < 0) . throwM $ Git.DiffTreeToTreeFailed "git_diff_foreach failed."
+        when (r' < 0) . throwM $ Git.Types.DiffTreeToTreeFailed "git_diff_foreach failed."
         liftIO . c'git_diff_list_free $ diffPtr
 
 -- Libgit2.hs
