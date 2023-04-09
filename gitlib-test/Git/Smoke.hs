@@ -291,6 +291,13 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
                               , "One"
                               , "Two"
                               ]
+      paths <- map fst <$> listTreeEntries False tree'
+      liftIO $ sort paths @?= [ "Files"
+                              , "Five"
+                              , "More"
+                              , "One"
+                              , "Two"
+                              ]
 
   treeit "adds a file" pr
       [ Bl "one"
