@@ -1049,7 +1049,7 @@ lgDiffContentsWithTree contents tree = do
   where
     -- generateDiff :: MonadLg m => LgRepo -> TBQueue ByteString -> m ()
     generateDiff repo chan = do
-        entries   <- M.fromList <$> Git.listTreeEntries tree
+        entries   <- M.fromList <$> Git.listTreeEntries True tree
         paths     <- liftIO $ newIORef []
         (src, ()) <- contents $$+ return ()
 
