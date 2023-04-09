@@ -10,8 +10,10 @@ import           Git.Blob
 import           Git.Tree.Builder
 import           Git.Types
 
-listTreeEntries :: MonadGit r m => Tree r -> m [(TreeFilePath, TreeEntry r)]
-listTreeEntries tree = runConduit $ sourceTreeEntries True tree .| sinkList
+-- | Return the list of names and entries in the tree. Recurse in to all
+-- subtrees when the boolean is true.
+listTreeEntries :: MonadGit r m => Bool -> Tree r -> m [(TreeFilePath, TreeEntry r)]
+listTreeEntries recursive tree = runConduit $ sourceTreeEntries recursive tree .| sinkList
 
 copyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
               => TreeEntry r -> HashSet Text -> t m (TreeEntry s, HashSet Text)
@@ -35,7 +37,7 @@ copyTree tr needed = do
     if HashSet.member sha needed
         then do
         tree    <- lift $ lookupTree tr
-        entries <- lift $ listTreeEntries tree
+        entries <- lift $ listTreeEntries True tree
         (needed', tref) <-
             withNewTree $ foldM doCopyTreeEntry needed entries
 
