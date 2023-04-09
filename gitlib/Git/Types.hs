@@ -80,7 +80,7 @@ class (Applicative m, Monad m, MonadThrow m,
 
     treeOid   :: Tree r -> m (TreeOid r)
     treeEntry :: Tree r -> TreeFilePath -> m (Maybe (TreeEntry r))
-    sourceTreeEntries :: Tree r -> ConduitT i (TreeFilePath, TreeEntry r) m ()
+    sourceTreeEntries :: Bool -> Tree r -> ConduitT i (TreeFilePath, TreeEntry r) m ()
 
     diffContentsWithTree :: ConduitT () (Either TreeFilePath ByteString) m ()
                          -> Tree r -> ConduitT i ByteString m ()

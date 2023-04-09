@@ -11,7 +11,7 @@ import           Git.Tree.Builder
 import           Git.Types
 
 listTreeEntries :: MonadGit r m => Tree r -> m [(TreeFilePath, TreeEntry r)]
-listTreeEntries tree = runConduit $ sourceTreeEntries tree .| sinkList
+listTreeEntries tree = runConduit $ sourceTreeEntries True tree .| sinkList
 
 copyTreeEntry :: (MonadGit r m, MonadGit s (t m), MonadTrans t)
               => TreeEntry r -> HashSet Text -> t m (TreeEntry s, HashSet Text)

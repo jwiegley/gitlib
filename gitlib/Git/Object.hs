@@ -29,7 +29,7 @@ expandTreeObjects = awaitForever $ \obj -> case obj of
     TreeObjOid toid -> do
         yield $ TreeObjOid toid
         tr <- lift $ lookupTree toid
-        sourceTreeEntries tr
+        sourceTreeEntries True tr
             .| awaitForever (\ent -> case ent of
                 (_, BlobEntry oid _) -> yield $ BlobObjOid oid
                 (_, TreeEntry oid)   -> yield $ TreeObjOid oid
