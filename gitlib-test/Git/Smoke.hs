@@ -280,7 +280,7 @@ smokeTestSpec pr _pr2 = describe "Smoke tests" $ do
       createCommit [] tree sig sig "Initial commit" (Just masterRef)
 
       tree' <- lookupTree tree
-      paths <- map fst <$> listTreeEntries tree'
+      paths <- map fst <$> listTreeEntries True tree'
       liftIO $ sort paths @?= [ "Files"
                               , "Files/Three"
                               , "Five"
@@ -451,7 +451,7 @@ doTreeit label pr kinds action = withNewRepository pr fullPath $ do
             _ -> do
                 liftIO $ isBlobKind kind @?= False
                 liftIO $ throwIO (TreeitException "Entry is of unexpected kind")
-    paths <- map fst <$> listTreeEntries tree
+    paths <- map fst <$> listTreeEntries True tree
     liftIO $ sort paths @?= map kindPath kinds
   where
     fullPath  = normalize label <> ".git"
