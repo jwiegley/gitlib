@@ -495,16 +495,22 @@ cliTreeEntry tree fp = do
                 ((_,x):_) -> Just x
 
 cliSourceTreeEntries :: MonadCli m
-                     => Tree CliRepo
+                     => Bool
+                     -> Tree CliRepo
                      -> ConduitT i (TreeFilePath, TreeEntry CliRepo) (ReaderT CliRepo m ())
-cliSourceTreeEntries tree = do
+cliSourceTreeEntries recursive tree = do
     contents <- lift $ do
         toid <- treeOid tree
-        runGit [ "ls-tree", "-t", "-r", "-z"
+        runGit $ "ls-tree"
+               : "-t"
+               : consIf recursive "-r"
+               [ "-z"
                , fromStrict (renderObjOid toid)
                ]
     forM_ (L.init (TL.splitOn "\NUL" contents)) $
         yield <=< lift . cliParseLsTree
+  where
+    consIf b x xs = if b then x:xs else xs
 
 cliLookupCommit :: MonadCli m
                 => CommitOid CliRepo -> ReaderT CliRepo m (Commit CliRepo)

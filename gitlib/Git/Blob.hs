@@ -60,7 +60,7 @@ sourceTreeBlobEntries
     :: MonadGit r m
     => Tree r -> ConduitT i (TreeFilePath, BlobOid r, BlobKind) m ()
 sourceTreeBlobEntries tree =
-    sourceTreeEntries tree .| awaitForever go
+    sourceTreeEntries True tree .| awaitForever go
   where
     go (fp ,BlobEntry oid k) = yield (fp, oid, k)
     go _ = return ()

@@ -1,5 +1,5 @@
 Name:                gitlib-cmdline
-Version:             3.1.0.2
+Version:             3.2.0.2
 Synopsis:            Gitlib repository backend that uses the git command-line tool.
 Description:         Gitlib repository backend that uses the git command-line tool.
 License-file:        LICENSE

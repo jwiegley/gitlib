@@ -369,10 +369,11 @@ gatherFrom' size scatter = do
 
 lgSourceTreeEntries
     :: (MonadLg m, HasLgRepo m)
-    => Tree
+    => Bool
+    -> Tree
     -> ConduitT i (Git.TreeFilePath, TreeEntry) m ()
-lgSourceTreeEntries (LgTree Nothing) = return ()
-lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
+lgSourceTreeEntries _recursive (LgTree Nothing) = return ()
+lgSourceTreeEntries recursive (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
     liftIO $ withForeignPtr tree $ \tr -> do
         r <- bracket
                 (mk'git_treewalk_cb (callback queue))
@@ -381,6 +382,7 @@ lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
                   c'git_tree_walk tr c'GIT_TREEWALK_PRE callback nullPtr)
         when (r < 0) $ lgThrow Git.TreeWalkFailed
   where
+    result = if recursive then 0 else 1
     callback queue root te _payload = do
         fp    <- peekFilePath root
         cname <- c'git_tree_entry_name te
@@ -388,7 +390,7 @@ lgSourceTreeEntries (LgTree (Just tree)) = gatherFrom' 16 $ \queue -> do
         entry <- entryToTreeEntry te
         atomically $
             writeTBQueue queue $ name `seq` entry `seq` (name,entry)
-        return 0
+        return result
 
 lgMakeBuilder :: (MonadLg m, HasLgRepo m)
               => ForeignPtr C'git_treebuilder -> TreeBuilder m
@@ -1047,7 +1049,7 @@ lgDiffContentsWithTree contents tree = do
   where
     -- generateDiff :: MonadLg m => LgRepo -> TBQueue ByteString -> m ()
     generateDiff repo chan = do
-        entries   <- M.fromList <$> Git.listTreeEntries tree
+        entries   <- M.fromList <$> Git.listTreeEntries True tree
         paths     <- liftIO $ newIORef []
         (src, ()) <- contents $$+ return ()
 

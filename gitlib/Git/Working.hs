@@ -19,7 +19,7 @@ checkoutFiles :: (MonadGit r m, MonadResource m)
               -> Bool
               -> m ()
 checkoutFiles destPath tree decode cloneSubmodules =
-    runConduit $ sourceTreeEntries tree .| (mapM_C $ \(path, entry) ->
+    runConduit $ sourceTreeEntries True tree .| (mapM_C $ \(path, entry) ->
         case (destPath </>) <$> decode path of
             Left e ->  decodeError path e
             Right fullPath -> do
