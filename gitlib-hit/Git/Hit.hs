@@ -393,11 +393,12 @@ hitSourceRefs = do
 
 
 hitSourceTreeEntries :: MonadHit m
-                     => Tree HitRepo
+                     => Bool
+                     -> Tree HitRepo
                      -> ConduitT i TreePathEntry (ReaderT HitRepo m ())
-hitSourceTreeEntries (HitTree oid) = do
+hitSourceTreeEntries recursive (HitTree oid) = do
     g <- lift $ hitGit <$> getRepository
-    ents <- liftIO $ readTreeRecurse "" (untag oid) g
+    ents <- liftIO $ readTree recursive "" (untag oid) g
     yieldMany ents
 
 
@@ -459,14 +460,15 @@ searchTreeRef ns ref g = do
         searchTree ns tr g
 
 
-readTreeRecurse :: TreeFilePath -> DG.Ref -> DGR.Git -> IO [TreePathEntry]
-readTreeRecurse dir ref g = do
+readTree :: Bool -> TreeFilePath -> DG.Ref -> DGR.Git -> IO [TreePathEntry]
+readTree recursive dir ref g = do
     DGT.Tree ents <- getTree g ref
-    fmap concat $ mapM f $ map (gitTreePathEnt dir) ents
+    let children = map (gitTreePathEnt dir) ents
+    if recursive then fmap concat $ mapM f children else return children
   where
     f :: TreePathEntry -> IO [TreePathEntry]
     f e@(p, TreeEntry oid) = do
-        es <- readTreeRecurse (BC.append p "/") (untag oid) g
+        es <- readTree recursive (BC.append p "/") (untag oid) g
         return (e:es)
     f e = return [e]
 
