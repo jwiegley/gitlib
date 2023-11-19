@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/filter.h"
+#include <git2/filter.h>
 module Bindings.Libgit2.Filter where
 import Foreign.Ptr
 #strict_import
@@ -47,10 +47,8 @@ import Bindings.Libgit2.Buffer
 #stoptype
 {- typedef struct git_filter git_filter; -}
 #opaque_t struct git_filter
-#synonym_t git_filter , <struct git_filter>
 {- typedef struct git_filter_list git_filter_list; -}
 #opaque_t struct git_filter_list
-#synonym_t git_filter_list , <struct git_filter_list>
 #ccall git_filter_list_load , Ptr (Ptr <struct git_filter_list>) -> Ptr <struct git_repository> -> Ptr <struct git_blob> -> CString -> <git_filter_mode_t> -> CUInt -> IO CInt
 #ccall git_filter_list_load_ext , Ptr (Ptr <struct git_filter_list>) -> Ptr <struct git_repository> -> Ptr <struct git_blob> -> CString -> <git_filter_mode_t> -> Ptr <git_filter_options> -> IO CInt
 #ccall git_filter_list_contains , Ptr <struct git_filter_list> -> CString -> IO CInt

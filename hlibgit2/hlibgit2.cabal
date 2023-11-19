@@ -1,7 +1,7 @@
 Name:                hlibgit2
-Version:             0.18.0.16
+Version:             1.7.1.0
 Synopsis:            Low-level bindings to libgit2
-Description:         Bindings to libgit2 v0.18.0.
+Description:         Bindings to libgit2 v1.7.1.
 License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
@@ -10,17 +10,24 @@ Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
 
-Extra-source-files:
-  libgit2/deps/http-parser/*.h
-  libgit2/include/git2.h
-  libgit2/include/git2/*.h
-  libgit2/src/*.h
-  libgit2/src/hash/*.h
-  libgit2/src/transports/*.h
-  libgit2/src/unix/*.h
-  libgit2/src/win32/*.h
-  libgit2/src/xdiff/*.h
-  libgit2/COPYING
+-- Extra-source-files: --TODO
+--    libgit2/include/git.h
+--    libgit2/src/libgit2/git2/*.h
+--    libgit2/src/libgit2/streams/*.h
+--    libgit2/src/libgit2/transports/*.h
+--    libgit2/src/util/*.h
+--    libgit2/src/util/allocators/*.h
+--    libgit2/src/util/hash/*.h
+--    libgit2/src/util/hash/sha1dc/*.h
+--    libgit2/src/util/hash/rfc6234/*.h
+--    libgit2/deps/http-parser/*.h
+--    libgit2/deps/xdiff/*.h
+--    libgit2/deps/pcre/*.h
+--    libgit2/deps/zlib/*.h
+--    libgit2/deps/winhttp/*.h
+--    libgit2/deps/ntlmclient/*.h
+--    libgit2/deps/chromium-zlib/*.h
+--    libgit2/COPYING
 
 Source-repository head
   type: git
@@ -54,193 +61,361 @@ Library
 
   exposed-modules:
     Bindings.Libgit2
+    Bindings.Libgit2.AnnotatedCommit
+    Bindings.Libgit2.Apply
     Bindings.Libgit2.Attr
+    Bindings.Libgit2.Blame
     Bindings.Libgit2.Blob
     Bindings.Libgit2.Branch
+    Bindings.Libgit2.Buffer
+    Bindings.Libgit2.Cert
     Bindings.Libgit2.Checkout
+    Bindings.Libgit2.Cherrypick
     Bindings.Libgit2.Clone
     Bindings.Libgit2.Commit
     Bindings.Libgit2.Common
     Bindings.Libgit2.Config
-    Bindings.Libgit2.CredHelpers
+    Bindings.Libgit2.CredentialHelpers
+    Bindings.Libgit2.Credential
+    Bindings.Libgit2.Describe
     Bindings.Libgit2.Diff
+    --Bindings.Libgit2.Email
     Bindings.Libgit2.Errors
+    Bindings.Libgit2.Experimental
+    Bindings.Libgit2.Filter
+    Bindings.Libgit2.Global
     Bindings.Libgit2.Graph
     Bindings.Libgit2.Ignore
-    Bindings.Libgit2.Index
     Bindings.Libgit2.Indexer
+    Bindings.Libgit2.Index
+    Bindings.Libgit2.Mailmap
     Bindings.Libgit2.Merge
     Bindings.Libgit2.Message
     Bindings.Libgit2.Net
     Bindings.Libgit2.Notes
     Bindings.Libgit2.Object
-    Bindings.Libgit2.Odb
     Bindings.Libgit2.OdbBackend
+    Bindings.Libgit2.Odb
+    Bindings.Libgit2.Oidarray
     Bindings.Libgit2.Oid
     Bindings.Libgit2.Pack
-    Bindings.Libgit2.Push
+    Bindings.Libgit2.Patch
+    Bindings.Libgit2.Pathspec
+    Bindings.Libgit2.Proxy
+    Bindings.Libgit2.Rebase
     Bindings.Libgit2.Refdb
-    Bindings.Libgit2.RefdbBackend
     Bindings.Libgit2.Reflog
     Bindings.Libgit2.Refs
     Bindings.Libgit2.Refspec
     Bindings.Libgit2.Remote
     Bindings.Libgit2.Repository
     Bindings.Libgit2.Reset
+    Bindings.Libgit2.Revert
     Bindings.Libgit2.Revparse
     Bindings.Libgit2.Revwalk
     Bindings.Libgit2.Signature
     Bindings.Libgit2.Stash
     Bindings.Libgit2.Status
+    Bindings.Libgit2.Stdint
     Bindings.Libgit2.Strarray
     Bindings.Libgit2.Submodule
     Bindings.Libgit2.Tag
-    Bindings.Libgit2.Threads
     Bindings.Libgit2.Trace
+    Bindings.Libgit2.Transaction
     Bindings.Libgit2.Transport
     Bindings.Libgit2.Tree
     Bindings.Libgit2.Types
     Bindings.Libgit2.Version
-    Bindings.Libgit2.Windows
+    --Bindings.Libgit2.Worktree
 
   c-sources:
-    Bindings/Libgit2/Attr.hsc.helper.c
-    Bindings/Libgit2/Blob.hsc.helper.c
-    Bindings/Libgit2/Commit.hsc.helper.c
-    Bindings/Libgit2/Common.hsc.helper.c
-    Bindings/Libgit2/Oid.hsc.helper.c
-    Bindings/Libgit2/Tag.hsc.helper.c
-    Bindings/Libgit2/Tree.hsc.helper.c
-    libgit2/src/attr.c
-    libgit2/src/attr_file.c
-    libgit2/src/blob.c
-    libgit2/src/branch.c
-    libgit2/src/buf_text.c
-    libgit2/src/buffer.c
-    libgit2/src/cache.c
-    libgit2/src/checkout.c
-    libgit2/src/clone.c
-    libgit2/src/commit.c
-    libgit2/src/commit_list.c
-    libgit2/src/compress.c
-    libgit2/src/config.c
-    libgit2/src/config_cache.c
-    libgit2/src/config_file.c
-    libgit2/src/crlf.c
-    libgit2/src/date.c
-    libgit2/src/delta-apply.c
-    libgit2/src/delta.c
-    libgit2/src/diff.c
-    libgit2/src/diff_output.c
-    libgit2/src/diff_tform.c
-    libgit2/src/errors.c
-    libgit2/src/fetch.c
-    libgit2/src/fetchhead.c
-    libgit2/src/filebuf.c
-    libgit2/src/fileops.c
-    libgit2/src/filter.c
-    libgit2/src/fnmatch.c
-    libgit2/src/global.c
-    libgit2/src/graph.c
-    libgit2/src/hash.c
-    libgit2/src/hashsig.c
-    libgit2/src/ignore.c
-    libgit2/src/index.c
-    libgit2/src/indexer.c
-    libgit2/src/iterator.c
-    libgit2/src/merge.c
-    libgit2/src/message.c
-    libgit2/src/mwindow.c
-    libgit2/src/netops.c
-    libgit2/src/notes.c
-    libgit2/src/object.c
-    libgit2/src/odb.c
-    libgit2/src/odb_loose.c
-    libgit2/src/odb_pack.c
-    libgit2/src/oid.c
-    libgit2/src/pack-objects.c
-    libgit2/src/pack.c
-    libgit2/src/path.c
-    libgit2/src/pathspec.c
-    libgit2/src/pool.c
-    libgit2/src/posix.c
-    libgit2/src/pqueue.c
-    libgit2/src/push.c
-    libgit2/src/refdb.c
-    libgit2/src/refdb_fs.c
-    libgit2/src/reflog.c
-    libgit2/src/refs.c
-    libgit2/src/refspec.c
-    libgit2/src/remote.c
-    libgit2/src/repository.c
-    libgit2/src/reset.c
-    libgit2/src/revparse.c
-    libgit2/src/revwalk.c
-    libgit2/src/sha1_lookup.c
-    libgit2/src/signature.c
-    libgit2/src/stash.c
-    libgit2/src/status.c
-    libgit2/src/submodule.c
-    libgit2/src/tag.c
-    libgit2/src/thread-utils.c
-    libgit2/src/trace.c
-    libgit2/src/transport.c
-    libgit2/src/tree-cache.c
-    libgit2/src/tree.c
-    libgit2/src/tsort.c
-    libgit2/src/util.c
-    libgit2/src/vector.c
-    libgit2/src/transports/cred.c
-    libgit2/src/transports/cred_helpers.c
-    libgit2/src/transports/git.c
-    libgit2/src/transports/http.c
-    libgit2/src/transports/local.c
-    libgit2/src/transports/smart.c
-    libgit2/src/transports/smart_pkt.c
-    libgit2/src/transports/smart_protocol.c
-    libgit2/src/xdiff/xdiffi.c
-    libgit2/src/xdiff/xemit.c
-    libgit2/src/xdiff/xhistogram.c
-    libgit2/src/xdiff/xmerge.c
-    libgit2/src/xdiff/xpatience.c
-    libgit2/src/xdiff/xprepare.c
-    libgit2/src/xdiff/xutils.c
     libgit2/deps/http-parser/http_parser.c
+    libgit2/deps/xdiff/xhistogram.c
+    libgit2/deps/xdiff/xdiffi.c
+    libgit2/deps/xdiff/xmerge.c
+    libgit2/deps/xdiff/xprepare.c
+    libgit2/deps/xdiff/xutils.c
+    libgit2/deps/xdiff/xemit.c
+    libgit2/deps/xdiff/xpatience.c
+    --libgit2/deps/ntlmclient/unicode_builtin.c
+    --libgit2/deps/ntlmclient/unicode_iconv.c
+    --libgit2/deps/ntlmclient/ntlm.c
+    --libgit2/deps/ntlmclient/crypt_commoncrypto.c
+    --libgit2/deps/ntlmclient/crypt_mbedtls.c
+    --libgit2/deps/ntlmclient/util.c
+    --libgit2/deps/ntlmclient/crypt_openssl.c
+    --libgit2/deps/zlib/trees.c
+    --libgit2/deps/zlib/deflate.c
+    --libgit2/deps/zlib/adler32.c
+    --libgit2/deps/zlib/inftrees.c
+    --libgit2/deps/zlib/infback.c
+    --libgit2/deps/zlib/inflate.c
+    --libgit2/deps/zlib/crc32.c
+    --libgit2/deps/zlib/inffast.c
+    --libgit2/deps/zlib/zutil.c
+    --libgit2/deps/pcre/pcre_ucd.c
+    --libgit2/deps/pcre/pcre_ord2utf8.c
+    --libgit2/deps/pcre/pcre_globals.c
+    --libgit2/deps/pcre/pcre_byte_order.c
+    --libgit2/deps/pcre/pcre_string_utils.c
+    --libgit2/deps/pcre/pcre_tables.c
+    --libgit2/deps/pcre/pcre_maketables.c
+    --libgit2/deps/pcre/pcre_version.c
+    --libgit2/deps/pcre/pcre_exec.c
+    --libgit2/deps/pcre/pcre_printint.c
+    --libgit2/deps/pcre/pcre_refcount.c
+    --libgit2/deps/pcre/pcre_study.c
+    --libgit2/deps/pcre/pcreposix.c
+    --libgit2/deps/pcre/pcre_chartables.c
+    --libgit2/deps/pcre/pcre_newline.c
+    --libgit2/deps/pcre/pcre_dfa_exec.c
+    --libgit2/deps/pcre/pcre_get.c
+    --libgit2/deps/pcre/pcre_compile.c
+    --libgit2/deps/pcre/pcre_xclass.c
+    --libgit2/deps/pcre/pcre_jit_compile.c
+    --libgit2/deps/pcre/pcre_fullinfo.c
+    --libgit2/deps/pcre/pcre_valid_utf8.c
+    --libgit2/deps/pcre/pcre_config.c
+    --libgit2/src/cli/cmd_help.c
+    --libgit2/src/cli/win32/sighandler.c
+    --libgit2/src/cli/win32/precompiled.c
+    --libgit2/src/cli/main.c
+    --libgit2/src/cli/progress.c
+    --libgit2/src/cli/cmd.c
+    --libgit2/src/cli/cmd_hash_object.c
+    --libgit2/src/cli/cmd_config.c
+    --libgit2/src/cli/common.c
+    --libgit2/src/cli/cmd_cat_file.c
+    --libgit2/src/cli/unix/sighandler.c
+    --libgit2/src/cli/opt_usage.c
+    --libgit2/src/cli/opt.c
+    --libgit2/src/cli/cmd_clone.c
+    --libgit2/src/util/win32/posix_w32.c
+    --libgit2/src/util/win32/process.c
+    --libgit2/src/util/win32/error.c
+    --libgit2/src/util/win32/path_w32.c
+    --libgit2/src/util/win32/map.c
+    --libgit2/src/util/win32/utf-conv.c
+    --libgit2/src/util/win32/thread.c
+    --libgit2/src/util/win32/dir.c
+    --libgit2/src/util/win32/w32_buffer.c
+    --libgit2/src/util/win32/w32_leakcheck.c
+    --libgit2/src/util/win32/w32_util.c
+    --libgit2/src/util/win32/precompiled.c
+    libgit2/src/util/futils.c
+    libgit2/src/util/wildmatch.c
+    libgit2/src/util/posix.c
+    libgit2/src/util/date.c
+    libgit2/src/util/hash/sha1dc/ubc_check.c
+    libgit2/src/util/hash/sha1dc/sha1.c
+    libgit2/src/util/hash/mbedtls.c
+    --libgit2/src/util/hash/common_crypto.c
+    libgit2/src/util/hash/collisiondetect.c
+    --libgit2/src/util/hash/win32.c
+    --libgit2/src/util/hash/builtin.c
+    libgit2/src/util/hash/rfc6234/sha224-256.c
+    libgit2/src/util/hash/openssl.c
+    libgit2/src/util/errors.c
+    libgit2/src/util/fs_path.c
+    libgit2/src/util/vector.c
+    libgit2/src/util/strmap.c
+    libgit2/src/util/pqueue.c
+    libgit2/src/util/allocators/failalloc.c
+    libgit2/src/util/allocators/stdalloc.c
+    libgit2/src/util/allocators/win32_leakcheck.c
+    libgit2/src/util/tsort.c
+    libgit2/src/util/hash.c
+    libgit2/src/util/str.c
+    libgit2/src/util/thread.c
+    libgit2/src/util/pool.c
+    libgit2/src/util/unix/process.c
+    libgit2/src/util/unix/map.c
+    libgit2/src/util/unix/realpath.c
+    libgit2/src/util/regexp.c
+    libgit2/src/util/utf8.c
+    libgit2/src/util/rand.c
+    libgit2/src/util/sortedcache.c
+    libgit2/src/util/varint.c
+    libgit2/src/util/strlist.c
+    libgit2/src/util/alloc.c
+    libgit2/src/util/runtime.c
+    libgit2/src/util/util.c
+    libgit2/src/util/filebuf.c
+    libgit2/src/util/zstream.c
+    libgit2/src/util/net.c
+    libgit2/src/libgit2/merge_driver.c
+    libgit2/src/libgit2/mailmap.c
+    libgit2/src/libgit2/revparse.c
+    libgit2/src/libgit2/trailer.c
+    libgit2/src/libgit2/sysdir.c
+    libgit2/src/libgit2/pack-objects.c
+    libgit2/src/libgit2/branch.c
+    libgit2/src/libgit2/email.c
+    libgit2/src/libgit2/blob.c
+    libgit2/src/libgit2/attrcache.c
+    libgit2/src/libgit2/revwalk.c
+    libgit2/src/libgit2/reader.c
+    libgit2/src/libgit2/filter.c
+    libgit2/src/libgit2/midx.c
+    libgit2/src/libgit2/transport.c
+    libgit2/src/libgit2/config_cache.c
+    libgit2/src/libgit2/patch_generate.c
+    libgit2/src/libgit2/config.c
+    libgit2/src/libgit2/config_parse.c
+    libgit2/src/libgit2/tree-cache.c
+    libgit2/src/libgit2/offmap.c
+    libgit2/src/libgit2/reflog.c
+    libgit2/src/libgit2/checkout.c
+    libgit2/src/libgit2/stash.c
+    libgit2/src/libgit2/describe.c
+    libgit2/src/libgit2/diff_driver.c
+    libgit2/src/libgit2/mwindow.c
+    libgit2/src/libgit2/diff_file.c
+    libgit2/src/libgit2/diff_stats.c
+    libgit2/src/libgit2/transaction.c
+    libgit2/src/libgit2/merge_file.c
+    libgit2/src/libgit2/revert.c
+    libgit2/src/libgit2/odb_mempack.c
+    libgit2/src/libgit2/pack.c
+    libgit2/src/libgit2/diff.c
+    libgit2/src/libgit2/patch.c
+    libgit2/src/libgit2/refdb_fs.c
+    libgit2/src/libgit2/proxy.c
+    libgit2/src/libgit2/ignore.c
+    libgit2/src/libgit2/merge.c
+    libgit2/src/libgit2/pathspec.c
+    libgit2/src/libgit2/buf.c
+    libgit2/src/libgit2/apply.c
+    libgit2/src/libgit2/fetchhead.c
+    libgit2/src/libgit2/ident.c
+    libgit2/src/libgit2/config_list.c
+    libgit2/src/libgit2/odb_loose.c
+    libgit2/src/libgit2/oid.c
+    libgit2/src/libgit2/commit_list.c
+    libgit2/src/libgit2/delta.c
+    libgit2/src/libgit2/hashsig.c
+    libgit2/src/libgit2/odb.c
+    libgit2/src/libgit2/config_file.c
+    libgit2/src/libgit2/iterator.c
+    libgit2/src/libgit2/graph.c
+    libgit2/src/libgit2/oidmap.c
+    libgit2/src/libgit2/fetch.c
+    libgit2/src/libgit2/repository.c
+    libgit2/src/libgit2/object.c
+    libgit2/src/libgit2/refs.c
+    libgit2/src/libgit2/blame.c
+    libgit2/src/libgit2/diff_generate.c
+    libgit2/src/libgit2/refspec.c
+    libgit2/src/libgit2/patch_parse.c
+    libgit2/src/libgit2/grafts.c
+    libgit2/src/libgit2/index.c
+    libgit2/src/libgit2/attr.c
+    libgit2/src/libgit2/remote.c
+    libgit2/src/libgit2/notes.c
+    libgit2/src/libgit2/submodule.c
+    libgit2/src/libgit2/diff_parse.c
+    libgit2/src/libgit2/config_snapshot.c
+    libgit2/src/libgit2/object_api.c
+    libgit2/src/libgit2/clone.c
+    libgit2/src/libgit2/signature.c
+    libgit2/src/libgit2/strarray.c
+    libgit2/src/libgit2/cherrypick.c
+    libgit2/src/libgit2/push.c
+    libgit2/src/libgit2/libgit2.c
+    libgit2/src/libgit2/tag.c
+    libgit2/src/libgit2/idxmap.c
+    libgit2/src/libgit2/attr_file.c
+    libgit2/src/libgit2/diff_print.c
+    libgit2/src/libgit2/annotated_commit.c
+    libgit2/src/libgit2/oidarray.c
+    libgit2/src/libgit2/commit_graph.c
+    libgit2/src/libgit2/reset.c
+    libgit2/src/libgit2/odb_pack.c
+    libgit2/src/libgit2/diff_xdiff.c
+    libgit2/src/libgit2/worktree.c
+    libgit2/src/libgit2/streams/socket.c
+    libgit2/src/libgit2/streams/schannel.c
+    libgit2/src/libgit2/streams/mbedtls.c
+    libgit2/src/libgit2/streams/openssl_legacy.c
+    libgit2/src/libgit2/streams/registry.c
+    libgit2/src/libgit2/streams/tls.c
+    libgit2/src/libgit2/streams/stransport.c
+    libgit2/src/libgit2/streams/openssl_dynamic.c
+    libgit2/src/libgit2/streams/openssl.c
+    libgit2/src/libgit2/diff_tform.c
+    libgit2/src/libgit2/path.c
+    libgit2/src/libgit2/refdb.c
+    libgit2/src/libgit2/status.c
+    libgit2/src/libgit2/blame_git.c
+    libgit2/src/libgit2/rebase.c
+    libgit2/src/libgit2/tree.c
+    libgit2/src/libgit2/transports/ssh.c
+    libgit2/src/libgit2/transports/ssh_libssh2.c
+    libgit2/src/libgit2/transports/smart_pkt.c
+    libgit2/src/libgit2/transports/auth_sspi.c
+    libgit2/src/libgit2/transports/credential.c
+    --libgit2/src/libgit2/transports/winhttp.c
+    libgit2/src/libgit2/transports/ssh_exec.c
+    libgit2/src/libgit2/transports/smart.c
+    libgit2/src/libgit2/transports/local.c
+    --libgit2/src/libgit2/transports/auth_gssapi.c
+    libgit2/src/libgit2/transports/auth_ntlmclient.c
+    libgit2/src/libgit2/transports/smart_protocol.c
+    libgit2/src/libgit2/transports/http.c
+    libgit2/src/libgit2/transports/auth.c
+    libgit2/src/libgit2/transports/credential_helpers.c
+    libgit2/src/libgit2/transports/httpclient.c
+    libgit2/src/libgit2/transports/git.c
+    libgit2/src/libgit2/parse.c
+    libgit2/src/libgit2/commit.c
+    libgit2/src/libgit2/config_mem.c
+    libgit2/src/libgit2/trace.c
+    libgit2/src/libgit2/indexer.c
+    libgit2/src/libgit2/cache.c
+    libgit2/src/libgit2/message.c
+    libgit2/src/libgit2/crlf.c
 
   include-dirs:
     libgit2/include
-    libgit2/src
+    libgit2/src/libgit2
+    libgit2/src/util
     libgit2/deps/http-parser
+    libgit2/deps/xdiff
+    --libgit2/deps/pcre
+    --libgit2/deps/zlib
+    --libgit2/deps/ntlmclient
+    --libgit2/deps/chromium-zlib
 
-  cc-options: -DGIT_THREADS -D_FILE_OFFSET_BITS=64 -DGIT_SSL -Wno-format -Wno-format-security
+  cc-options: -Wno-implicit-function-declaration
   if os(windows)
     cpp-options: -DWINDOWS
     cc-options: -DGIT_WIN32 -DWIN32 -DWIN32_SHA1 -D_DEBUG -D_WIN32_WINNT=0x0501 -DGIT_WINHTTP
     c-sources:
-      libgit2/src/hash/hash_win32.c
-      libgit2/src/transports/winhttp.c
-      libgit2/src/win32/dir.c
-      libgit2/src/win32/error.c
-      libgit2/src/win32/findfile.c
-      libgit2/src/win32/map.c
-      libgit2/src/win32/posix_w32.c
-      libgit2/src/win32/precompiled.c
-      libgit2/src/win32/pthread.c
-      libgit2/src/win32/utf-conv.c
+      libgit2/src/util/win32/posix_w32.c
+      libgit2/src/util/win32/process.c
+      libgit2/src/util/win32/error.c
+      libgit2/src/util/win32/path_w32.c
+      libgit2/src/util/win32/map.c
+      libgit2/src/util/win32/utf-conv.c
+      libgit2/src/util/win32/thread.c
+      libgit2/src/util/win32/dir.c
+      libgit2/src/util/win32/w32_buffer.c
+      libgit2/src/util/win32/w32_leakcheck.c
+      libgit2/src/util/win32/w32_util.c
+      libgit2/src/util/win32/precompiled.c
+      libgit2/src/util/hash/win32.c
     include-dirs:
-      libgit2/src/win32
+      libgit2/deps/winhttp
     extra-libraries:
       ws2_32, regex, winhttp, crypt32, rpcrt4, ssl, crypto
   else
-    cc-options: -D_GNU_SOURCE -DOPENSSL_SHA1 -Wno-deprecated-declarations
-    c-sources:
-      -- libgit2/src/hash/hash_generic.c
-      libgit2/src/unix/map.c
-      libgit2/src/unix/realpath.c
-    include-dirs:
-      libgit2/src/unix
+    cc-options: -Wno-deprecated-declarations
     if os(darwin)
-      include-dirs: /usr/local/opt/openssl/include
-      extra-lib-dirs: /usr/local/opt/openssl/lib
+      c-sources:
+        libgit2/src/util/hash/common_crypto.c
+      include-dirs: 
+        /usr/local/opt/openssl/include
+      extra-lib-dirs: 
+        /usr/local/opt/openssl/lib
     extra-libraries:
-      ssl, crypto, pthread
+      ssl, crypto, pthread, pcre

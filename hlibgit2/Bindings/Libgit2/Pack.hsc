@@ -1,13 +1,15 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/pack.h"
+#include <git2/pack.h>
 module Bindings.Libgit2.Pack where
 import Foreign.Ptr
 #strict_import
 
+import Bindings.Libgit2.Types
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Indexer
+import Bindings.Libgit2.Buffer
 {- typedef enum {
             GIT_PACKBUILDER_ADDING_OBJECTS = 0,
             GIT_PACKBUILDER_DELTAFICATION = 1

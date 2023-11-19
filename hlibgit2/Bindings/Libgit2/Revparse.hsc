@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/revparse.h"
+#include <git2/revparse.h>
 module Bindings.Libgit2.Revparse where
 import Foreign.Ptr
 #strict_import

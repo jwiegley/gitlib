@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/checkout.h"
+#include <git2/checkout.h>
 module Bindings.Libgit2.Checkout where
 import Foreign.Ptr
 #strict_import
@@ -8,6 +8,7 @@ import Foreign.Ptr
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Diff
+import Bindings.Libgit2.Strarray
 {- typedef enum {
             GIT_CHECKOUT_NONE = 0,
             GIT_CHECKOUT_SAFE = 1u << 0,
@@ -131,7 +132,6 @@ import Bindings.Libgit2.Diff
 #field perfdata_cb , <git_checkout_perfdata_cb>
 #field perfdata_payload , Ptr ()
 #stoptype
-#synonym_t git_checkout_options , <struct git_checkout_options>
 #ccall git_checkout_options_init , Ptr <struct git_checkout_options> -> CUInt -> IO CInt
 #ccall git_checkout_head , Ptr <struct git_repository> -> Ptr <struct git_checkout_options> -> IO CInt
 #ccall git_checkout_index , Ptr <struct git_repository> -> Ptr <struct git_index> -> Ptr <struct git_checkout_options> -> IO CInt

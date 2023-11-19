@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/remote.h"
+#include <git2/remote.h>
 module Bindings.Libgit2.Remote where
 import Foreign.Ptr
 #strict_import
@@ -14,6 +14,11 @@ import Bindings.Libgit2.Strarray
 import Bindings.Libgit2.Transport
 import Bindings.Libgit2.Pack
 import Bindings.Libgit2.Proxy
+import Bindings.Libgit2.Types
+import Bindings.Libgit2.Buffer
+import Bindings.Libgit2.Oid
+import Bindings.Libgit2.Credential
+import Bindings.Libgit2.Cert
 #ccall git_remote_create , Ptr (Ptr <struct git_remote>) -> Ptr <struct git_repository> -> CString -> CString -> IO CInt
 {- typedef enum {
             GIT_REMOTE_REDIRECT_NONE = 1 << 0,
@@ -52,7 +57,6 @@ import Bindings.Libgit2.Proxy
 #field fetchspec , CString
 #field flags , CUInt
 #stoptype
-#synonym_t git_remote_create_options , <struct git_remote_create_options>
 #ccall git_remote_create_options_init , Ptr <struct git_remote_create_options> -> CUInt -> IO CInt
 #ccall git_remote_create_with_opts , Ptr (Ptr <struct git_remote>) -> CString -> Ptr <struct git_remote_create_options> -> IO CInt
 #ccall git_remote_create_with_fetchspec , Ptr (Ptr <struct git_remote>) -> Ptr <struct git_repository> -> CString -> CString -> CString -> IO CInt
@@ -89,7 +93,6 @@ import Bindings.Libgit2.Proxy
 #num GIT_REMOTE_COMPLETION_DOWNLOAD
 #num GIT_REMOTE_COMPLETION_INDEXING
 #num GIT_REMOTE_COMPLETION_ERROR
-#synonym_t git_remote_completion_t , <enum git_remote_completion_t>
 #callback git_push_transfer_progress_cb , CUInt -> CUInt -> CSize -> Ptr () -> IO CInt
 {- typedef struct {
             char * src_refname; char * dst_refname; git_oid src; git_oid dst;

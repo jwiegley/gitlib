@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/cherrypick.h"
+#include <git2/cherrypick.h>
 module Bindings.Libgit2.Cherrypick where
 import Foreign.Ptr
 #strict_import
@@ -8,6 +8,7 @@ import Foreign.Ptr
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Merge
+import Bindings.Libgit2.Checkout
 {- typedef struct {
             unsigned int version;
             unsigned int mainline;

@@ -1,8 +1,9 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/branch.h"
+#include <git2/branch.h>
 module Bindings.Libgit2.Branch where
 import Foreign.Ptr
+import Bindings.Libgit2.Buffer
 #strict_import
 
 import Bindings.Libgit2.Common
@@ -13,7 +14,6 @@ import Bindings.Libgit2.Types
 #ccall git_branch_delete , Ptr <struct git_reference> -> IO CInt
 {- typedef struct git_branch_iterator git_branch_iterator; -}
 #opaque_t struct git_branch_iterator
-#synonym_t git_branch_iterator , <struct git_branch_iterator>
 #ccall git_branch_iterator_new , Ptr (Ptr <struct git_branch_iterator>) -> Ptr <struct git_repository> -> <git_branch_t> -> IO CInt
 #ccall git_branch_next , Ptr (Ptr <struct git_reference>) -> Ptr <git_branch_t> -> Ptr <struct git_branch_iterator> -> IO CInt
 #ccall git_branch_iterator_free , Ptr <struct git_branch_iterator> -> IO ()

@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/oidarray.h"
+#include <git2/oidarray.h>
 module Bindings.Libgit2.Oidarray where
 import Foreign.Ptr
 #strict_import
@@ -14,5 +14,4 @@ import Bindings.Libgit2.Oid
 #field ids , Ptr <struct git_oid>
 #field count , CSize
 #stoptype
-#synonym_t git_oidarray , <struct git_oidarray>
 #ccall git_oidarray_dispose , Ptr <struct git_oidarray> -> IO ()

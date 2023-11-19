@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/refdb.h"
+#include <git2/refdb.h>
 module Bindings.Libgit2.Refdb where
 import Foreign.Ptr
 #strict_import

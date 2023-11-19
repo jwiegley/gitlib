@@ -1,13 +1,13 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/types.h"
+#include <git2/types.h>
 module Bindings.Libgit2.Types where
 import Foreign.Ptr
+--import Bindings.Libgit2.Oid
 #strict_import
 
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Buffer
-import Bindings.Libgit2.Oid
 {- typedef int64_t git_off_t; -}
 #synonym_t git_off_t , CLong
 {- typedef int64_t git_time_t; -}
@@ -35,91 +35,58 @@ import Bindings.Libgit2.Oid
 #num GIT_OBJECT_REF_DELTA
 {- typedef struct git_odb git_odb; -}
 #opaque_t struct git_odb
-#synonym_t git_odb , <struct git_odb>
 {- typedef struct git_odb_backend git_odb_backend; -}
 #opaque_t struct git_odb_backend
-#synonym_t git_odb_backend , <struct git_odb_backend>
 {- typedef struct git_odb_object git_odb_object; -}
 #opaque_t struct git_odb_object
-#synonym_t git_odb_object , <struct git_odb_object>
-{- typedef struct git_odb_stream git_odb_stream; -}
-#opaque_t struct git_odb_stream
-#synonym_t git_odb_stream , <struct git_odb_stream>
-{- typedef struct git_odb_writepack git_odb_writepack; -}
-#opaque_t struct git_odb_writepack
-#synonym_t git_odb_writepack , <struct git_odb_writepack>
 {- typedef struct git_midx_writer git_midx_writer; -}
 #opaque_t struct git_midx_writer
-#synonym_t git_midx_writer , <struct git_midx_writer>
 {- typedef struct git_refdb git_refdb; -}
 #opaque_t struct git_refdb
-#synonym_t git_refdb , <struct git_refdb>
 {- typedef struct git_refdb_backend git_refdb_backend; -}
 #opaque_t struct git_refdb_backend
-#synonym_t git_refdb_backend , <struct git_refdb_backend>
 {- typedef struct git_commit_graph git_commit_graph; -}
 #opaque_t struct git_commit_graph
-#synonym_t git_commit_graph , <struct git_commit_graph>
 {- typedef struct git_commit_graph_writer git_commit_graph_writer; -}
 #opaque_t struct git_commit_graph_writer
-#synonym_t git_commit_graph_writer , <struct git_commit_graph_writer>
 {- typedef struct git_repository git_repository; -}
 #opaque_t struct git_repository
-#synonym_t git_repository , <struct git_repository>
 {- typedef struct git_worktree git_worktree; -}
 #opaque_t struct git_worktree
-#synonym_t git_worktree , <struct git_worktree>
 {- typedef struct git_object git_object; -}
 #opaque_t struct git_object
-#synonym_t git_object , <struct git_object>
 {- typedef struct git_revwalk git_revwalk; -}
 #opaque_t struct git_revwalk
-#synonym_t git_revwalk , <struct git_revwalk>
 {- typedef struct git_tag git_tag; -}
 #opaque_t struct git_tag
-#synonym_t git_tag , <struct git_tag>
 {- typedef struct git_blob git_blob; -}
 #opaque_t struct git_blob
-#synonym_t git_blob , <struct git_blob>
 {- typedef struct git_commit git_commit; -}
 #opaque_t struct git_commit
-#synonym_t git_commit , <struct git_commit>
 {- typedef struct git_tree_entry git_tree_entry; -}
 #opaque_t struct git_tree_entry
-#synonym_t git_tree_entry , <struct git_tree_entry>
 {- typedef struct git_tree git_tree; -}
 #opaque_t struct git_tree
-#synonym_t git_tree , <struct git_tree>
 {- typedef struct git_treebuilder git_treebuilder; -}
 #opaque_t struct git_treebuilder
-#synonym_t git_treebuilder , <struct git_treebuilder>
 {- typedef struct git_index git_index; -}
 #opaque_t struct git_index
-#synonym_t git_index , <struct git_index>
 {- typedef struct git_index_iterator git_index_iterator; -}
 #opaque_t struct git_index_iterator
-#synonym_t git_index_iterator , <struct git_index_iterator>
 {- typedef struct git_index_conflict_iterator git_index_conflict_iterator; -}
 #opaque_t struct git_index_conflict_iterator
-#synonym_t git_index_conflict_iterator , <struct git_index_conflict_iterator>
 {- typedef struct git_config git_config; -}
 #opaque_t struct git_config
-#synonym_t git_config , <struct git_config>
 {- typedef struct git_config_backend git_config_backend; -}
 #opaque_t struct git_config_backend
-#synonym_t git_config_backend , <struct git_config_backend>
 {- typedef struct git_reflog_entry git_reflog_entry; -}
 #opaque_t struct git_reflog_entry
-#synonym_t git_reflog_entry , <struct git_reflog_entry>
 {- typedef struct git_reflog git_reflog; -}
 #opaque_t struct git_reflog
-#synonym_t git_reflog , <struct git_reflog>
 {- typedef struct git_note git_note; -}
 #opaque_t struct git_note
-#synonym_t git_note , <struct git_note>
 {- typedef struct git_packbuilder git_packbuilder; -}
 #opaque_t struct git_packbuilder
-#synonym_t git_packbuilder , <struct git_packbuilder>
 {- typedef struct git_time {
             git_time_t time; int offset; char sign;
         } git_time; -}
@@ -128,7 +95,6 @@ import Bindings.Libgit2.Oid
 #field offset , CInt
 #field sign , CChar
 #stoptype
-#synonym_t git_time , <struct git_time>
 {- typedef struct git_signature {
             char * name; char * email; git_time when;
         } git_signature; -}
@@ -137,25 +103,18 @@ import Bindings.Libgit2.Oid
 #field email , CString
 #field when , <struct git_time>
 #stoptype
-#synonym_t git_signature , <struct git_signature>
 {- typedef struct git_reference git_reference; -}
 #opaque_t struct git_reference
-#synonym_t git_reference , <struct git_reference>
 {- typedef struct git_reference_iterator git_reference_iterator; -}
 #opaque_t struct git_reference_iterator
-#synonym_t git_reference_iterator , <struct git_reference_iterator>
 {- typedef struct git_transaction git_transaction; -}
 #opaque_t struct git_transaction
-#synonym_t git_transaction , <struct git_transaction>
 {- typedef struct git_annotated_commit git_annotated_commit; -}
 #opaque_t struct git_annotated_commit
-#synonym_t git_annotated_commit , <struct git_annotated_commit>
 {- typedef struct git_status_list git_status_list; -}
 #opaque_t struct git_status_list
-#synonym_t git_status_list , <struct git_status_list>
 {- typedef struct git_rebase git_rebase; -}
 #opaque_t struct git_rebase
-#synonym_t git_rebase , <struct git_rebase>
 {- typedef enum {
             GIT_REFERENCE_INVALID = 0,
             GIT_REFERENCE_DIRECT = 1,
@@ -193,28 +152,14 @@ import Bindings.Libgit2.Oid
 #num GIT_FILEMODE_COMMIT
 {- typedef struct git_refspec git_refspec; -}
 #opaque_t struct git_refspec
-#synonym_t git_refspec , <struct git_refspec>
 {- typedef struct git_remote git_remote; -}
 #opaque_t struct git_remote
-#synonym_t git_remote , <struct git_remote>
 {- typedef struct git_transport git_transport; -}
 #opaque_t struct git_transport
-#synonym_t git_transport , <struct git_transport>
 {- typedef struct git_push git_push; -}
 #opaque_t struct git_push
-#synonym_t git_push , <struct git_push>
-{- typedef struct git_remote_head git_remote_head; -}
-#opaque_t struct git_remote_head
-#synonym_t git_remote_head , <struct git_remote_head>
-{- typedef struct git_remote_callbacks git_remote_callbacks; -}
-#opaque_t struct git_remote_callbacks
-#synonym_t git_remote_callbacks , <struct git_remote_callbacks>
-{- typedef struct git_cert git_cert; -}
-#opaque_t struct git_cert
-#synonym_t git_cert , <struct git_cert>
 {- typedef struct git_submodule git_submodule; -}
 #opaque_t struct git_submodule
-#synonym_t git_submodule , <struct git_submodule>
 {- typedef enum {
             GIT_SUBMODULE_UPDATE_CHECKOUT = 1,
             GIT_SUBMODULE_UPDATE_REBASE = 2,
@@ -252,7 +197,6 @@ import Bindings.Libgit2.Oid
 #num GIT_SUBMODULE_RECURSE_ONDEMAND
 {- typedef struct git_writestream git_writestream; -}
 #opaque_t struct git_writestream
-#synonym_t git_writestream , <struct git_writestream>
 {- struct git_writestream {
     int (* write)(git_writestream * stream,
                   const char * buffer,
@@ -260,11 +204,5 @@ import Bindings.Libgit2.Oid
     int (* close)(git_writestream * stream);
     void (* free)(git_writestream * stream);
 }; -}
-#starttype struct git_writestream
-#field write , FunPtr (Ptr <struct git_writestream> -> CString -> CSize -> CInt)
-#field close , FunPtr (Ptr <struct git_writestream> -> CInt)
-#field free , FunPtr (Ptr <struct git_writestream> -> IO ())
-#stoptype
 {- typedef struct git_mailmap git_mailmap; -}
 #opaque_t struct git_mailmap
-#synonym_t git_mailmap , <struct git_mailmap>

@@ -1,12 +1,13 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/blame.h"
+#include <git2/blame.h>
 module Bindings.Libgit2.Blame where
 import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Oid
+import Bindings.Libgit2.Types
 {- typedef enum {
             GIT_BLAME_NORMAL = 0,
             GIT_BLAME_TRACK_COPIES_SAME_FILE = 1 << 0,
@@ -44,7 +45,6 @@ import Bindings.Libgit2.Oid
 #field min_line , CSize
 #field max_line , CSize
 #stoptype
-#synonym_t git_blame_options , <struct git_blame_options>
 #ccall git_blame_options_init , Ptr <struct git_blame_options> -> CUInt -> IO CInt
 {- typedef struct git_blame_hunk {
             size_t lines_in_hunk;
@@ -68,10 +68,8 @@ import Bindings.Libgit2.Oid
 #field orig_signature , Ptr <struct git_signature>
 #field boundary , CChar
 #stoptype
-#synonym_t git_blame_hunk , <struct git_blame_hunk>
 {- typedef struct git_blame git_blame; -}
 #opaque_t struct git_blame
-#synonym_t git_blame , <struct git_blame>
 #ccall git_blame_get_hunk_count , Ptr <struct git_blame> -> IO CUInt
 #ccall git_blame_get_hunk_byindex , Ptr <struct git_blame> -> CUInt -> IO (Ptr <struct git_blame_hunk>)
 #ccall git_blame_get_hunk_byline , Ptr <struct git_blame> -> CSize -> IO (Ptr <struct git_blame_hunk>)

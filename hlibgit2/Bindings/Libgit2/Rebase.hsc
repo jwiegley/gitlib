@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/rebase.h"
+#include <git2/rebase.h>
 module Bindings.Libgit2.Rebase where
 import Foreign.Ptr
 #strict_import
@@ -12,6 +12,7 @@ import Bindings.Libgit2.AnnotatedCommit
 import Bindings.Libgit2.Merge
 import Bindings.Libgit2.Checkout
 import Bindings.Libgit2.Commit
+import Bindings.Libgit2.Buffer
 {- typedef struct {
             unsigned int version;
             int quiet;

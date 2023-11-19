@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/odb.h"
+#include <git2/odb.h>
 module Bindings.Libgit2.Odb where
 import Foreign.Ptr
 #strict_import
@@ -10,6 +10,7 @@ import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Oidarray
 import Bindings.Libgit2.Indexer
+import Bindings.Libgit2.OdbBackend
 {- typedef enum {
             GIT_ODB_LOOKUP_NO_REFRESH = 1 << 0
         } git_odb_lookup_flags_t; -}
@@ -41,7 +42,6 @@ import Bindings.Libgit2.Indexer
 #field length , CUShort
 #field type , <git_object_t>
 #stoptype
-#synonym_t git_odb_expand_id , <struct git_odb_expand_id>
 #ccall git_odb_expand_ids , Ptr <struct git_odb> -> Ptr <struct git_odb_expand_id> -> CSize -> IO CInt
 #ccall git_odb_refresh , Ptr <struct git_odb> -> IO CInt
 #ccall git_odb_foreach , Ptr <struct git_odb> -> <git_odb_foreach_cb> -> Ptr () -> IO CInt

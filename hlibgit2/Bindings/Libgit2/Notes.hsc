@@ -1,11 +1,13 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/notes.h"
+#include <git2/notes.h>
 module Bindings.Libgit2.Notes where
 import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Oid
+import Bindings.Libgit2.Types
+import Bindings.Libgit2.Buffer
 #callback git_note_foreach_cb , Ptr <struct git_oid> -> Ptr <struct git_oid> -> Ptr () -> IO CInt
 {- typedef struct git_iterator git_note_iterator; -}
 #opaque_t struct git_iterator

@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/common.h"
+#include <git2/common.h>
 module Bindings.Libgit2.Common where
 import Foreign.Ptr
 #strict_import

@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/commit.h"
+#include <git2/commit.h>
 module Bindings.Libgit2.Commit where
 import Foreign.Ptr
 #strict_import
@@ -9,6 +9,7 @@ import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Object
+import Bindings.Libgit2.Buffer
 #ccall git_commit_lookup , Ptr (Ptr <struct git_commit>) -> Ptr <struct git_repository> -> Ptr <struct git_oid> -> IO CInt
 #ccall git_commit_lookup_prefix , Ptr (Ptr <struct git_commit>) -> Ptr <struct git_repository> -> Ptr <struct git_oid> -> CSize -> IO CInt
 #ccall git_commit_free , Ptr <struct git_commit> -> IO ()

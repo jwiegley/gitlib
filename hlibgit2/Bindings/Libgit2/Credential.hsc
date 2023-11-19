@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/credential.h"
+#include <git2/credential.h>
 module Bindings.Libgit2.Credential where
 import Foreign.Ptr
 #strict_import
@@ -25,24 +25,18 @@ import Bindings.Libgit2.Common
 #num GIT_CREDENTIAL_SSH_MEMORY
 {- typedef struct git_credential git_credential; -}
 #opaque_t struct git_credential
-#synonym_t git_credential , <struct git_credential>
 {- typedef struct git_credential_userpass_plaintext git_credential_userpass_plaintext; -}
 #opaque_t struct git_credential_userpass_plaintext
-#synonym_t git_credential_userpass_plaintext , <struct git_credential_userpass_plaintext>
 {- typedef struct git_credential_username git_credential_username; -}
 #opaque_t struct git_credential_username
-#synonym_t git_credential_username , <struct git_credential_username>
 {- typedef struct git_credential git_credential_default; -}
 #synonym_t git_credential_default , <struct git_credential>
 {- typedef struct git_credential_ssh_key git_credential_ssh_key; -}
 #opaque_t struct git_credential_ssh_key
-#synonym_t git_credential_ssh_key , <struct git_credential_ssh_key>
 {- typedef struct git_credential_ssh_interactive git_credential_ssh_interactive; -}
 #opaque_t struct git_credential_ssh_interactive
-#synonym_t git_credential_ssh_interactive , <struct git_credential_ssh_interactive>
 {- typedef struct git_credential_ssh_custom git_credential_ssh_custom; -}
 #opaque_t struct git_credential_ssh_custom
-#synonym_t git_credential_ssh_custom , <struct git_credential_ssh_custom>
 #callback git_credential_acquire_cb , Ptr (Ptr <struct git_credential>) -> CString -> CString -> CUInt -> Ptr () -> IO CInt
 #ccall git_credential_free , Ptr <struct git_credential> -> IO ()
 #ccall git_credential_has_username , Ptr <struct git_credential> -> IO CInt

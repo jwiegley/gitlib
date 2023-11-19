@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/odb_backend.h"
+#include <git2/odb_backend.h>
 module Bindings.Libgit2.OdbBackend where
 import Foreign.Ptr
 #strict_import
@@ -8,6 +8,7 @@ import Foreign.Ptr
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Indexer
+import Bindings.Libgit2.Oid
 {- typedef struct {
             unsigned int version; git_oid_t oid_type;
         } git_odb_backend_pack_options; -}

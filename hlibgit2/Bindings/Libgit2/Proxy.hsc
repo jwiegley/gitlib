@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/proxy.h"
+#include <git2/proxy.h>
 module Bindings.Libgit2.Proxy where
 import Foreign.Ptr
 #strict_import

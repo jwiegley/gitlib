@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/patch.h"
+#include <git2/patch.h>
 module Bindings.Libgit2.Patch where
 import Foreign.Ptr
 #strict_import
@@ -9,9 +9,9 @@ import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Diff
+import Bindings.Libgit2.Buffer
 {- typedef struct git_patch git_patch; -}
 #opaque_t struct git_patch
-#synonym_t git_patch , <struct git_patch>
 #ccall git_patch_owner , Ptr <struct git_patch> -> IO (Ptr <struct git_repository>)
 #ccall git_patch_from_diff , Ptr (Ptr <struct git_patch>) -> Ptr <struct git_diff> -> CSize -> IO CInt
 #ccall git_patch_from_blobs , Ptr (Ptr <struct git_patch>) -> Ptr <struct git_blob> -> CString -> Ptr <struct git_blob> -> CString -> Ptr <git_diff_options> -> IO CInt

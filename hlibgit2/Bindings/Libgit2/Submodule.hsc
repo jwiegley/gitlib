@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/submodule.h"
+#include <git2/submodule.h>
 module Bindings.Libgit2.Submodule where
 import Foreign.Ptr
 #strict_import
@@ -10,6 +10,7 @@ import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Remote
 import Bindings.Libgit2.Checkout
+import Bindings.Libgit2.Buffer
 {- typedef enum {
             GIT_SUBMODULE_STATUS_IN_HEAD = 1u << 0,
             GIT_SUBMODULE_STATUS_IN_INDEX = 1u << 1,
@@ -54,7 +55,6 @@ import Bindings.Libgit2.Checkout
 #field fetch_opts , <git_fetch_options>
 #field allow_fetch , CInt
 #stoptype
-#synonym_t git_submodule_update_options , <struct git_submodule_update_options>
 #ccall git_submodule_update_options_init , Ptr <struct git_submodule_update_options> -> CUInt -> IO CInt
 #ccall git_submodule_update , Ptr <struct git_submodule> -> CInt -> Ptr <struct git_submodule_update_options> -> IO CInt
 #ccall git_submodule_lookup , Ptr (Ptr <struct git_submodule>) -> Ptr <struct git_repository> -> CString -> IO CInt

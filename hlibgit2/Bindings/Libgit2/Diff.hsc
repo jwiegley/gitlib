@@ -1,8 +1,10 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/diff.h"
+#include <git2/diff.h>
 module Bindings.Libgit2.Diff where
 import Foreign.Ptr
+import Bindings.Libgit2.Buffer
+import Bindings.Libgit2.Strarray
 #strict_import
 
 import Bindings.Libgit2.Common
@@ -77,7 +79,6 @@ import Bindings.Libgit2.Refs
 #num GIT_DIFF_SHOW_BINARY
 {- typedef struct git_diff git_diff; -}
 #opaque_t struct git_diff
-#synonym_t git_diff , <struct git_diff>
 {- typedef enum {
             GIT_DIFF_FLAG_BINARY = 1u << 0,
             GIT_DIFF_FLAG_NOT_BINARY = 1u << 1,
@@ -398,7 +399,6 @@ import Bindings.Libgit2.Refs
 #ccall git_diff_from_buffer , Ptr (Ptr <struct git_diff>) -> CString -> CSize -> IO CInt
 {- typedef struct git_diff_stats git_diff_stats; -}
 #opaque_t struct git_diff_stats
-#synonym_t git_diff_stats , <struct git_diff_stats>
 {- typedef enum {
             GIT_DIFF_STATS_NONE = 0,
             GIT_DIFF_STATS_FULL = 1u << 0,
@@ -424,6 +424,5 @@ import Bindings.Libgit2.Refs
 #starttype struct git_diff_patchid_options
 #field version , CUInt
 #stoptype
-#synonym_t git_diff_patchid_options , <struct git_diff_patchid_options>
 #ccall git_diff_patchid_options_init , Ptr <struct git_diff_patchid_options> -> CUInt -> IO CInt
 #ccall git_diff_patchid , Ptr <struct git_oid> -> Ptr <struct git_diff> -> Ptr <struct git_diff_patchid_options> -> IO CInt

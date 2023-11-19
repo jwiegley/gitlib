@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/stash.h"
+#include <git2/stash.h>
 module Bindings.Libgit2.Stash where
 import Foreign.Ptr
 #strict_import
@@ -8,6 +8,8 @@ import Foreign.Ptr
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Checkout
+import Bindings.Libgit2.Strarray
+import Bindings.Libgit2.Oid
 {- typedef enum {
             GIT_STASH_DEFAULT = 0,
             GIT_STASH_KEEP_INDEX = 1 << 0,
@@ -36,7 +38,6 @@ import Bindings.Libgit2.Checkout
 #field message , CString
 #field paths , <struct git_strarray>
 #stoptype
-#synonym_t git_stash_save_options , <struct git_stash_save_options>
 #ccall git_stash_save_options_init , Ptr <struct git_stash_save_options> -> CUInt -> IO CInt
 #ccall git_stash_save_with_opts , Ptr <struct git_oid> -> Ptr <struct git_repository> -> Ptr <struct git_stash_save_options> -> IO CInt
 {- typedef enum {
@@ -80,7 +81,6 @@ import Bindings.Libgit2.Checkout
 #field progress_cb , <git_stash_apply_progress_cb>
 #field progress_payload , Ptr ()
 #stoptype
-#synonym_t git_stash_apply_options , <struct git_stash_apply_options>
 #ccall git_stash_apply_options_init , Ptr <struct git_stash_apply_options> -> CUInt -> IO CInt
 #ccall git_stash_apply , Ptr <struct git_repository> -> CSize -> Ptr <struct git_stash_apply_options> -> IO CInt
 #callback git_stash_cb , CSize -> CString -> Ptr <struct git_oid> -> Ptr () -> IO CInt

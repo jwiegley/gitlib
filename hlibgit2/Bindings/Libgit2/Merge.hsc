@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/merge.h"
+#include <git2/merge.h>
 module Bindings.Libgit2.Merge where
 import Foreign.Ptr
 #strict_import
@@ -12,6 +12,7 @@ import Bindings.Libgit2.Oidarray
 import Bindings.Libgit2.Checkout
 import Bindings.Libgit2.Index
 import Bindings.Libgit2.AnnotatedCommit
+import Bindings.Libgit2.Diff
 {- typedef struct {
             unsigned int version;
             const char * ptr;

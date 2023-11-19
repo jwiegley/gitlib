@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/clone.h"
+#include <git2/clone.h>
 module Bindings.Libgit2.Clone where
 import Foreign.Ptr
 #strict_import
@@ -48,6 +48,5 @@ import Bindings.Libgit2.Transport
 #field remote_cb , <git_remote_create_cb>
 #field remote_cb_payload , Ptr ()
 #stoptype
-#synonym_t git_clone_options , <struct git_clone_options>
 #ccall git_clone_options_init , Ptr <struct git_clone_options> -> CUInt -> IO CInt
 #ccall git_clone , Ptr (Ptr <struct git_repository>) -> CString -> CString -> Ptr <struct git_clone_options> -> IO CInt

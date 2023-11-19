@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include "../../libgit2/include/git2/errors.h"
+#include <git2/errors.h>
 module Bindings.Libgit2.Errors where
 import Foreign.Ptr
 #strict_import
