@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include <git2.h>
+#include "../../libgit2/include/git2/reflog.h"
 module Bindings.Libgit2.Reflog where
 import Foreign.Ptr
 #strict_import
@@ -8,16 +8,16 @@ import Foreign.Ptr
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
-#ccall git_reflog_read , Ptr (Ptr <git_reflog>) -> Ptr <git_reference> -> IO (CInt)
-#ccall git_reflog_write , Ptr <git_reflog> -> IO (CInt)
-#ccall git_reflog_append , Ptr <git_reflog> -> Ptr <git_oid> -> Ptr <git_signature> -> CString -> IO (CInt)
-#ccall git_reflog_rename , Ptr <git_reference> -> CString -> IO (CInt)
-#ccall git_reflog_delete , Ptr <git_reference> -> IO (CInt)
-#ccall git_reflog_entrycount , Ptr <git_reflog> -> IO (CSize)
-#ccall git_reflog_entry_byindex , Ptr <git_reflog> -> CSize -> IO (Ptr <git_reflog_entry>)
-#ccall git_reflog_drop , Ptr <git_reflog> -> CSize -> CInt -> IO (CInt)
-#ccall git_reflog_entry_id_old , Ptr <git_reflog_entry> -> IO (Ptr <git_oid>)
-#ccall git_reflog_entry_id_new , Ptr <git_reflog_entry> -> IO (Ptr <git_oid>)
-#ccall git_reflog_entry_committer , Ptr <git_reflog_entry> -> IO (Ptr <git_signature>)
-#ccall git_reflog_entry_message , Ptr <git_reflog_entry> -> IO (CString)
-#ccall git_reflog_free , Ptr <git_reflog> -> IO ()
+#ccall git_reflog_read , Ptr (Ptr <struct git_reflog>) -> Ptr <struct git_repository> -> CString -> IO CInt
+#ccall git_reflog_write , Ptr <struct git_reflog> -> IO CInt
+#ccall git_reflog_append , Ptr <struct git_reflog> -> Ptr <struct git_oid> -> Ptr <struct git_signature> -> CString -> IO CInt
+#ccall git_reflog_rename , Ptr <struct git_repository> -> CString -> CString -> IO CInt
+#ccall git_reflog_delete , Ptr <struct git_repository> -> CString -> IO CInt
+#ccall git_reflog_entrycount , Ptr <struct git_reflog> -> IO CSize
+#ccall git_reflog_entry_byindex , Ptr <struct git_reflog> -> CSize -> IO (Ptr <struct git_reflog_entry>)
+#ccall git_reflog_drop , Ptr <struct git_reflog> -> CSize -> CInt -> IO CInt
+#ccall git_reflog_entry_id_old , Ptr <struct git_reflog_entry> -> IO (Ptr <struct git_oid>)
+#ccall git_reflog_entry_id_new , Ptr <struct git_reflog_entry> -> IO (Ptr <struct git_oid>)
+#ccall git_reflog_entry_committer , Ptr <struct git_reflog_entry> -> IO (Ptr <struct git_signature>)
+#ccall git_reflog_entry_message , Ptr <struct git_reflog_entry> -> IO CString
+#ccall git_reflog_free , Ptr <struct git_reflog> -> IO ()
