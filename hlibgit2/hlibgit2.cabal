@@ -1,3 +1,4 @@
+cabal-version:       3.0
 Name:                hlibgit2
 Version:             1.7.1.0
 Synopsis:            Low-level bindings to libgit2
@@ -6,27 +7,12 @@ License-file:        LICENSE
 License:             MIT
 Author:              John Wiegley, Sakari Jokinen, Jacob Stanleyyeah,
 Maintainer:          johnw@newartisans.com
-Build-Type:          Simple
-Cabal-Version:       >=1.10
+Build-Type:          Configure
 Category:            FFI
 
-Extra-source-files:
-  libgit2/include/git2/*.h
-  libgit2/include/git2.h
-  libgit2/deps/http-parser/http_parser.h
-  libgit2/deps/winhttp/*.h
-  libgit2/deps/xdiff/*.h
-  libgit2/deps/ntlmclient/*.h
-  libgit2/deps/zlib/*.h
-  libgit2/deps/pcre/*.h
-  libgit2/src/util/win32/*.h
-  libgit2/src/util/*.h
-  libgit2/src/util/hash/sha1dc/*.h
-  libgit2/src/util/hash/*.h
-  libgit2/src/util/allocators/*.h
-  libgit2/src/libgit2/*.h
-  libgit2/src/libgit2/streams/*.h
-  libgit2/src/libgit2/transports/*.h
+extra-source-files:
+  libgit2/**/*.h
+  libgit2/**/*.c
   libgit2/COPYING
 
 Source-repository head
@@ -45,8 +31,8 @@ Test-suite smoke
       base >=3
     , hlibgit2
     , process
-  build-tools:
-    git
+  build-tool-depends:
+    git:executable
 
 Library
   hs-source-dirs: .
@@ -55,7 +41,7 @@ Library
   default-extensions:
     ForeignFunctionInterface
   build-depends:
-      base            >= 3 && < 5
+      base >= 3 && < 5
     , bindings-DSL    >= 1.0.11
     , zlib            >= 0.5.4
 

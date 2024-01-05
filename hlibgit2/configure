@@ -1,0 +1,11 @@
+set -e
+
+cmake ../../../../../../libgit2 \
+  -D USE_NTLMCLIENT=OFF
+
+echo "include-dirs: 
+    ${PWD}/include
+    ${PWD}/src
+    ${PWD}/src/libgit2
+    ${PWD}/src/util
+    "> hlibgit2.buildinfo
