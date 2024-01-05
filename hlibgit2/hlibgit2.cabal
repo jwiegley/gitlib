@@ -10,28 +10,28 @@ Build-Type:          Simple
 Cabal-Version:       >=1.10
 Category:            FFI
 
--- Extra-source-files: --TODO
---    libgit2/include/git.h
---    libgit2/src/libgit2/git2/*.h
---    libgit2/src/libgit2/streams/*.h
---    libgit2/src/libgit2/transports/*.h
---    libgit2/src/util/*.h
---    libgit2/src/util/allocators/*.h
---    libgit2/src/util/hash/*.h
---    libgit2/src/util/hash/sha1dc/*.h
---    libgit2/src/util/hash/rfc6234/*.h
---    libgit2/deps/http-parser/*.h
---    libgit2/deps/xdiff/*.h
---    libgit2/deps/pcre/*.h
---    libgit2/deps/zlib/*.h
---    libgit2/deps/winhttp/*.h
---    libgit2/deps/ntlmclient/*.h
---    libgit2/deps/chromium-zlib/*.h
---    libgit2/COPYING
+Extra-source-files:
+  libgit2/include/git2/*.h
+  libgit2/include/git2.h
+  libgit2/deps/http-parser/http_parser.h
+  libgit2/deps/winhttp/*.h
+  libgit2/deps/xdiff/*.h
+  libgit2/deps/ntlmclient/*.h
+  libgit2/deps/zlib/*.h
+  libgit2/deps/pcre/*.h
+  libgit2/src/util/win32/*.h
+  libgit2/src/util/*.h
+  libgit2/src/util/hash/sha1dc/*.h
+  libgit2/src/util/hash/*.h
+  libgit2/src/util/allocators/*.h
+  libgit2/src/libgit2/*.h
+  libgit2/src/libgit2/streams/*.h
+  libgit2/src/libgit2/transports/*.h
+  libgit2/COPYING
 
 Source-repository head
   type: git
-  location: git://github.com/jwiegley/gitlib.git
+  location: git://github.com/flandweber/gitlib.git
 
 Test-suite smoke
   default-language: Haskell98
