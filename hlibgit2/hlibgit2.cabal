@@ -363,11 +363,11 @@ Library
     libgit2/src/libgit2/crlf.c
 
   include-dirs:
-    libgit2/include
-    libgit2/src/libgit2
-    libgit2/src/util
-    libgit2/deps/http-parser
-    libgit2/deps/xdiff
+    --libgit2/include
+    --libgit2/src/libgit2
+    --libgit2/src/util
+    --libgit2/deps/http-parser
+    --libgit2/deps/xdiff
     --libgit2/deps/pcre
     --libgit2/deps/zlib
     --libgit2/deps/ntlmclient
