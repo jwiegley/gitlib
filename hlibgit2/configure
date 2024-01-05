@@ -1,6 +1,6 @@
 set -e
 
-cmake ../../../../../../libgit2 \
+cmake ../../../../../../hlibgit2/libgit2 \
   -D USE_NTLMCLIENT=OFF
 
 echo "include-dirs: 
