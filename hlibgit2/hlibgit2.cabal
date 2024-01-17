@@ -11,8 +11,8 @@ Build-Type:          Configure
 Category:            FFI
 
 extra-source-files:
-  libgit2/**/*.h
-  libgit2/**/*.c
+  --libgit2/**/*.h
+  --libgit2/**/*.c
   libgit2/COPYING
   configure
 
@@ -406,3 +406,4 @@ Library
         /usr/local/opt/openssl/lib
     extra-libraries:
       ssl, crypto, pthread, pcre
+      --, libgit2

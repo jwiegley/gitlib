@@ -34,4 +34,4 @@ let
     '';
   };
 in
-  pkgs.haskellPackages.callCabal2nix "hlibgit2" hlibgit2-src {git = pkgs.git;}
+  pkgs.haskellPackages.callCabal2nix "hlibgit2" ./. {inherit (pkgs) git;}
