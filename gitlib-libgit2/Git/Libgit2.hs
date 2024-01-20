@@ -10,6 +10,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-# OPTIONS_GHC -fno-warn-name-shadowing
                 -fno-warn-unused-binds
@@ -46,6 +47,8 @@ module Git.Libgit2
        --, lgCopyPackFile
        --, lgDiffContentsWithTree
        , lgDiffTreeToTree
+       , lgAutomergeTrees
+       , lgMergeBase
        , lgWrap
        , oidToSha
        , shaToCOid
@@ -1617,5 +1620,47 @@ lgDiffTreeToTree file_cb binary_cb hunk_cb line_cb oldTree newTree = do
         r' <- liftIO $ c'git_diff_foreach diffPtr fcb bcb hcb lcb nullPtr
         when (r' < 0) . throwM $ Git.Types.DiffTreeToTreeFailed "git_diff_foreach failed."
         liftIO . c'git_diff_free $ diffPtr -- TODO: release whole list, not just first element
+
+lgAutomergeTrees ourTree theirTree mAncestorTree = do
+  repo <- getRepository
+  liftIO $
+    withForeignPtr (repoObj repo) $ \repoPtr ->
+    alloca $ \(out::Ptr (Ptr C'git_index)) ->
+    withTreePtr ourTree $ \our_tree ->
+    withTreePtr theirTree $ \their_tree ->
+    maybeWithTreePtr mAncestorTree $ \ancestor_tree -> do
+      try $ c'git_merge_trees out repoPtr ancestor_tree our_tree their_tree nullPtr
+      index::(Ptr C'git_index) <- peek out
+      conflicts <- c'git_index_has_conflicts index
+      if conflicts == 1
+        then return Nothing
+        else do
+          oid <- mallocForeignPtr
+          withForeignPtr oid $ \oid' -> 
+            try $ c'git_index_write_tree_to oid' index repoPtr
+          return $ Just $ Tagged $ mkOid oid
+  where
+    withTreePtr (LgTree Nothing) io = io nullPtr
+    withTreePtr (LgTree (Just ptr)) io = withForeignPtr ptr io
+    maybeWithTreePtr Nothing io = io nullPtr
+    maybeWithTreePtr (Just tp) io = withTreePtr tp io
+    try io = do
+      r <- io
+      when (r < 0) $ do
+        message <- peekCString . c'git_error'message =<< peek =<< c'git_error_last
+        throwM $ Git.Types.BackendError $ T.pack message
+
+lgMergeBase :: (HasLgRepo m, MonadIO m) => [CommitOid] -> m CommitOid
+lgMergeBase inputs = do
+  repo <- getRepository
+  liftIO $ do
+    inputs::[C'git_oid] <- mapM (\oid -> withForeignPtr oid peek) $ map (getOid . untag) inputs
+    oid <- mallocForeignPtr
+    withForeignPtr oid $ \out -> 
+      withForeignPtr (repoObj repo) $ \repo ->
+      withArray inputs $ \input_array ->
+      c'git_merge_base_many out repo (fromInteger $ toInteger $ length inputs) input_array
+    return $ Tagged $ mkOid oid
+
 
 -- Libgit2.hs
