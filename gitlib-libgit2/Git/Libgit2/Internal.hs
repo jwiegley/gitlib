@@ -29,18 +29,18 @@ import           Git.Libgit2.Trace
 import           Git.Libgit2.Types
 import           System.FilePath.Posix
 
-addTracingBackend :: LgRepo -> IO ()
-addTracingBackend repo =
-    withCString (lgRepoPath repo </> "objects") $ \objectsDir ->
-        alloca $ \loosePtr -> do
-            r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
-            when (r < 0) $
-                error "Failed to create loose objects backend"
-
-            loosePtr' <- peek loosePtr
-            backend   <- traceBackend loosePtr'
-            void $ odbBackendAdd repo backend 3
-            return ()
+--addTracingBackend :: LgRepo -> IO ()
+--addTracingBackend repo =
+--    withCString (lgRepoPath repo </> "objects") $ \objectsDir ->
+--        alloca $ \loosePtr -> do
+--            r <- c'git_odb_backend_loose loosePtr objectsDir (-1) 0
+--            when (r < 0) $
+--                error "Failed to create loose objects backend"
+--
+--            loosePtr' <- peek loosePtr
+--            backend   <- traceBackend loosePtr'
+--            void $ odbBackendAdd repo backend 3
+--            return ()
 
 coidPtrToOid :: Ptr C'git_oid -> IO (ForeignPtr C'git_oid)
 coidPtrToOid coidptr = do
@@ -68,7 +68,7 @@ lookupObject' oid len lookupFn lookupPrefixFn createFn = do
             then do
               oidStr <- withForeignPtr oid (flip oidToStr len)
               let args = ["Could not lookup ", T.pack oidStr]
-              err <- c'giterr_last
+              err <- c'git_error_last
               if err == nullPtr
                   then return $ Left $ T.concat args
                   else do

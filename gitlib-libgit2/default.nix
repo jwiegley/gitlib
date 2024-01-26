@@ -1,27 +1,11 @@
-{ mkDerivation, base, bytestring, conduit, conduit-combinators
-, containers, directory, exceptions, fast-logger, filepath, gitlib
-, gitlib-test, hlibgit2, hspec, hspec-expectations, HUnit
-, lifted-async, lifted-base, mmorph, monad-control, monad-loops
-, mtl, resourcet, stdenv, stm, stm-conduit, tagged
-, template-haskell, text, text-icu, time, transformers
-, transformers-base
-, ...
-}:
-mkDerivation {
-  pname = "gitlib-libgit2";
-  version = "3.1.1";
-  src = ./.;
-  libraryHaskellDepends = [
-    base bytestring conduit conduit-combinators containers directory
-    exceptions fast-logger filepath gitlib hlibgit2 lifted-async
-    lifted-base mmorph monad-control monad-loops mtl resourcet stm
-    stm-conduit tagged template-haskell text text-icu time transformers
-    transformers-base
-  ];
-  testHaskellDepends = [
-    base exceptions gitlib gitlib-test hspec hspec-expectations HUnit
-    transformers
-  ];
-  description = "Libgit2 backend for gitlib";
-  license = stdenv.lib.licenses.mit;
-}
+let
+  pkgs = import <nixpkgs> {};
+  hpkgs = pkgs.haskellPackages.override {
+    overrides = hself: hsuper: {
+      gitlib = hsuper.callCabal2nix "gitlib" ../gitlib {};
+      gitlib-test = hsuper.callCabal2nix "gitlib-test" ../gitlib-test {};
+      hlibgit2 = import ../hlibgit2;
+    };
+  };
+in
+  hpkgs.callCabal2nix "gitlib-libgit2" ./. {}

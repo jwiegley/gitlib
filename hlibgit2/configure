@@ -1,0 +1,22 @@
+set -e
+
+rm -rf libgit2
+git clone https://github.com/libgit2/libgit2.git libgit2
+cd libgit2
+git checkout 45fd9ed7ae1a9b74b957ef4f337bc3c8b3df01b5
+
+cmake . \
+  -D USE_NTLMCLIENT=OFF \
+  -D BUILD_TESTS=OFF \
+  -D USE_HTTPS=system
+
+cd ..
+
+echo "include-dirs: 
+    ${PWD}/libgit2/include
+    ${PWD}/libgit2/src
+    ${PWD}/libgit2/src/libgit2
+    ${PWD}/libgit2/src/util
+    ${PWD}/libgit2/deps/http-parser
+    ${PWD}/libgit2/deps/xdiff
+    "> hlibgit2.buildinfo

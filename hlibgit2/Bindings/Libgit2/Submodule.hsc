@@ -1,6 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include <git2.h>
+#include <git2/submodule.h>
 module Bindings.Libgit2.Submodule where
 import Foreign.Ptr
 #strict_import
@@ -8,34 +8,9 @@ import Foreign.Ptr
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
 import Bindings.Libgit2.Oid
-{- typedef struct git_submodule git_submodule; -}
-#opaque_t git_submodule
-{- typedef enum {
-            GIT_SUBMODULE_UPDATE_DEFAULT = -1,
-            GIT_SUBMODULE_UPDATE_CHECKOUT = 0,
-            GIT_SUBMODULE_UPDATE_REBASE = 1,
-            GIT_SUBMODULE_UPDATE_MERGE = 2,
-            GIT_SUBMODULE_UPDATE_NONE = 3
-        } git_submodule_update_t; -}
-#integral_t git_submodule_update_t
-#num GIT_SUBMODULE_UPDATE_DEFAULT
-#num GIT_SUBMODULE_UPDATE_CHECKOUT
-#num GIT_SUBMODULE_UPDATE_REBASE
-#num GIT_SUBMODULE_UPDATE_MERGE
-#num GIT_SUBMODULE_UPDATE_NONE
-{- typedef enum {
-            GIT_SUBMODULE_IGNORE_DEFAULT = -1,
-            GIT_SUBMODULE_IGNORE_NONE = 0,
-            GIT_SUBMODULE_IGNORE_UNTRACKED = 1,
-            GIT_SUBMODULE_IGNORE_DIRTY = 2,
-            GIT_SUBMODULE_IGNORE_ALL = 3
-        } git_submodule_ignore_t; -}
-#integral_t git_submodule_ignore_t
-#num GIT_SUBMODULE_IGNORE_DEFAULT
-#num GIT_SUBMODULE_IGNORE_NONE
-#num GIT_SUBMODULE_IGNORE_UNTRACKED
-#num GIT_SUBMODULE_IGNORE_DIRTY
-#num GIT_SUBMODULE_IGNORE_ALL
+import Bindings.Libgit2.Remote
+import Bindings.Libgit2.Checkout
+import Bindings.Libgit2.Buffer
 {- typedef enum {
             GIT_SUBMODULE_STATUS_IN_HEAD = 1u << 0,
             GIT_SUBMODULE_STATUS_IN_INDEX = 1u << 1,
@@ -67,31 +42,50 @@ import Bindings.Libgit2.Oid
 #num GIT_SUBMODULE_STATUS_WD_INDEX_MODIFIED
 #num GIT_SUBMODULE_STATUS_WD_WD_MODIFIED
 #num GIT_SUBMODULE_STATUS_WD_UNTRACKED
-#ccall git_submodule_lookup , Ptr (Ptr <git_submodule>) -> Ptr <git_repository> -> CString -> IO (CInt)
-#callback git_submodule_foreach_callback , Ptr (<git_submodule>) -> CString -> Ptr () -> IO CInt
-#ccall git_submodule_foreach , Ptr <git_repository> -> <git_submodule_foreach_callback> -> Ptr () -> IO (CInt)
-#ccall git_submodule_add_setup , Ptr (Ptr <git_submodule>) -> Ptr <git_repository> -> CString -> CString -> CInt -> IO (CInt)
-#ccall git_submodule_add_finalize , Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_add_to_index , Ptr <git_submodule> -> CInt -> IO (CInt)
-#ccall git_submodule_save , Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_owner , Ptr <git_submodule> -> IO (Ptr <git_repository>)
-#ccall git_submodule_name , Ptr <git_submodule> -> IO (CString)
-#ccall git_submodule_path , Ptr <git_submodule> -> IO (CString)
-#ccall git_submodule_url , Ptr <git_submodule> -> IO (CString)
-#ccall git_submodule_set_url , Ptr <git_submodule> -> CString -> IO (CInt)
-#ccall git_submodule_index_id , Ptr <git_submodule> -> IO (Ptr <git_oid>)
-#ccall git_submodule_head_id , Ptr <git_submodule> -> IO (Ptr <git_oid>)
-#ccall git_submodule_wd_id , Ptr <git_submodule> -> IO (Ptr <git_oid>)
-#ccall git_submodule_ignore , Ptr <git_submodule> -> IO (<git_submodule_ignore_t>)
-#ccall git_submodule_set_ignore , Ptr <git_submodule> -> <git_submodule_ignore_t> -> IO (<git_submodule_ignore_t>)
-#ccall git_submodule_update , Ptr <git_submodule> -> IO (<git_submodule_update_t>)
-#ccall git_submodule_set_update , Ptr <git_submodule> -> <git_submodule_update_t> -> IO (<git_submodule_update_t>)
-#ccall git_submodule_fetch_recurse_submodules , Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_set_fetch_recurse_submodules , Ptr <git_submodule> -> CInt -> IO (CInt)
-#ccall git_submodule_init , Ptr <git_submodule> -> CInt -> IO (CInt)
-#ccall git_submodule_sync , Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_open , Ptr (Ptr <git_repository>) -> Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_reload , Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_reload_all , Ptr <git_repository> -> IO (CInt)
-#ccall git_submodule_status , Ptr CUInt -> Ptr <git_submodule> -> IO (CInt)
-#ccall git_submodule_location , Ptr CUInt -> Ptr <git_submodule> -> IO (CInt)
+#callback git_submodule_cb , Ptr <struct git_submodule> -> CString -> Ptr () -> IO CInt
+{- typedef struct git_submodule_update_options {
+            unsigned int version;
+            git_checkout_options checkout_opts;
+            git_fetch_options fetch_opts;
+            int allow_fetch;
+        } git_submodule_update_options; -}
+#starttype struct git_submodule_update_options
+#field version , CUInt
+#field checkout_opts , <struct git_checkout_options>
+#field fetch_opts , <git_fetch_options>
+#field allow_fetch , CInt
+#stoptype
+#ccall git_submodule_update_options_init , Ptr <struct git_submodule_update_options> -> CUInt -> IO CInt
+#ccall git_submodule_update , Ptr <struct git_submodule> -> CInt -> Ptr <struct git_submodule_update_options> -> IO CInt
+#ccall git_submodule_lookup , Ptr (Ptr <struct git_submodule>) -> Ptr <struct git_repository> -> CString -> IO CInt
+#ccall git_submodule_dup , Ptr (Ptr <struct git_submodule>) -> Ptr <struct git_submodule> -> IO CInt
+#ccall git_submodule_free , Ptr <struct git_submodule> -> IO ()
+#ccall git_submodule_foreach , Ptr <struct git_repository> -> <git_submodule_cb> -> Ptr () -> IO CInt
+#ccall git_submodule_add_setup , Ptr (Ptr <struct git_submodule>) -> Ptr <struct git_repository> -> CString -> CString -> CInt -> IO CInt
+#ccall git_submodule_clone , Ptr (Ptr <struct git_repository>) -> Ptr <struct git_submodule> -> Ptr <struct git_submodule_update_options> -> IO CInt
+#ccall git_submodule_add_finalize , Ptr <struct git_submodule> -> IO CInt
+#ccall git_submodule_add_to_index , Ptr <struct git_submodule> -> CInt -> IO CInt
+#ccall git_submodule_owner , Ptr <struct git_submodule> -> IO (Ptr <struct git_repository>)
+#ccall git_submodule_name , Ptr <struct git_submodule> -> IO CString
+#ccall git_submodule_path , Ptr <struct git_submodule> -> IO CString
+#ccall git_submodule_url , Ptr <struct git_submodule> -> IO CString
+#ccall git_submodule_resolve_url , Ptr <git_buf> -> Ptr <struct git_repository> -> CString -> IO CInt
+#ccall git_submodule_branch , Ptr <struct git_submodule> -> IO CString
+#ccall git_submodule_set_branch , Ptr <struct git_repository> -> CString -> CString -> IO CInt
+#ccall git_submodule_set_url , Ptr <struct git_repository> -> CString -> CString -> IO CInt
+#ccall git_submodule_index_id , Ptr <struct git_submodule> -> IO (Ptr <struct git_oid>)
+#ccall git_submodule_head_id , Ptr <struct git_submodule> -> IO (Ptr <struct git_oid>)
+#ccall git_submodule_wd_id , Ptr <struct git_submodule> -> IO (Ptr <struct git_oid>)
+#ccall git_submodule_ignore , Ptr <struct git_submodule> -> IO <git_submodule_ignore_t>
+#ccall git_submodule_set_ignore , Ptr <struct git_repository> -> CString -> <git_submodule_ignore_t> -> IO CInt
+#ccall git_submodule_update_strategy , Ptr <struct git_submodule> -> IO <git_submodule_update_t>
+#ccall git_submodule_set_update , Ptr <struct git_repository> -> CString -> <git_submodule_update_t> -> IO CInt
+#ccall git_submodule_fetch_recurse_submodules , Ptr <struct git_submodule> -> IO <git_submodule_recurse_t>
+#ccall git_submodule_set_fetch_recurse_submodules , Ptr <struct git_repository> -> CString -> <git_submodule_recurse_t> -> IO CInt
+#ccall git_submodule_init , Ptr <struct git_submodule> -> CInt -> IO CInt
+#ccall git_submodule_repo_init , Ptr (Ptr <struct git_repository>) -> Ptr <struct git_submodule> -> CInt -> IO CInt
+#ccall git_submodule_sync , Ptr <struct git_submodule> -> IO CInt
+#ccall git_submodule_open , Ptr (Ptr <struct git_repository>) -> Ptr <struct git_submodule> -> IO CInt
+#ccall git_submodule_reload , Ptr <struct git_submodule> -> CInt -> IO CInt
+#ccall git_submodule_status , Ptr CUInt -> Ptr <struct git_repository> -> CString -> <git_submodule_ignore_t> -> IO CInt
+#ccall git_submodule_location , Ptr CUInt -> Ptr <struct git_submodule> -> IO CInt

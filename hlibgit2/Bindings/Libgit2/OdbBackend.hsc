@@ -1,142 +1,92 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include <git2.h>
+#include <git2/odb_backend.h>
 module Bindings.Libgit2.OdbBackend where
 import Foreign.Ptr
 #strict_import
 
 import Bindings.Libgit2.Common
 import Bindings.Libgit2.Types
-import Bindings.Libgit2.Oid
 import Bindings.Libgit2.Indexer
-{- struct git_odb_stream; -}
-{-  #opaque_t git_odb_stream -}
-{- struct git_odb_writepack; -}
-{-  #opaque_t git_odb_writepack -}
-{- typedef int (* git_odb_foreach_cb)(const git_oid * id,
-                                   void * payload); -}
-#callback git_odb_foreach_cb , Ptr (<git_oid>) -> Ptr () -> IO CInt
-{- struct git_odb_backend {
-    unsigned int version;
-    git_odb * odb;
-    int (* read)(void * *,
-                 size_t *,
-                 git_otype *,
-                 struct git_odb_backend *,
-                 const git_oid *);
-    int (* read_prefix)(git_oid *,
-                        void * *,
-                        size_t *,
-                        git_otype *,
-                        struct git_odb_backend *,
-                        const git_oid *,
-                        size_t);
-    int (* read_header)(size_t *,
-                        git_otype *,
-                        struct git_odb_backend *,
-                        const git_oid *);
-    int (* write)(git_oid *,
-                  struct git_odb_backend *,
-                  const void *,
-                  size_t,
-                  git_otype);
-    int (* writestream)(struct git_odb_stream * *,
-                        struct git_odb_backend *,
-                        size_t,
-                        git_otype);
-    int (* readstream)(struct git_odb_stream * *,
-                       struct git_odb_backend *,
-                       const git_oid *);
-    int (* exists)(struct git_odb_backend *, const git_oid *, bool);
-    int (* refresh)(struct git_odb_backend *);
-    int (* foreach)(struct git_odb_backend *,
-                    git_odb_foreach_cb cb,
-                    void * payload);
-    int (* writepack)(struct git_odb_writepack * *,
-                      struct git_odb_backend *,
-                      git_transfer_progress_callback progress_cb,
-                      void * progress_payload);
-    void (* free)(struct git_odb_backend *);
-}; -}
-#callback git_odb_backend_read_callback , Ptr (Ptr ()) -> Ptr CSize -> Ptr <git_otype> -> Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
-#callback git_odb_backend_read_prefix_callback , Ptr <git_oid> -> Ptr (Ptr ()) -> Ptr CSize -> Ptr <git_otype> -> Ptr <git_odb_backend> -> Ptr <git_oid> -> CSize -> IO CInt
-#callback git_odb_backend_read_header_callback , Ptr CSize -> Ptr <git_otype> -> Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
-#callback git_odb_backend_write_callback , Ptr <git_oid> -> Ptr <git_odb_backend> -> Ptr () -> CSize -> <git_otype> -> IO CInt
-#callback git_odb_backend_writestream_callback , Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> CSize -> <git_otype> -> IO CInt
-#callback git_odb_backend_readstream_callback , Ptr (Ptr <git_odb_stream>) -> Ptr <git_odb_backend> -> Ptr <git_oid> -> IO CInt
-#callback git_odb_backend_exists_callback , Ptr <git_odb_backend> -> Ptr <git_oid> -> CInt -> IO CInt
-#callback git_odb_backend_refresh_callback , Ptr <git_odb_backend> -> IO CInt
-#callback git_odb_backend_foreach_callback , Ptr <git_odb_backend> -> <git_odb_foreach_cb> -> Ptr () -> IO CInt
-#callback git_odb_backend_writepack_callback , Ptr (Ptr <git_odb_writepack>) -> Ptr <git_odb_backend> -> <git_transfer_progress_callback> -> Ptr () -> IO CInt
-#callback git_odb_backend_free_callback , Ptr <git_odb_backend> -> IO ()
-#starttype git_odb_backend
+import Bindings.Libgit2.Oid
+{- typedef struct {
+            unsigned int version; git_oid_t oid_type;
+        } git_odb_backend_pack_options; -}
+#starttype git_odb_backend_pack_options
 #field version , CUInt
-#field odb , Ptr <git_odb>
-#field read , <git_odb_backend_read_callback>
-#field read_prefix , <git_odb_backend_read_prefix_callback>
-#field read_header , <git_odb_backend_read_header_callback>
-#field write , <git_odb_backend_write_callback>
-#field writestream , <git_odb_backend_writestream_callback>
-#field readstream , <git_odb_backend_readstream_callback>
-#field exists , <git_odb_backend_exists_callback>
-#field refresh , <git_odb_backend_refresh_callback>
-#field foreach , <git_odb_backend_foreach_callback>
-#field writepack , <git_odb_backend_writepack_callback>
-#field free , <git_odb_backend_free_callback>
+#field oid_type , <git_oid_t>
 #stoptype
-{- enum {
-    GIT_STREAM_RDONLY = 1 << 1,
-    GIT_STREAM_WRONLY = 1 << 2,
-    GIT_STREAM_RW = GIT_STREAM_RDONLY | GIT_STREAM_WRONLY
-}; -}
+#ccall git_odb_backend_pack , Ptr (Ptr <struct git_odb_backend>) -> CString -> IO CInt
+#ccall git_odb_backend_one_pack , Ptr (Ptr <struct git_odb_backend>) -> CString -> IO CInt
+{- typedef enum {
+            GIT_ODB_BACKEND_LOOSE_FSYNC = 1 << 0
+        } git_odb_backend_loose_flag_t; -}
+#integral_t git_odb_backend_loose_flag_t
+#num GIT_ODB_BACKEND_LOOSE_FSYNC
+{- typedef struct {
+            unsigned int version;
+            uint32_t flags;
+            int compression_level;
+            unsigned int dir_mode;
+            unsigned int file_mode;
+            git_oid_t oid_type;
+        } git_odb_backend_loose_options; -}
+#starttype git_odb_backend_loose_options
+#field version , CUInt
+#field flags , CUInt
+#field compression_level , CInt
+#field dir_mode , CUInt
+#field file_mode , CUInt
+#field oid_type , <git_oid_t>
+#stoptype
+#ccall git_odb_backend_loose , Ptr (Ptr <struct git_odb_backend>) -> CString -> CInt -> CInt -> CUInt -> CUInt -> IO CInt
+{- typedef enum {
+            GIT_STREAM_RDONLY = 1 << 1,
+            GIT_STREAM_WRONLY = 1 << 2,
+            GIT_STREAM_RW = GIT_STREAM_RDONLY | GIT_STREAM_WRONLY
+        } git_odb_stream_t; -}
+#integral_t git_odb_stream_t
 #num GIT_STREAM_RDONLY
 #num GIT_STREAM_WRONLY
 #num GIT_STREAM_RW
 {- struct git_odb_stream {
-    struct git_odb_backend * backend;
+    git_odb_backend * backend;
     unsigned int mode;
-    int (* read)(struct git_odb_stream * stream,
-                 char * buffer,
-                 size_t len);
-    int (* write)(struct git_odb_stream * stream,
+    void * hash_ctx;
+    git_object_size_t declared_size;
+    git_object_size_t received_bytes;
+    int (* read)(git_odb_stream * stream, char * buffer, size_t len);
+    int (* write)(git_odb_stream * stream,
                   const char * buffer,
                   size_t len);
-    int (* finalize_write)(git_oid * oid_p,
-                           struct git_odb_stream * stream);
-    void (* free)(struct git_odb_stream * stream);
+    int (* finalize_write)(git_odb_stream * stream,
+                           const git_oid * oid);
+    void (* free)(git_odb_stream * stream);
 }; -}
-#callback git_odb_stream_read_callback , Ptr <git_odb_stream> -> CString -> CSize -> IO CInt
-#callback git_odb_stream_write_callback , Ptr <git_odb_stream> -> CString -> CSize -> IO CInt
-#callback git_odb_stream_finalize_write_callback , Ptr <git_oid> -> Ptr <git_odb_stream> -> IO CInt
-#callback git_odb_stream_free_callback , Ptr <git_odb_stream> -> IO ()
-#starttype git_odb_stream
-#field backend , Ptr <git_odb_backend>
+#starttype struct git_odb_stream
+#field backend , Ptr <struct git_odb_backend>
 #field mode , CUInt
-#field read , <git_odb_stream_read_callback>
-#field write , <git_odb_stream_write_callback>
-#field finalize_write , <git_odb_stream_finalize_write_callback>
-#field free , <git_odb_stream_free_callback>
+#field hash_ctx , Ptr ()
+#field declared_size , CULong
+#field received_bytes , CULong
+#field read , FunPtr (Ptr <struct git_odb_stream> -> CString -> CSize -> CInt)
+#field write , FunPtr (Ptr <struct git_odb_stream> -> CString -> CSize -> CInt)
+#field finalize_write , FunPtr (Ptr <struct git_odb_stream> -> Ptr <struct git_oid> -> CInt)
+#field free , FunPtr (Ptr <struct git_odb_stream> -> IO ())
 #stoptype
 {- struct git_odb_writepack {
-    struct git_odb_backend * backend;
-    int (* add)(struct git_odb_writepack * writepack,
-                const void * data,
-                size_t size,
-                git_transfer_progress * stats);
-    int (* commit)(struct git_odb_writepack * writepack,
-                   git_transfer_progress * stats);
-    void (* free)(struct git_odb_writepack * writepack);
+    git_odb_backend * backend;
+    int (* append)(git_odb_writepack * writepack,
+                   const void * data,
+                   size_t size,
+                   git_indexer_progress * stats);
+    int (* commit)(git_odb_writepack * writepack,
+                   git_indexer_progress * stats);
+    void (* free)(git_odb_writepack * writepack);
 }; -}
-#callback git_odb_writepack_add_callback , Ptr <git_odb_writepack> -> Ptr () -> CSize -> Ptr <git_transfer_progress> -> IO CInt
-#callback git_odb_writepack_commit_callback , Ptr <git_odb_writepack> -> Ptr <git_transfer_progress> -> IO CInt
-#callback git_odb_writepack_free_callback , Ptr <git_odb_writepack> -> IO ()
-#starttype git_odb_writepack
-#field backend , Ptr <git_odb_backend>
-#field add , <git_odb_writepack_add_callback>
-#field commit , <git_odb_writepack_commit_callback>
-#field free , <git_odb_writepack_free_callback>
+#starttype struct git_odb_writepack
+#field backend , Ptr <struct git_odb_backend>
+#field append , FunPtr (Ptr <struct git_odb_writepack> -> Ptr () -> CSize -> Ptr <struct git_indexer_progress> -> CInt)
+#field commit , FunPtr (Ptr <struct git_odb_writepack> -> Ptr <struct git_indexer_progress> -> CInt)
+#field free , FunPtr (Ptr <struct git_odb_writepack> -> IO ())
 #stoptype
-#ccall git_odb_backend_malloc , Ptr <git_odb_backend> -> CSize -> IO (Ptr ())
-#ccall git_odb_backend_pack , Ptr (Ptr <git_odb_backend>) -> CString -> IO (CInt)
-#ccall git_odb_backend_loose , Ptr (Ptr <git_odb_backend>) -> CString -> CInt -> CInt -> IO (CInt)
-#ccall git_odb_backend_one_pack , Ptr (Ptr <git_odb_backend>) -> CString -> IO (CInt)

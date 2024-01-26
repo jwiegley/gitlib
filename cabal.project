@@ -1,0 +1,6 @@
+packages: 
+  --*/*.cabal
+  gitlib
+  gitlib-libgit2
+  gitlib-test
+  hlibgit2

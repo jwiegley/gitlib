@@ -1,6 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 #include <bindings.dsl.h>
-#include <git2.h>
 #include <git2/trace.h>
 module Bindings.Libgit2.Trace where
 import Foreign.Ptr
@@ -25,7 +24,5 @@ import Bindings.Libgit2.Types
 #num GIT_TRACE_INFO
 #num GIT_TRACE_DEBUG
 #num GIT_TRACE_TRACE
-{- typedef void (* git_trace_callback)(git_trace_level_t level,
-                                    const char * msg); -}
-#callback git_trace_callback , <git_trace_level_t> -> CString -> IO ()
-#ccall git_trace_set , <git_trace_level_t> -> <git_trace_callback> -> IO (CInt)
+#callback git_trace_cb , <git_trace_level_t> -> CString -> IO ()
+#ccall git_trace_set , <git_trace_level_t> -> <git_trace_cb> -> IO CInt
