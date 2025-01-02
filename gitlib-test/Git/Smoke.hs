@@ -8,6 +8,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-wrong-do-bind #-}
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 
 module Git.Smoke where
 
@@ -15,8 +16,6 @@ import           Conduit
 import           Control.Applicative
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.Fail
-import           Control.Monad.IO.Unlift
 import qualified Data.ByteString.Lazy as BL
 import           Data.List (sort)
 import           Data.Monoid
@@ -28,7 +27,7 @@ import           Data.Typeable
 import           Git
 import           Prelude hiding (putStr)
 import           Test.HUnit
-import           Test.Hspec (Spec, Example, describe, it)
+import           Test.Hspec (Spec, describe, it)
 import           Test.Hspec.Expectations
 
 sampleCommit :: MonadGit r m => TreeOid r -> Signature -> m (Commit r)

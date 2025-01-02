@@ -9,7 +9,6 @@ import           Control.Monad.IO.Unlift
 -- import           Control.Monad.Trans.Control
 import qualified Data.ByteString as B (readFile)
 import qualified Data.ByteString.Char8 as B8
-import           Data.Foldable (foldl')
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import           Data.Maybe

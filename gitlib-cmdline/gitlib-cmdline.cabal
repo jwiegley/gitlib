@@ -1,5 +1,5 @@
 Name:                gitlib-cmdline
-Version:             3.2.0.2
+Version:             3.3.0
 Synopsis:            Gitlib repository backend that uses the git command-line tool.
 Description:         Gitlib repository backend that uses the git command-line tool.
 License-file:        LICENSE
@@ -20,7 +20,7 @@ Library
   ghc-options: -Wall
   build-depends:
       base >= 3 && < 5
-    , gitlib               >= 3.0.0
+    , gitlib               >= 3.3.0
     , bytestring           >= 0.9.2.1
     , conduit              >= 1.1.0
     , conduit-combinators  >= 1
@@ -51,9 +51,10 @@ Test-suite smoke
   hs-source-dirs: test
   build-depends:
       base >=3
-    , gitlib             >= 3.0.0
-    , gitlib-test        >= 3.0.0
-    , gitlib-cmdline     >= 3.0.0
+    , gitlib             >= 3.3.0
+    , gitlib-test        >= 3.3.0
+    , gitlib-cmdline     >= 3.3.0
+    , HUnit              >= 1.6.2.0
     , hspec              >= 1.4.4
     , hspec-expectations >= 0.3
     , system-filepath    >= 0.4.7

@@ -61,11 +61,10 @@ instance Functor m => Functor (TreeT r m) where
     fmap f (TreeT t) = TreeT (fmap f t)
 
 instance Monad m => Monad (TreeT r m) where
-    return x = TreeT (return x)
     TreeT x >>= f = TreeT (x >>= runTreeT . f)
 
 instance (Functor m, Monad m) => Applicative (TreeT r m) where
-    pure = return
+    pure = TreeT . pure
     (<*>) = ap
 
 instance (Functor m, MonadPlus m) => Alternative (TreeT r m) where
@@ -149,7 +148,6 @@ queryTreeBuilder builder path kind f = do
                 tree <- lookupTree st'
                 ModifiedBuilder
                     <$> mtbNewBuilder (fromBuilderMod bm) (Just tree)
-            _ -> error "queryTreeBuilder encountered the impossible"
 
         (sbm', z) <- walk sbm names
         let bm' = bm <> postUpdate bm sbm' name

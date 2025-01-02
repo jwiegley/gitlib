@@ -7,7 +7,7 @@ module Main where
 
 import qualified Git.CmdLine as Cli
 import qualified Git.Smoke as Git
-import           Test.Hspec.HUnit ()
+import           Test.HUnit ()
 import           Test.Hspec.Runner
 
 main :: IO ()

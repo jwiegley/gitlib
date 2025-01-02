@@ -21,7 +21,6 @@ import           Data.Function (fix)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as Map
 import           Data.Maybe
-import           Data.Monoid ((<>))
 import           Data.Tagged
 import           Data.Text (pack)
 import qualified Data.Text as T
@@ -45,6 +44,7 @@ data Options = Options
     , optDebug      :: Bool
     , optGitDir     :: FilePath
     , optWorkingDir :: FilePath
+    , optRefName    :: String
     , optInterval   :: Int
     , optResume     :: Bool
     }
@@ -55,10 +55,12 @@ options = Options
     <*> switch (short 'v' <> long "verbose" <> help "Display more info")
     <*> switch (short 'D' <> long "debug" <> help "Display debug")
     <*> strOption
-        (long "git-dir" <> value ".git"
+        (long "git-dir" <> value "some.git.directory"
          <> help "Git repository to store snapshots in (def: \".git\")")
     <*> strOption (short 'd' <> long "work-dir" <> value ""
                    <> help "The working tree to snapshot (def: \".\")")
+    <*> strOption (short 'r' <> long "ref" <> value "HEAD"
+                   <> help "The ref name whose work should be tracked")
     <*> option auto (short 'i' <> long "interval" <> value 60
                 <> help "Snapshot each N seconds")
     <*> switch (short 'r' <> long "resume"
@@ -100,16 +102,15 @@ doMain opts = do
     -- Make sure we're in a known branch, and if so, let it begin
     forever $ withRepository lgFactory gd $ do
         log' $ pack $ "Working tree: " ++ wd
-        ref <- lookupReference "HEAD"
-        case ref of
-            Just (RefSymbolic name) -> do
-                log' $ "Tracking branch " <> name
-                log' $ "Saving snapshots under " <> T.pack gd
-                log' $ "Snapshot ref is refs/snapshots/" <> name
-                void $ start wd userName userEmail name
-            _ -> do
-                log' "Cannot use git-monitor if no branch is checked out"
-                liftIO $ threadDelay (optInterval opts * 1000000)
+        let rname = T.pack (optRefName opts)
+        ref <- lookupReference rname
+        let name = case ref of
+                Just (RefSymbolic name) -> name
+                _ -> rname
+        log' $ "Tracking branch " <> name
+        log' $ "Saving snapshots under " <> T.pack gd
+        log' $ "Snapshot ref is refs/snapshots/" <> name
+        void $ start wd userName userEmail name
   where
     start wd userName userEmail ref = do
         let sref = "refs/snapshots/" <> ref
@@ -126,7 +127,7 @@ doMain opts = do
         scr  <- if optResume opts
                 then resolveReference sref
                 else return Nothing
-        scr' <- maybe (resolveReference "HEAD") (return . Just) scr
+        scr' <- maybe (resolveReference ref) (return . Just) scr
         case scr' of
             Nothing -> errorL "Failed to lookup reference"
             Just r -> do
@@ -189,8 +190,9 @@ snapshotTree opts wd name email ref sref = fix $ \loop sc toid ft -> do
     liftIO $ threadDelay (optInterval opts * 1000000)
 
     -- Rinse, wash, repeat.
-    ref' <- lift $ lookupReference "HEAD"
-    let curRef = case ref' of Just (RefSymbolic ref'') -> ref''; _ -> ""
+    let rname = T.pack (optRefName opts)
+    ref' <- lift $ lookupReference rname
+    let curRef = case ref' of Just (RefSymbolic ref'') -> ref''; _ -> rname
     if ref /= curRef
         then lift $ log' $ "Branch changed to " <> curRef <> ", restarting"
         else loop sc' toid' ft'

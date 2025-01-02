@@ -14,6 +14,7 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing
                 -fno-warn-unused-binds
                 -fno-warn-orphans #-}
+{-# LANGUAGE BlockArguments #-}
 
 -- | Interface for opening and creating repositories.  Repository objects are
 --   immutable, and serve only to refer to the given repository.  Any data
@@ -68,7 +69,6 @@ import           Control.Monad.Loops
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 import           Control.Monad.Trans.Resource
 import           Data.Bits ((.|.), (.&.))
-import           Data.Bool (bool)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -280,7 +280,7 @@ lgCreateBlob b = do
                 (castPtr cstr) (fromIntegral len)
 
     readFromSource repo ptr src =
-        src $$ drainTo 2 $ \queue ->
+        runConduit $ src .| drainTo 2 \queue ->
             liftIO $ withForeignPtr ptr $ \coid' ->
             withForeignPtr (repoObj repo) $ \repoPtr ->
             bracket

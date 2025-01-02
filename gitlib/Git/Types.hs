@@ -8,7 +8,6 @@ module Git.Types where
 import           Conduit
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.Fail (MonadFail)
 import           Control.Monad.Trans.State
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Base16 as B16
@@ -214,7 +213,6 @@ instance Semigroup (ModifiedBuilder r m) where
 
 instance Monoid (ModifiedBuilder r m) where
     mempty = BuilderUnchanged (error "ModifiedBuilder is a semigroup")
-    x `mappend` y = x <> y
 
 fromBuilderMod :: ModifiedBuilder r m -> TreeBuilder r m
 fromBuilderMod (BuilderUnchanged tb) = tb

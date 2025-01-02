@@ -1,0 +1,6 @@
+packages: gitlib/
+          gitlib-cmdline/
+          hlibgit2/
+          gitlib-libgit2/
+          gitlib-test/
+          git-monitor/
