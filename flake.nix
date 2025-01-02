@@ -35,7 +35,7 @@
         })
       ];
     in {
-      packages.default = flake.packages."gitlib:exe:git-monitor";
+      packages.default = flake.packages."git-moniter:exe:git-monitor";
       devShell = flake.devShell // {
         withHoogle = true;
       };
