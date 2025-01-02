@@ -14,11 +14,11 @@
         inherit system overlays;
         inherit (haskellNix) config;
       };
-      flake = pkgs.gitlib.flake {
+      flake = pkgs.gitlib-repo.flake {
       };
       overlays = [ haskellNix.overlay
         (final: prev: {
-          gitlib =
+          gitlib-repo =
             final.haskell-nix.project' {
               src = ./.;
               supportHpack = true;
@@ -35,7 +35,7 @@
         })
       ];
     in {
-      packages.default = flake.packages."git-moniter:exe:git-monitor";
+      packages.default = flake.packages."git-monitor:exe:git-monitor";
       devShell = flake.devShell // {
         withHoogle = true;
       };

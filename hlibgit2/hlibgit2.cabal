@@ -24,7 +24,7 @@ Extra-source-files:
 
 Source-repository head
   type: git
-  location: git://github.com/jwiegley/gitlib.git
+  location: https://github.com/jwiegley/gitlib.git
 
 Test-suite smoke
   default-language: Haskell98

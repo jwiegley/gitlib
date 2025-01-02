@@ -41,4 +41,4 @@ Executable git-monitor
 
 Source-repository head
   type:     git
-  location: git://github.com/jwiegley/gitlib
+  location: https://github.com/jwiegley/gitlib

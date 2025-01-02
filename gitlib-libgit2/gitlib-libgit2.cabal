@@ -13,7 +13,7 @@ Description:
 
 Source-repository head
   type: git
-  location: git://github.com/jwiegley/gitlib.git
+  location: https://github.com/jwiegley/gitlib.git
 
 Test-suite smoke
     Default-language: Haskell98

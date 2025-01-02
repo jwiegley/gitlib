@@ -12,7 +12,7 @@ Category:            Git
 
 Source-repository head
   type: git
-  location: git://github.com/jwiegley/gitlib.git
+  location: https://github.com/jwiegley/gitlib.git
 
 Library
   hs-source-dirs: .
