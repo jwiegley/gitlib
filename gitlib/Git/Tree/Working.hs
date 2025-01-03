@@ -16,8 +16,9 @@ import           Data.Tagged
 import           Data.Time
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Git hiding (Options)
-import           Prelude hiding (log)
+import           Prelude hiding (log, Foldable(..))
 import           UnliftIO.Async
+import           Data.Foldable (Foldable(..))
 import           System.FilePath.Posix
 #ifndef mingw32_HOST_OS
 import           System.Posix.Files
