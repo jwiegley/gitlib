@@ -33,7 +33,7 @@ checkoutFiles destPath tree decode cloneSubmodules =
                         | otherwise -> liftIO $ createDirectory fullPath)
   where
     decodeError path e = throwM $ PathEncodingError $
-        "Could not decode path " <> T.pack (show path) <> ":" <> T.pack e
+        "Could not decode path " <> T.pack (Prelude.show path) <> ":" <> T.pack e
 
     checkoutBlob oid kind fullPath = do
         Blob _ contents <- lookupBlob oid
