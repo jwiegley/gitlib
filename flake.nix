@@ -34,9 +34,9 @@
             };
         })
       ];
-    in {
+    in flake // {
       packages.default = flake.packages."git-monitor:exe:git-monitor";
-      devShell = flake.devShell // {
+      devShells.default = flake.devShells.default // {
         withHoogle = true;
       };
     });
