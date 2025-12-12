@@ -34,6 +34,7 @@ import           Prelude hiding (log)
 import           Shelly (silently, shelly, run)
 import           System.Directory
 import           System.FilePath.Posix
+import           Data.List (isInfixOf)
 #if !MIN_VERSION_time (1,5,0)
 import           System.Locale (defaultTimeLocale)
 #endif
@@ -89,15 +90,9 @@ doMain opts = do
         (,) <$> (T.init <$> run "git" ["config", "user.name"])
             <*> (T.init <$> run "git" ["config", "user.email"])
 
-    let gDir = optGitDir opts
-    isDir <- doesDirectoryExist gDir
-    gd    <- if isDir
-             then return gDir
-             else shelly $ silently $
-                  T.unpack . T.init <$> run "git" ["rev-parse", "--git-dir"]
-
-    let wDir = optWorkingDir opts
-        wd   = if null wDir then takeDirectory gd else wDir
+    -- Determine the git directory and working directory
+    -- Handle both regular clones (.git is a directory) and worktrees (.git is a file)
+    (gd, wd) <- resolveGitDir (optGitDir opts) (optWorkingDir opts)
 
     -- Make sure we're in a known branch, and if so, let it begin
     forever $ withRepository lgFactory gd $ do
@@ -142,6 +137,75 @@ doMain opts = do
                 -- (C-c) or even SIGKILL.
                 mutateTreeOid toid $
                     snapshotTree opts wd userName userEmail ref sref sc toid ft
+
+-- | Resolve the git directory, handling both regular repositories and worktrees.
+-- In a worktree, .git is a file containing "gitdir: /path/to/.git/worktrees/name"
+resolveGitDir :: FilePath -> FilePath -> IO (FilePath, FilePath)
+resolveGitDir userGitDir userWorkDir = do
+    -- First, try .git in current directory (handles worktrees properly)
+    let defaultGitPath = ".git"
+
+    -- Check if user specified a custom git-dir or we should use default
+    let gDir = if userGitDir == "some.git.directory" then defaultGitPath else userGitDir
+
+    isDir <- doesDirectoryExist gDir
+    if isDir
+        then do
+            -- Regular clone: .git is a directory
+            let wd = if null userWorkDir then takeDirectory gDir else userWorkDir
+            -- If gDir is ".git", working dir should be "." not ""
+            let wd' = if wd == "" then "." else wd
+            return (gDir, wd')
+        else do
+            -- Check if .git is a file (worktree case)
+            isFile <- doesFileExist gDir
+            if isFile
+                then parseWorktreeGitFile gDir userWorkDir
+                else do
+                    -- Neither file nor directory at specified path, use git command
+                    gitDir <- shelly $ silently $
+                        T.unpack . T.init <$> run "git" ["rev-parse", "--git-dir"]
+                    -- Check if this is a worktree path
+                    isWorktreeDir <- doesDirectoryExist gitDir
+                    if isWorktreeDir && "/worktrees/" `isInfixOf` gitDir
+                        then do
+                            -- Extract main .git dir from worktree path
+                            let mainGitDir = takeDirectory $ takeDirectory gitDir
+                            cwd <- getCurrentDirectory
+                            let wd = if null userWorkDir then cwd else userWorkDir
+                            return (mainGitDir, wd)
+                        else do
+                            let wd = if null userWorkDir then takeDirectory gitDir else userWorkDir
+                            let wd' = if wd == "" then "." else wd
+                            return (gitDir, wd')
+
+-- | Parse a .git file (used in worktrees) to extract the actual git directory
+parseWorktreeGitFile :: FilePath -> FilePath -> IO (FilePath, FilePath)
+parseWorktreeGitFile gitFile userWorkDir = do
+    contents <- B.readFile gitFile
+    let gitdirLine = T.strip $ T.decodeUtf8 contents
+    case T.stripPrefix "gitdir: " gitdirLine of
+        Just worktreeGitDir -> do
+            -- For worktrees, we need the main repo's .git dir
+            -- The worktree git dir looks like: /path/to/.git/worktrees/name
+            -- We need to get: /path/to/.git
+            let worktreePath = T.unpack worktreeGitDir
+                mainGitDir = takeDirectory $ takeDirectory worktreePath
+
+            -- The working directory should be the worktree root (parent of .git file)
+            let wd = if null userWorkDir
+                     then takeDirectory gitFile
+                     else userWorkDir
+            -- If gitFile is ".git", working dir should be "."
+            let wd' = if wd == "" then "." else wd
+            return (mainGitDir, wd')
+        Nothing -> do
+            -- File doesn't have gitdir: line, fall back to git command
+            gitDir <- shelly $ silently $
+                T.unpack . T.init <$> run "git" ["rev-parse", "--git-dir"]
+            let wd = if null userWorkDir then takeDirectory gitDir else userWorkDir
+            let wd' = if wd == "" then "." else wd
+            return (gitDir, wd')
 
 -- | 'snapshotTree' is the core workhorse of this utility.  It periodically
 --   checks the filesystem for changes to Git-tracked files, and snapshots any
