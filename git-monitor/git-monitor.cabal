@@ -1,8 +1,15 @@
 Name:    git-monitor
-Version: 3.2.1
+Version: 3.2.2
 
 Synopsis:    Passively snapshots working tree changes efficiently.
-Description: Passively snapshots working tree changes efficiently.
+Description:
+  A utility that passively monitors your Git working tree and periodically
+  creates snapshot commits of any changes. This is useful for creating a
+  detailed history of your work during development sessions, allowing you
+  to recover any intermediate state. Run @git monitor@ in your project
+  directory before starting work, and snapshots will be saved to
+  @refs\/snapshots\/refs\/heads\/$BRANCH@. Supports both regular Git
+  repositories and Git worktrees.
 
 Homepage:           http://github.com/jwiegley/gitlib
 License:            BSD3
@@ -21,23 +28,23 @@ Executable git-monitor
     ghc-options: -Wall -threaded -rtsopts
 
     Build-depends: base                 >= 4 && < 5
-                 , gitlib               >= 3.3.0
-                 , gitlib-libgit2       >= 3.3.0
-                 , bytestring           >= 0.9.2.1
-                 , containers           >= 0.4.2.1
-                 , directory            >= 1.1.0.2
-                 , logging              >= 1.3.0
-                 , filepath             >= 1.3.0.0
-                 , old-locale           >= 1.0.0.4
-                 , optparse-applicative >= 0.10
-                 , shelly               >= 0.14
-                 , tagged               >= 0.4.5
-                 , template-haskell
-                 , text                 >= 0.11.2
-                 , time                 >= 1.4
-                 , transformers         >= 0.3.0.0
-                 , unordered-containers >= 0.2.3.0
-                 , unix
+                 , gitlib               >= 3.3.0 && < 4
+                 , gitlib-libgit2       >= 3.3.0 && < 4
+                 , bytestring           >= 0.9.2.1 && < 0.13
+                 , containers           >= 0.4.2.1 && < 0.8
+                 , directory            >= 1.1.0.2 && < 1.4
+                 , logging              >= 1.3.0 && < 4
+                 , filepath             >= 1.3.0.0 && < 1.6
+                 , old-locale           >= 1.0.0.4 && < 1.1
+                 , optparse-applicative >= 0.10 && < 0.19
+                 , shelly               >= 0.14 && < 1.13
+                 , tagged               >= 0.4.5 && < 0.9
+                 , template-haskell     >= 2.7 && < 2.23
+                 , text                 >= 0.11.2 && < 2.2
+                 , time                 >= 1.4 && < 1.15
+                 , transformers         >= 0.3.0.0 && < 0.7
+                 , unordered-containers >= 0.2.3.0 && < 0.3
+                 , unix                 >= 2.5 && < 2.9
 
 Source-repository head
   type:     git
