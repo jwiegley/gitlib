@@ -28,16 +28,59 @@
                   };
                   buildInputs = with final; [
                     pkg-config
+                    icu
                   ];
                   withHoogle = true;
+                  shellHook = let
+                    isDarwin = final.stdenv.isDarwin;
+                    libExt = if isDarwin then "dylib" else "so";
+                  in ''
+                    # Create symlink to libgit2 source for cabal builds
+                    if [ ! -e hlibgit2/libgit2 ]; then
+                      echo "Setting up libgit2 source symlink for hlibgit2..."
+                      ln -sf ${libgit2-src} hlibgit2/libgit2
+                    fi
+
+                    # Force cabal to use Nix's ICU library instead of system ICU
+                    export PKG_CONFIG_PATH="${final.icu}/lib/pkgconfig:$PKG_CONFIG_PATH"
+                    export LIBRARY_PATH="${final.icu}/lib:$LIBRARY_PATH"
+                    export C_INCLUDE_PATH="${final.icu.dev}/include:$C_INCLUDE_PATH"
+                    export CPLUS_INCLUDE_PATH="${final.icu.dev}/include:$CPLUS_INCLUDE_PATH"
+
+                    # Platform-specific runtime library overrides
+                    # This is needed because the cached text-icu may have system paths baked in
+                  '' + (if isDarwin then ''
+                    export DYLD_LIBRARY_PATH="${final.icu}/lib:$DYLD_LIBRARY_PATH"
+                    export DYLD_INSERT_LIBRARIES="${final.icu}/lib/libicuuc.${libExt}:${final.icu}/lib/libicui18n.${libExt}:${final.icu}/lib/libicudata.${libExt}"
+                  '' else ''
+                    export LD_LIBRARY_PATH="${final.icu}/lib:$LD_LIBRARY_PATH"
+                    export LD_PRELOAD="${final.icu}/lib/libicuuc.${libExt}:${final.icu}/lib/libicui18n.${libExt}:${final.icu}/lib/libicudata.${libExt}"
+                  '') + ''
+
+                    # Create cabal.project.local to explicitly use Nix's ICU for rebuilds
+                    cat > cabal.project.local <<EOF
+                    package text-icu
+                      extra-lib-dirs: ${final.icu}/lib
+                      extra-include-dirs: ${final.icu.dev}/include
+                    EOF
+
+                    echo "ICU library configured: ${final.icu}/lib"
+                  '';
                 };
                 modules = [{
+                  # Force hlibgit2 to use our libgit2 source
                   packages.hlibgit2.src = final.lib.mkForce (final.runCommand "hlibgit2-src" {} ''
                     cp -r ${./.}/hlibgit2 $out
                     chmod -R u+w $out
                     rm -rf $out/libgit2
                     cp -r ${libgit2-src} $out/libgit2
                   '');
+
+                  # Configure text-icu to use Nix's ICU (for nix build)
+                  packages.text-icu.components.library = {
+                    libs = final.lib.mkForce [ final.icu ];
+                    pkgconfig = final.lib.mkForce [ [ final.icu ] ];
+                  };
                 }];
               };
           })
